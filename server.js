@@ -9,7 +9,9 @@ import { directExternalApiCall } from './ai/openai/promptsUtils.js';
 import { getMockResponse } from './mocks.js';
 import { fileURLToPath } from 'url';
 
+
 let CHAT_MOCK = true; // Set to false to use the actual OpenAI API
+let NARRATION_MOCK = true; // Toggle mock mode here or in your config
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -122,34 +124,101 @@ app.post('/api/submitRoll', async (req, res) => {
   }
 });
 
-// server-side (Express)
+
+
 
 app.post('/api/getNarrationScript', async (req, res) => {
   try {
-    const { sceneId } = req.body;
+    const { sessionId, sceneId, content } = req.body;
 
-    if (!sceneId) {
-      return res.status(400).json({ error: 'Missing sceneId' });
+    if (!sessionId || !sceneId) {
+      return res.status(400).json({ error: 'Missing sessionId or sceneId' });
     }
 
-    console.log(`Received request for narration script, sceneId: ${sceneId}`);
+    const now = Date.now();
 
-    // Mocked script — later can load from DB or GPT
-    const fullScript = [
-      { text: "It's been a few days since that strange messaging correspondence...", font: "mono", size: "lg", color: "text-white", delay: 0 },
-      { text: "Something about a typewriter... you almost forgot.", font: "cinzel", size: "2xl", color: "text-yellow-100", delay: 3000 },
-      { text: "It's nearly dusk. The streets of San Juan are dry and hot.", font: "serif", size: "xl", italic: true, color: "text-white", delay: 6000 },
-      { text: "You turn the key to your apartment.", font: "mono", size: "lg", color: "text-white", delay: 9000 },
-    ];
+    // 1️⃣ If no initial system message, create it
+    const alreadyHasInitial = await ChatMessage.exists({ sessionId, sceneId, type: 'initial' });
 
-    return res.status(200).json(fullScript);
+    if (!alreadyHasInitial) {
+      const introMessage = `Opening narration for scene: ${sceneId}`;
+      await ChatMessage.create({
+        sessionId,
+        sceneId,
+        order: now,
+        sender: 'system',
+        content: introMessage,
+        type: 'initial'
+      });
+    }
 
-  } catch (error) {
-    console.error('Error in /api/getNarrationScript:', error);
+    // 2️⃣ Save user's content
+    if (content) {
+      await ChatMessage.create({
+        sessionId,
+        sceneId,
+        order: now + 1,
+        sender: 'user',
+        content: content,
+        type: 'user'
+      });
+    }
+
+    // 3️⃣ Build history for this scene
+    const history = await ChatMessage.find({ sessionId, sceneId }).sort({ order: 1 });
+
+    const formattedHistory = history.map(msg => ({
+      role: msg.sender === 'user' ? 'user' : 'system',
+      content: msg.content
+    }));
+
+    // 4️⃣ System prompt
+    const initialPrompt = generateInitialScenePrompt(sceneId);
+    const fullPrompt = [initialPrompt[0], ...formattedHistory];
+
+    let gptResponse;
+
+    if (NARRATION_MOCK) {
+      console.log(`(MOCK) Narration requested for sceneId: ${sceneId}`);
+      gptResponse = {
+        narrationScript: [
+          { text: "It's been a few days since that strange messaging correspondence...", font: "mono", size: "lg", color: "text-white", delay: 0 },
+          { text: "Something about a typewriter... you almost forgot.", font: "cinzel", size: "2xl", color: "text-yellow-100", delay: 3000 },
+          { text: "It's nearly dusk. The streets of San Juan are dry and hot.", font: "serif", size: "xl", italic: true, color: "text-white", delay: 6000 },
+          { text: "You turn the key to your apartment.", font: "mono", size: "lg", color: "text-white", delay: 9000 },
+        ],
+        has_chat_ended: false,
+        required_rolls: {
+          check: "Observation + Wits",
+          dice: "6d6",
+          canPush: true
+        }
+      };
+    } else {
+      gptResponse = await directExternalApiCall(fullPrompt, 2500, undefined, undefined, true, false);
+    }
+
+    const { narrationScript, has_chat_ended, required_rolls } = gptResponse || {};
+
+    // 5️⃣ Save GPT system response
+    await ChatMessage.create({
+      sessionId,
+      sceneId,
+      order: now + 2,
+      sender: 'system',
+      content: JSON.stringify(narrationScript),
+      type: 'response',
+      has_chat_ended: has_chat_ended || false,
+      required_rolls: required_rolls || null
+    });
+
+    return res.status(200).json({ narrationScript, has_chat_ended, required_rolls });
+
+  } catch (err) {
+    console.error('Error in /api/getNarrationScript:', err);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
-
 
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
