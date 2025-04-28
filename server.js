@@ -59,7 +59,8 @@ app.post('/api/sendMessage', async (req, res) => {
       order: now + 1,
       sender: 'user',
       content: message,
-      type: 'user'
+      type: 'user',
+      sceneId: 0
     });
 
     // 🧠 Retrieve history (now includes the intro!)
@@ -91,7 +92,8 @@ app.post('/api/sendMessage', async (req, res) => {
       order: now + 2,
       sender: 'system',
       content: message_assistant,
-      type: 'response'
+      type: 'response',
+      sceneId: 0,
     });
 
 return res.status(200).json({ reply: message_assistant, has_chat_ended });
