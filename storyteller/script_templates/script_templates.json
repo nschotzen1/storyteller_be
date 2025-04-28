@@ -1,0 +1,179 @@
+{
+    "scenes": [
+        {
+            "scene_name": "The Prologue: Unearthing Secrets",
+            "scene_general_direction_guideline": "Create an atmosphere of mystery and anticipation, focusing on the detective's discovery and preparations. Highlight the detective's character through their interaction with clues, using sensory details to enrich the narrative.",
+            "necessary_background": "The scene sets the stage for an epic journey, introducing the detective's quest to uncover hidden truths within a world brimming with secrets and ancient lore.",
+            "description": [
+                {
+                    "step_number": 1,
+                    "step_title": "Time of Approach",
+                    "step_description": "time of day, e.g., night/dark/noon, but also ones that can be more meaningful storytelling wise",
+                    "step_guideline": "ensure the seamless direct continuation and the logic of the current narrative. you may make fine adjustments to the script template to ensure the cohesive and natural seamless unfolding of the narrative! make it captivating! all options should be grounded, show don't tell. don't interpret. remain using the senses and factual facts. minimalism and subtle suggestion is ALWAYS ADVISED!",
+                    "script_template_for_step": "And so, it became to be that it was almost ___ (1. time of day, e.g., night/dark/noon)"
+                },
+                {
+                    "step_number": 2,
+                    "step_guideline": "I want a structure situated in a place that seems peculiar, but I want it subtle, like a growing concern. be as wry as poissble. devoid of any interpretation. just sensory wry description. very minimalistic. concise. try give a first impression, crude, a raw glimpse, vague, what it seems to be like....but remain CONCRETE in your description, and images. FACTUAL, GROUNDED, NO GENERIC BANAL SUPERFICIAL IMAGERY!! DO NOT INTERPRET, JUST OBSERVE! BE Hemingway.I want the adjectives used  to be meaningful, tangible, based on sensory experience ONLY!! . not interpreted and most of all not generic or vague.SHOW Don't TELL! Dana Gabaldon/Ursula Le guin. For each option, include in the json object a unique set of 'influences' that clearly guide the narrative. first choose a continent, place in that continent, climate, strangeness_level, subgenre that would be fitting. Each set should combine elements from different categories: cultural or historical context, rich and diverse specific environmental setting, an acclaimed not mainstream RPG/fantasy universe, a notable literary work, and a related musical genre or soundtrack. These influences should be distinct and vivid, fitting for various climates, and tones. but refined and subtle, still unknown! designed to take the story subtly in varied and recognizable directions, enriching the narrative with a diverse range of tones and settings. I want the various influences to differ from each other (from the same option) not to echo one another. I want it SPECFIC. whatever you're writing. be specific. the details are tangible fitting to the time, location and object. immersive",
+                    "script_template_for_step": "as the storyteller detective finally approached  ___ (2.  a very specific FOUND_ OBJECT/PHENOMENON/STRUCTURE/RELIC and how it interacts with the specificity of the surroundings)"
+                },
+                {
+                    "step_number": 3,
+                    "step_guideline": "",
+                    "script_template_for_step": "___ (3. more specific description, based on knowledge and synthesis, also mentioning the material/materials and physicality of the structure. you may add influences objects to the object as you see fit) "
+                },
+                {
+                    "step_number": 4,
+                    "step_guideline": "",
+                    "script_template_for_step": "___ (4. (direct speech of the storyteller detective) + (verb: how the detective said it). direct speech: a subjective observative given by a very specific storyteller detective, who finally reaches to that specific structure and reacts differently to it . referencing about that structure, in the specificity of this location and also in the more wider surroundings) "
+                },
+                {
+                   
+                    "step_number": 5,
+                    "step_title": "Pronoun Determination",
+                    "step_description": "pronoun: he/she/they (determines gender)",
+                    "step_guideline": "Select the appropriate pronoun to match the storyteller detective's gender identity, ensuring consistency in narrative perspective.",
+                    "script_template_for_step": "as ___ (12. pronoun: he/she/they) ___"
+                },
+                {
+                    "step_number": 6,
+                    "step_title": "Mode of Transportation",
+                    "step_description": "specific single word verb indicating dismounting or stopping a very specific mode of transportation the storyteller detective used to get here",
+                    "step_guideline": "describe the unique or characteristic mode of transportation used in this narrative world. This detail should add to the setting's atmosphere and hint at the technological or magical advancements present in the story.",
+                    "script_template_for_step": "(13. specific single word verb indicating dismounting or stopping a very specific mode of transportation the storyteller detective used to get here),"
+                },
+                {
+                    "step_number": 7,
+                    "step_title": "Securing Transportation",
+                    "step_description": "action of securing a very distinct mode of transportation and a short yet descriptive and detailed of the mode of transportation",
+                    "step_guideline": "Convey how the storyteller detective secures their mode of transportation, adding a layer of realism and practicality to the narrative.",
+                    "script_template_for_step": "___ (pronoun based on previously chosen gender (13)) ___ (14. action of securing a very distinct mode of transportation)"
+                },
+                {
+                    "step_number": 8,
+                    "step_title": "Preparation for Exploration",
+                    "step_description": "object/s from a storage item, e.g., backpack",
+                    "step_guideline": "Detail the tools or items the storyteller detective takes in preparation for further exploration. These items should be relevant to the task at hand and hint at the challenges ahead.",
+                    "script_template_for_step": "Then, taking ___ (15. object/s from a storage item, e.g., backpack), ___ (pronoun) proceeded"
+                },
+                {
+                    "step_number": 9,
+                    "step_title": "Action Towards Discovery",
+                    "step_description": "action indicating moving deeper into the location, looking for a specific place where that item/items from the storage should be used",
+                    "step_guideline": "Build suspense and anticipation as the storyteller detective moves closer to a significant discovery. The action taken here should directly contribute to the narrative's progression and the unfolding mystery.",
+                    "script_template_for_step": "to ___ (16. action indicating moving deeper into the location, looking for a specific place where that item/items from the storage should be used)."
+                },
+                {
+                    "step_number": 10,
+                    "step_title": "Location Analysis",
+                    "step_description": "further examination of the surroundings in more detail",
+                    "step_guideline": "Encourage a deeper dive into the setting, highlighting details that set the scene and contribute to the world-building. This could include environmental descriptions, architectural details, or atmospheric conditions.",
+                    "script_template_for_step": "___ (17. further examination of the surroundings in more detail). 'Now where that"
+                },
+                {
+                    "step_number": 11,
+                    "step_title": "Clue to Final Location",
+                    "step_description": "specific description of the purpose or nature of the final resting place of the object is, and how it's entered",
+                    "step_guideline": "Introduce a pivotal clue or piece of information that points the way to the object's location. This should be a moment of revelation that propels the narrative toward its climax, filled with tension and excitement.",
+                    "script_template_for_step": "___ (18. specific description of the purpose or nature of the final resting place of the object is, and how it's entered) might be?'"
+                }
+            ],
+            "prompt_function": "STORYTELLER_DETECTIVE_PROLOGUE",
+            "order": 1
+        },
+        {
+            "scene_name": "Writing a Journal",
+            "scene_general_direction_guideline": "I want to feel the reality of the journal page written, the mystery and to feel real clues revealed. it should be meaningful",
+            "necessary_background": "Following the prologue's mysterious setup, this scene transitions to a moment of revelation and preparation. The storyteller detective, upon unearthing a pivotal clue, decides to document her findings and insights in a journal, leaving a trail for the storyteller to follow. This act not only bridges the past with the present but also sets the stage for a journey that spans continents and delves into ancient mysteries. The specifics chosen should build a bridge between the tangible and the arcane, rooting the narrative in a reality laced with enigma and anticipation.",
+            "description": [
+                {
+                    "step_number": 1,
+                    "step_title": "Journal's Physicality",
+                    "step_description": "material, or texture, or a sequence of adjectives verbs describing the physicality of the journal",
+                    "step_guideline": "Describe the journal in a way that highlights its age, use, and the journey it's been through. Focus on tactile and visual details to bring it to life."
+                },
+                {
+                    "step_number": 2,
+                    "step_title": "Writing Medium",
+                    "step_description": "medium of writing",
+                    "step_guideline": "Choose a writing instrument that adds character to the scene, whether it's an ink pen, charcoal, or something more unique, reflecting the detective's style and the era."
+                },
+                {
+                    "step_number": 3,
+                    "step_title": "Map Creation",
+                    "step_description": "describing how the storyteller detective wrote those words, the instrument for writing and how the words look on the page markings that show excitement",
+                    "step_guideline": "Illustrate the process of map-making, focusing on the detective's method and the map's details that reveal her urgency and determination."
+                },
+                {
+                    "step_number": 4,
+                    "step_title": "Map Legend",
+                    "step_description": "shortlist of items in the map legend",
+                    "step_guideline": "Detail the symbols or key items used in the map's legend to provide insight into the detective's thought process and the significance of each element."
+                },
+                {
+                    "step_number": 5,
+                    "step_title": "Directional Arrows",
+                    "step_description": "where do they point in the map",
+                    "step_guideline": "Explain the purpose of the arrows on the map, hinting at destinations or important locations that will come into play later in the story."
+                },
+                {
+                    "step_number": 6,
+                    "step_title": "Entity Drawing",
+                    "step_description": "some sort of entity, a place, an item, a creature, flora, fauna",
+                    "step_guideline": "Describe the entity drawn by the detective, making it a focal point for the narrative and imbuing it with mystery and importance."
+                },
+                {
+                    "step_number": 7,
+                    "step_title": "Drawing's Title",
+                    "step_description": "the title she gives to her drawing and mention of how the font and writing style looks like",
+                    "step_guideline": "Provide a title for the drawing that adds to its enigma and detail the unique penmanship used, offering insight into the detective's personality."
+                },
+                {
+                    "step_number": 8,
+                    "step_title": "Initial Stay Location",
+                    "step_description": "options for specific places in our world which would be in the distance of 5 days journey suitable to have the initial scene as a location for a movie",
+                    "step_guideline": "Select a starting location that sets the tone for the adventure, considering its atmosphere, historical significance, or unique landscape."
+                },
+                {
+                    "step_number": 9,
+                    "step_title": "Destination Location",
+                    "step_description": "the exact location that would be suitable for a location for the COMPLETE_NARRATIVE",
+                    "step_guideline": "Choose a destination that promises mystery and adventure, one that fits seamlessly into the narrative's unfolding plot."
+                },
+                {
+                    "step_number": 10,
+                    "step_title": "Means of Transportation",
+                    "step_description": "means of transportation",
+                    "step_guideline": "Detail the mode of transportation in a way that adds to the narrative's setting, whether it's rooted in the story's era, the detective's character, or the story's geographical setting."
+                },
+                {
+                    "step_number": 11,
+                    "step_title": "Necessary Skill or Knowledge",
+                    "step_description": "some skill or knowledge",
+                    "step_guideline": "Identify a skill or body of knowledge essential for the journey, hinting at challenges the storyteller might face and how this expertise could aid them."
+                },
+                {
+                    "step_number": 12,
+                    "step_title": "Essential Item",
+                    "step_description": "an Item that doesn't seem to be relevant at first glance",
+                    "step_guideline": "Introduce an item that, while seemingly out of place, will play a crucial role in the story, adding a layer of intrigue and foresight."
+                },
+                {
+                    "step_number": 13,
+                    "step_title": "Photographic Evidence",
+                    "step_description": "specific model of camera 100-70 years old",
+                    "step_guideline": "Choose a camera that fits the story's period and reflects the detective's penchant for detail, setting up a link between the past and present narrative."
+                },
+                {
+                    "step_number": 14,
+                    "step_title": "Captured Moment",
+                    "step_description": "some entity or entities that are present in the current scene, with shot size and composition",
+                    "step_guideline": "Describe the photograph taken, focusing on how it captures key elements of the scene or clues, and how it contributes to the narrative's mystery."
+                }
+            ],
+            "prompt_function": "STORYTELLER_DETECTIVE_JOURNAL",
+            "order": 2
+        }
+    ]
+}
+

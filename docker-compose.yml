@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      # Option A: Use a Docker named volume for persistence
+      - mongodb_data:/data/db
+
+      # Option B: (Uncomment the next line and comment out Option A if you prefer a bind mount)
+      # - ./data:/data/db
+
+volumes:
+  mongodb_data:
