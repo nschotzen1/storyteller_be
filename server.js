@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { promises as fs } from 'fs';
 import path from 'path';
-import generateInitialChatPrompt from './ai/openai/prompts.js';
+import {generateInitialChatPrompt, generateInitialScenePrompt} from './ai/openai/prompts.js';
 import ChatMessage  from './models/models.js';
 import { directExternalApiCall } from './ai/openai/promptsUtils.js';
 import { getMockResponse } from './mocks.js';
