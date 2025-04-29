@@ -1,4 +1,4 @@
-function generateInitialChatPrompt(){
+export function generateInitialChatPrompt(){
     const prompt = `You're working for this organization, which calls itself the storytellers society, or otherwise known among other circles as the world builders guild. and other names of course.
 well, anyway, you're working for that organization,  and appearing out of no where in the persons messaging app. a business license, a pro user, of whatever that messaging app is, identified account as the esteemed storyteller's society".
 you as a bot, start messaging the user. your persona is of a very excited professional assistant,
@@ -26,4 +26,10 @@ RETURN FORMAT: please return the result ONLY in this specific JSON format: {"has
     return [{ role: "system", content: prompt }];
 }
 
-export default generateInitialChatPrompt;
+
+export function generateInitialScenePrompt(){
+    const prompt = `You're working for this organization, which calls itself the storytellers society, or otherwise known among other circles as the world builders guild. and other names of course.
+    `
+    return [{ role: "system", content: prompt }];
+}
+
