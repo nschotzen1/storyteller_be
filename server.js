@@ -127,6 +127,91 @@ app.post('/api/submitRoll', async (req, res) => {
 });
 
 
+app.post('/api/send_typewriter_text', async (req, res) => {
+  try {
+    const { sessionId, message } = req.body;
+
+    if (!sessionId || !message) {
+      return res.status(400).json({ error: 'Missing sessionId or message' });
+    }
+
+    console.log(`✍️ Typewriter API — Session: ${sessionId} — Message: ${message}`);
+
+    const wordCount = message.trim().split(/\s+/).length;
+
+    let mockResponse;
+
+    if (wordCount <= 5) {
+      // Short addition
+      mockResponse = {
+        content: "Yes. That’s where it begins.",
+        font: "'Uncial Antiqua', serif",
+        font_size: "1.8rem",
+        font_color: "#3b1d15"
+      };
+    } else if (wordCount <= 12) {
+      // Medium addition
+      mockResponse = {
+        content: "Something beneath the ink stirred — it remembered the shape of your thought.",
+        font: "'IM Fell English SC', serif",
+        font_size: "1.9rem",
+        font_color: "#2a120f"
+      };
+    } else {
+      // Long addition
+      mockResponse = {
+        content: "But the words you wrote had already been written — long ago, by another hand. It had only waited for your ink to remember.",
+        font: "'EB Garamond', serif",
+        font_size: "2.0rem",
+        font_color: "#1f0e08"
+      };
+    }
+
+    return res.status(200).json(mockResponse);
+  } catch (error) {
+    console.error('Error in /api/send_typewriter_text:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+
+
+app.post('/api/shouldGenerateContinuation', async (req, res) => {
+  try {
+    const { currentText, latestAddition, latestPauseSeconds } = req.body;
+
+    if (!currentText || !latestAddition || typeof latestPauseSeconds !== 'number') {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const wordCount = latestAddition.trim().split(/\s+/).filter(Boolean).length;
+    const totalLength = currentText.trim().split(/\s+/).length;
+
+    // Base wait time
+    const basePause = 1.8;
+
+    // Longer current text = longer delay
+    const scaleFactor = Math.min(3, totalLength * 0.05); // caps at +3s
+
+    // Bigger additions require more time
+    const additionFactor = Math.min(1.5, wordCount * 0.2); // caps at +1.5s
+
+    // Add random variation (mild unpredictability)
+    const randomness = Math.random() * 0.7 - 0.3; // between -0.3s and +0.4s
+
+    const requiredPause = basePause + scaleFactor + additionFactor + randomness;
+
+    const shouldGenerate = latestPauseSeconds > requiredPause;
+
+    console.log(`[shouldGenerate] pause: ${latestPauseSeconds.toFixed(1)}s vs needed ${requiredPause.toFixed(2)}s → ${shouldGenerate}`);
+
+    return res.status(200).json({ shouldGenerate });
+  } catch (error) {
+    console.error('Error in /api/shouldGenerateContinuation:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 
 
 app.post('/api/getNarrationScript', async (req, res) => {
