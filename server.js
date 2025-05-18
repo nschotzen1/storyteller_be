@@ -127,6 +127,44 @@ app.post('/api/submitRoll', async (req, res) => {
 });
 
 
+// --- New Route: Generate Next Film Image ---
+app.post('/api/next_film_image', async (req, res) => {
+  try {
+    const { sessionId, text } = req.body;
+
+    if (!sessionId || !text) {
+      return res.status(400).json({ error: 'Missing sessionId or text' });
+    }
+
+    // For now, just pick a random texture 1-10:
+    const textureIndex = Math.floor(Math.random() * 10) + 1;
+    const paper = `/assets/paper_textures/paper_texture_${textureIndex}.png`;
+    const fullUrl = req.protocol + '://' + req.get('host') + paper;
+    
+
+
+    // Optionally pick a random font config
+    const fontOptions = [
+      { font: "'Uncial Antiqua', serif", font_size: "1.8rem", font_color: "#3b1d15" },
+      { font: "'IM Fell English SC', serif", font_size: "1.9rem", font_color: "#2a120f" },
+      { font: "'EB Garamond', serif", font_size: "2.0rem", font_color: "#1f0e08" }
+    ];
+    const fontConfig = fontOptions[Math.floor(Math.random() * fontOptions.length)];
+
+    // Combine in response:
+    return res.status(200).json({
+      image_url: fullUrl,
+      ...fontConfig
+    });
+
+  } catch (error) {
+    console.error('Error in /api/next_film_image:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+
+
 app.post('/api/send_typewriter_text', async (req, res) => {
   try {
     const { sessionId, message } = req.body;
@@ -307,5 +345,9 @@ app.post('/api/getNarrationScript', async (req, res) => {
   }
 });
 
+
+
+
+app.use('/assets', express.static(path.join(__dirname, 'assets'))); 
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
