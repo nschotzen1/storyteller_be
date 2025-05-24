@@ -1,30 +1,33 @@
-const express = require('express');
-const cors = require('cors');
-const fs = require('fs').promises;
-const fsSync = require('fs')
-const path = require('path');
-const { directExternalApiCall, generateMasterCartographerChat, generatePrefixesPrompt2, generateFragmentsBeginnings, 
-  generateContinuationPrompt, generateMasterStorytellerChat, generateMasterStorytellerConclusionChat, askForBooksGeneration } = require("./ai/openai/promptsUtils.js")
-const {  generateTextureImgFromPrompt, generateTextureOptionsByText, developEntity } = require("./ai/textToImage/api.js");
-const { chatWithStoryteller, saveFragment, updateTurn, getTurn, storytellerDetectiveFirstParagraphCreation, generateEntitiesFromFragment} = require('./storyteller/utils.js');
-const DEMO_MODE = false
+import express from 'express';
+import cors from 'cors';
+import { access, mkdir, readdir, readFile, writeFile } from 'fs/promises'; // Assuming fs.promises was used for these
+import { writeFileSync as writeFileSyncFsSync, existsSync, mkdirSync } from 'fs'; // For fsSync operations
+import pathNode from 'path'; // Renaming to avoid conflict with the existing 'path' import if any, or to be more explicit.
+
+// Assuming these are named exports from the respective files
+import { directExternalApiCall, generateMasterCartographerChat, generatePrefixesPrompt2, generateFragmentsBeginnings, 
+  generateContinuationPrompt, generateMasterStorytellerChat, generateMasterStorytellerConclusionChat, askForBooksGeneration } from "./ai/openai/promptsUtils.js";
+import { generateTextureImgFromPrompt, generateTextureOptionsByText, developEntity } from "./ai/textToImage/api.js";
+import { chatWithStoryteller, saveFragment, updateTurn, getTurn, storytellerDetectiveFirstParagraphCreation, generateEntitiesFromFragment } from './storyteller/utils.js';
+
+const DEMO_MODE = false;
 
 import { fileURLToPath } from 'url';
-import path from 'path';
+// import path from 'path'; // This was duplicated, pathNode is used above from 'path'
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = pathNode.dirname(__filename);
 
 
 
 
 const ensureDirectoryExists = async (dirPath) => {
   try {
-      await fs.access(dirPath);  // Try accessing the path
+      await access(dirPath);  // Try accessing the path, changed from fs.access
   } catch (error) {
       if (error.code === 'ENOENT') {
           // The path doesn't exist, so create the directory
-          await fs.mkdir(dirPath, { recursive: true });  // Using recursive to ensure all nested directories are created
+          await mkdir(dirPath, { recursive: true });  // Using recursive to ensure all nested directories are created, changed from fs.mkdir
       } else {
           throw error;  // Rethrow other errors
       }
@@ -32,11 +35,11 @@ const ensureDirectoryExists = async (dirPath) => {
 };
 
 const writeContentToFile = async (subfolderName, fileName, content)=> {
-  const subfolderPath = path.join(__dirname, '/assets', subfolderName);
+  const subfolderPath = pathNode.join(__dirname, '/assets', subfolderName); // path changed to pathNode
 
   await ensureDirectoryExists(subfolderPath);
   const rnd = Math.floor(Math.random() * 11);
-  fsSync.writeFileSync(path.join(subfolderPath, `${fileName}${rnd}.json`), JSON.stringify(content));
+  writeFileSyncFsSync(pathNode.join(subfolderPath, `${fileName}${rnd}.json`), JSON.stringify(content)); // path changed to pathNode, fsSync.writeFileSync changed to writeFileSyncFsSync
 }
 
 // Usage example:
@@ -96,8 +99,8 @@ const titles = ["Title 1", "Title 2", "Title 3"]; // Update with your actual tit
 const fontNames = ["Arial", "Verdana", "Times New Roman"]; // Update with your actual font names
 
 const getTextureFiles = async (folderNumber) => {
-    let dir = path.join(__dirname, 'assets', 'textures', folderNumber.toString());
-    let files = await fs.readdir(dir);
+    let dir = pathNode.join(__dirname, 'assets', 'textures', folderNumber.toString()); // path changed to pathNode
+    let files = await readdir(dir); // fs.readdir changed to readdir
     return files.filter(file => file.endsWith('.jpeg') || file.endsWith('.png'));
 }
 
@@ -538,7 +541,15 @@ app.get('/api/cards', async (req, res) => {
           const textureIndex = Math.floor(Math.random() * textures.length);
 
 
-            const prompts = require(`./assets/textures/${folderNumber}/prompts.json`);
+            const promptsFilePath = pathNode.join(__dirname, `assets/textures/${folderNumber}/prompts.json`); // path changed to pathNode
+            let prompts = {};
+            try {
+                const promptsData = await readFile(promptsFilePath, 'utf-8'); // fs.readFile
+                prompts = JSON.parse(promptsData);
+            } catch (e) {
+                console.warn(`Could not read or parse prompts.json for folder ${folderNumber}:`, e);
+                // Keep prompts as {} or handle error as appropriate
+            }
             // console.log(JSON.stringify(prompts))
             const titleIndex = prompts?.cardTitles ? Math.floor(Math.random() * prompts.cardTitles.length) : 0;
 
@@ -563,7 +574,7 @@ app.get('/api/cards', async (req, res) => {
     }
 });
 
-app.use('/assets', express.static(path.join(__dirname, 'assets'))); 
+app.use('/assets', express.static(pathNode.join(__dirname, 'assets'))); // path changed to pathNode
 const PORT = process.env.PORT || 5001;
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));

@@ -1,7 +1,7 @@
-const { OpenAI } = require('openai');
-const { OPENAI_KEYS} = require('./keke')
-const { Anthropic} = require('@Anthropic-ai/sdk');
-const e = require('express');
+import { OpenAI } from 'openai';
+// import { OPENAI_KEYS } from './keke.js'; // Removed: API keys will come from environment variables
+import { Anthropic } from '@anthropic-ai/sdk';
+import express from 'express'; // 'e' was previously imported but not used. Changed to 'express' for clarity if it were to be used.
 
 
 const KEYS_TYPE = {
@@ -15,18 +15,26 @@ const openAIConfig = {
     temperature: 0.89,
 };
 
-function chooseApiKey() {
+export function chooseApiKey() {
+    const keysList = process.env.OPENAI_API_KEYS_LIST;
+    if (!keysList) {
+        throw new Error('OPENAI_API_KEYS_LIST environment variable is not set.');
+    }
+    const OPENAI_KEYS = keysList.split(',').map(key => key.trim()).filter(key => key);
+    if (OPENAI_KEYS.length === 0) {
+        throw new Error('OPENAI_API_KEYS_LIST is empty or contains no valid keys.');
+    }
     const idx = Math.floor(Math.random() * OPENAI_KEYS.length);
-    console.log("chose key ", idx);
+    console.log("Chose OpenAI API key index:", idx);
     return OPENAI_KEYS[idx];
 }
 
-function getOpenaiClient() {
+export function getOpenaiClient() {
     return new OpenAI({apiKey: chooseApiKey()});
 }
 
 
-function generateProctorOfProficiencyChat(paragraph){
+export function generateProctorOfProficiencyChat(paragraph){
     return `"The Scenario: ${paragraph}.
 
             Your Role: You are "The Proctor of Proficiencies", an observant and analytical entity, specializing in the analysis and understanding of skills, abilities, talents, and feats within this universe. You possess a keen understanding of how characters interact with their environments, overcoming challenges using their unique abilities, and creating narratives shaped by these actions.
@@ -52,7 +60,7 @@ function generateProctorOfProficiencyChat(paragraph){
 
 }
 //and also a list of entities discussed and inferred to by this initial fragment and further discussion.
-function characterCreationInitialOptionsPrompt2(originalFragment='', previousDiscussions='', texture=''){
+export function characterCreationInitialOptionsPrompt2(originalFragment='', previousDiscussions='', texture=''){
     const prompt =`you're going to be given a fragment of a narrative cowritten by the storyteller and gpt-4. after that there's a discussion between the master storyteller detective (portrayed by gpt-4) and the storyteller. 
     it's going to expand on the ideas and theme presented in the initial narrative fragment.
     there's also a "texture card" that serves as a texttoImage prompt to provide texture for virtual card deck inspired by this fledging universe.
@@ -115,7 +123,7 @@ But BE GROUNDED, CONCRETE, AVOID SYMBOLISM. AVOID CLICHES AT ALL COST!! we're lo
     return prompt;
 }
 
-function characterCreationInitialOptionsPrompt(originalFragment='', previousDiscussions='', texture=''){
+export function characterCreationInitialOptionsPrompt(originalFragment='', previousDiscussions='', texture=''){
 //     const prompt = `Begin a journey of discovery into the life of a Level 1 hero in our RPG universe. Your adventure starts with a narrative fragment, co-authored by the storyteller and GPT-4, and a subsequent enriching discussion.
 
 // Original Fragment: "${originalFragment}"
@@ -204,7 +212,7 @@ return prompt;
 
 
 
-function askForBooksGeneration(){
+export function askForBooksGeneration(){
     const prompt = `do you think you can think of a list of like 10 different books, parchments, maps etc...
     various medium of writings that could be found in the premises of the master storyteller 
     that could be relevant to the client.
@@ -215,7 +223,7 @@ function askForBooksGeneration(){
     return [{ role: "system", content: prompt }];
 }
 
-function generateMasterStorytellerConclusionChat(){
+export function generateMasterStorytellerConclusionChat(){
     const prompt = `[remember to try to end the chat in understanding and deducting and suggesting 
         where this story should go next... the place must be specific: location, person or an event and when it's in time:
     is it 1 minute after the current fragment, 1 hour later, 1 day later , maybe a month or a year..
@@ -227,7 +235,7 @@ function generateMasterStorytellerConclusionChat(){
     return [{ role: "system", content: prompt }];
 }
 
-function generateStorytellerSummaryPropt(discussionText, originalFragment, texture){
+export function generateStorytellerSummaryPropt(discussionText, originalFragment, texture){
     const prompt = `Take a look at this storytelling fragment: "${originalFragment}".
     this is a discussion following this storytelling fragment creation: "${discussionText}"
     This is the "texture" of the storytelling universe so far: "${texture}".
@@ -240,7 +248,7 @@ function generateStorytellerSummaryPropt(discussionText, originalFragment, textu
 
 }
 
-async function generate_cards(fragmentText, chatHistory) {
+export async function generate_cards(fragmentText, chatHistory) {
     const response = await externalApiCall({
         prompt: `
         Generate a high-rank card + supporting constellation based on the storytelling fragment.
@@ -269,7 +277,7 @@ async function generate_cards(fragmentText, chatHistory) {
 }
 
 
-function generateMasterStorytellerChat(paragraph){
+export function generateMasterStorytellerChat(paragraph){
     const prompt = `extrapolate a world from a fragment chat: You are a master storyteller detective. You're about to have a chat with a new client. 
     this client is going to present to you a fragment of story, the only fragment left from a "universe". You are a charismatic, but mysterious. not revealing all you know the second you know it. you're keen and sharp and you don't overlook anything. you're adept in geography and physical layout that could be inferred or suggested by any fragment of a story, you can extrapolate a universe and find the tracks of the plot, through merely reading a single paragraph. Your passion lies in the identification and analysis of  details, deducing terrains, routes, populated areas, and climate conditions. Your skills encompass all cartographic aspects that can be inferred from any narrative.
     but also understanding or lore, motives, plot lines, hidden plot lines...characters...
@@ -290,7 +298,7 @@ function generateMasterStorytellerChat(paragraph){
     return [{ role: "system", content: prompt }];
 }
 
-function generateMasterCartographerChat(paragraph){
+export function generateMasterCartographerChat(paragraph){
     const prompt =`You are the Guardian of Realms, an astute entity who melds the keen observation skills of a detective with the wisdom of a master cartographer and a learned sage. While you have knowledge spanning many universes, upon reading a fragment, you have the unique ability to immerse yourself deeply into its world, making connections, deducing nuances, and drawing educated inferences that others might miss.
 
     Your current realm of focus is derived from this fragment: ---START "${paragraph}" ---END
@@ -327,7 +335,7 @@ function generateMasterCartographerChat(paragraph){
     return [{ role: "system", content: prompt }];
 }
 
-function generateSageLoreChat(paragraph){
+export function generateSageLoreChat(paragraph){
     const prompt = `You are now stepping into the persona of "The Sage of Lore", a wise and knowledgeable historian of a fledgling universe. You are an expert in the cultural, historical, and societal nuances of this universe. Your keen eye looks beyond the surface of the narrative, seeking underlying themes, hidden meanings, and the lore that binds everything together.
 
     Today, you have come across a new fragment of this universe: "${paragraph}"
@@ -345,10 +353,11 @@ function generateSageLoreChat(paragraph){
     type: The type of the entity (Character, Location, Event, etc.).
     centrality: An integer from 1-5 indicating the entity's importance to the central narrative.
     Your ultimate goal is to deepen your understanding and further elaborate the history and culture of this fledgling universe. Through this interaction, you will not only expand the world's lore but also create a structure that can help others navigate the complexities of this universe.`
-
+    // This function currently doesn't return the prompt. Assuming it should:
+    return [{ role: "system", content: prompt }];
 }
 
-function generateMasterCartographerChatOlder(paragraph) {
+export function generateMasterCartographerChatOlder(paragraph) {
     const prompt = `You are the Grand Cartographer, about to have a chat with a user. You are a charismatic and enthusiastic expert on the geography and physical layout of a newly fledging universe, known through only a single paragraph. Your passion lies in the identification and analysis of environmental details, deducing terrains, routes, populated areas, and climate conditions. Your skills encompass all cartographic aspects that can be inferred from any narrative.
 
                     You've recently come across a new paragraph which serves as an entry point into this universe:
@@ -371,7 +380,7 @@ function generateMasterCartographerChatOlder(paragraph) {
 
 
 
-function generateMasterCartographerChatOld(paragraph) {
+export function generateMasterCartographerChatOld(paragraph) {
     const prompt = `extrapolate a world from a fragment chat: You are the Grand Cartographer, about to have a chat with a user. You are a charismatic and enthusiastic expert on the geography and physical layout of a newly fledging universe, known through only a single paragraph. Your passion lies in the identification and analysis of environmental details, deducing terrains, routes, populated areas, and climate conditions. Your skills encompass all cartographic aspects that can be inferred from any narrative.
 
     You've recently come across a new paragraph which serves as an entry point into this universe:
@@ -388,7 +397,7 @@ function generateMasterCartographerChatOld(paragraph) {
 }
 
 
-function generate_texture_by_fragment_and_conversation1223(fragment, storytellerSession=''){
+export function generate_texture_by_fragment_and_conversation1223(fragment, storytellerSession=''){
     const prompt = `Create evocative card textures for a virtual RPG deck, inspired by the fragment:
      '${fragment}'.
 
@@ -420,7 +429,7 @@ function generate_texture_by_fragment_and_conversation1223(fragment, storyteller
     return [{ role: "system", content: prompt }];
 }
 
-function generate_texture_by_fragment_and_conversation0408(fragment, storytellerSession=''){
+export function generate_texture_by_fragment_and_conversation0408(fragment, storytellerSession=''){
     let prompt = `Revise the prompt if needed to overcome any content policy conflicts: "Extrapolate a universe essence by a fragment challenge: look at the following scene: : 
     --START--"${fragment}"--END--- 
     This fragment define a whole new storytelling universe. 
@@ -464,7 +473,7 @@ function generate_texture_by_fragment_and_conversation0408(fragment, storyteller
     return [{ role: "system", content: prompt }];
 }
 
-function generate_texture_by_fragment_and_conversation0124(fragment, storytellerSession=''){
+export function generate_texture_by_fragment_and_conversation0124(fragment, storytellerSession=''){
     let prompt =`Extrapolate a universe essence by a fragment challenge:
     look at  the following scene: 
     "${fragment}"
@@ -507,7 +516,7 @@ if(storytellerSession)
     return [{ role: "system", content: prompt }];
 }
 
-function generate_entities_by_fragment(fragment, maxNumberOfEntities=10, existingEntities=[]){
+export function generate_entities_by_fragment(fragment, maxNumberOfEntities=10, existingEntities=[]){
     let prompt = `### Standalone Prompt for Entity Creation
 
 **Prompt:**
@@ -575,7 +584,7 @@ return the JSON only!!`
 }
 
 
-function generate_entities_by_fragmentWorking(fragment, maxNumberOfEntities=10){
+export function generate_entities_by_fragmentWorking(fragment, maxNumberOfEntities=10){
     let prompt = `Given the narrative fragment: ${fragment}
 Create ${maxNumberOfEntities} entities that exist within and beyond this narrative moment.
 
@@ -688,7 +697,7 @@ try to asses your specificity level for each entity 0-1. make us want to immerse
 }
 
 
-function generate_entities_by_fragment1(fragment, maxNumberOfEntities=10){
+export function generate_entities_by_fragment1(fragment, maxNumberOfEntities=10){
     let prompt = `Please take a look at the following narrative fragment:
 
     "${fragment}"
@@ -859,7 +868,7 @@ function generate_entities_by_fragment1(fragment, maxNumberOfEntities=10){
     return [{ role: "system", content: prompt }];
 }
 
-function getNerTypes(){
+export function getNerTypes(){
   const nerTypes =  {
       "Entities": {
         "Subtypes": ["Characters", "Races/Species", "Factions/Organizations", "Deities/Religious Figures", "Creatures/Monsters"]
@@ -895,7 +904,7 @@ function getNerTypes(){
     return nerTypes
 }
 
-function getNArchetypes(n) {
+export function getNArchetypes(n) {
   const archetypes =[
     {
       "archetype_name": "YRL",
@@ -1560,7 +1569,7 @@ function getNArchetypes(n) {
 
 
 
-function generate_texture_by_fragment_and_conversation(fragment, storytellerSession, entities, numberOfTextures){
+export function generate_texture_by_fragment_and_conversation(fragment, storytellerSession, entities, numberOfTextures){
 
     
     if(! entities)
@@ -1726,7 +1735,7 @@ return [{ role: "system", content: prompt }];
 // return [{ role: "system", content: prompt }];
 // }
 
-function generate_texture_by_fragment_and_conversation_old(fragment, storytellerSession=''){
+export function generate_texture_by_fragment_and_conversation_old(fragment, storytellerSession=''){
     let prompt =`Extrapolate a universe essence by a fragment challenge:
     look at  the following scene: : 
     "${fragment}"
@@ -1786,7 +1795,7 @@ as backside for a virtual RPG deck of card.`
     return [{ role: "system", content: prompt }];
 }
 
-function generate_texture_by_fragment_and_conversationGood(fragment){
+export function generate_texture_by_fragment_and_conversationGood(fragment){
     const prompt =`look at  the following scene: 
     "${fragment}"
 
@@ -1813,7 +1822,7 @@ the backside of the deck is a texture. I want you to define that texture, after 
     return [{ role: "system", content: prompt }];
 }
 
-function generate_texture_by_fragment_and_conversationOlder(fragment){
+export function generate_texture_by_fragment_and_conversationOlder(fragment){
     const prompt = `Generate 4 distinctive descriptions for the texture of a card that corresponds to this text fragment taken from a new unfolding story: "${fragment}" 
     Each texture description should be interpreting the text fragment in a different way. taking it to a different direction - answering the question which genre or subgenre this fragment can relate to. the direction can be influenced by other related cultural influences, whether it be books, movies, myths etc. but in a surprising various options. 
     The textures should have a keyword format, utilizing terms such as RPG, cinematic, ArtStation, ArtStation winner, grainy, embellishments, decorative styles, etc. Note that these descriptions are for the texture of a card, not an illustration. They should provide an engaging aesthetic complement to the story continuation. For example, 'Card texture: Inspired by Brom's art style and Dark Sun, a desert of sizzling oranges and browns, distressed edges give a sense of scorched earth, embellishments of a twisted dragon in the top right, high contrast, 8k, RPG card texture.', 'Card texture: Inspired by Stephan Martinière's art style and A Song of Ice and Fire, a meticulously detailed castle silhouette against a frigid landscape, Northern-inspired knotwork at the corners, the matte finish brings out the texture of the snow, dark fantasy, 8k, ArtStation winner. 
@@ -1823,7 +1832,7 @@ function generate_texture_by_fragment_and_conversationOlder(fragment){
 }
 
 
-function generate_texture_by_fragment_and_conversationOld(fragment){
+export function generate_texture_by_fragment_and_conversationOld(fragment){
     const prompt = `Generate 4 standalone card texture descriptions based on the atmospheric essence captured by the following scene: 
     --sceneStart ${fragment} ---sceneEnd
     Each description should:
@@ -1847,7 +1856,7 @@ function generate_texture_by_fragment_and_conversationOld(fragment){
 }
 
 
-function generateExpertList(paragraph) {
+export function generateExpertList(paragraph) {
 
     const expertDescription = `The Sage of Lore: An expert in the history, mythology, and cultural practices of the universe. They could discuss the potential backstory or significance of characters, objects, and events in the narrative, shedding light on the deeper meanings and connections within the world.
 
@@ -1882,7 +1891,7 @@ function generateExpertList(paragraph) {
 }
 
 
-function generateFragmentsBeginnings(numberOfFragments = 20) {
+export function generateFragmentsBeginnings(numberOfFragments = 20) {
     const prompt = `Instructions: Generate ${numberOfFragments} distinct sentence fragments as if they're taken from within a fantasy/adventure/sci-fi novel influenced by two different in genre esoteric acclaimed fantasy novels in the broadest sense of the word. and an esoteric mature RPG game system. when we see the fragments we wouldn't be able to trace back those influences, to initiate a collaborative storytelling game. These fragments should be atmospheric, thought-provoking, and varied in length, ranging from just a 3 words up to a sentence of 15 words. They should provide a palpable sense of setting, characters, or events, enticing participants to continue the narrative in their unique style.
     the fragments are taken from the middle of a book...they don't have to be dramatic, actually, they're aren't so dramatic, no need to showoff. be as concrete as possible. so anyone who reads the fragments would feel as if they're really taken from within a book. remember these sentences are fragments, they're not standing alone. but they should have some echo..the essence of the storytelling.
 verbs that invite actions, imagery that is concrete and invites personal interpretation is most desired.
@@ -1946,7 +1955,7 @@ verbs that invite actions, imagery that is concrete and invites personal interpr
 
 }
 
-function generateContinuationPromptConcise(userText = null){
+export function generateContinuationPromptConcise(userText = null){
     userTextLength = userText.split(/\s|/).length
     const lastFiveWords = userText.split(' ').slice(-5).join(' ');
         const prompt =`Given the fragment: ---FRAGMENT_START '${userText}' ----FRAGMENT_END
@@ -1978,7 +1987,7 @@ function generateContinuationPromptConcise(userText = null){
 }
 
 
-function generateContinuationPrompt1(userText = null, numberOfContinuations=4){
+export function generateContinuationPrompt1(userText = null, numberOfContinuations=4){
     const words = userText.split(' ');
     const oneThirdLength = Math.ceil(words.length / 3);
     const oneFourthLength = Math.ceil(words.length / 4);
@@ -2046,7 +2055,7 @@ min number of additions (new words) ${minNumberOfAdditions}. pay close attention
 }
 
 
-function generateContinuationPrompt(userText = null, numberOfContinuations=4){
+export function generateContinuationPrompt(userText = null, numberOfContinuations=4){
     const words = userText.split(' ');
     const oneThirdLength = Math.ceil(words.length / 3);
     const oneFourthLength = Math.ceil(words.length / 4);
@@ -2154,7 +2163,7 @@ return nothing but a JSON ARRAY!!
     return [{ role: "system", content: prompt }];
 }
 
-function generateContinuationPromptWorking(userText = null, numberOfContinuations=4){
+export function generateContinuationPromptWorking(userText = null, numberOfContinuations=4){
     const words = userText.split(' ');
     const oneThirdLength = Math.ceil(words.length / 3);
     const numberOfWordsToReturn = Math.max(5, oneThirdLength);
@@ -2246,7 +2255,7 @@ function generateContinuationPromptWorking(userText = null, numberOfContinuation
 
                 
 
-function generateContinuationPromptOld(userText= null){
+export function generateContinuationPromptOld(userText= null){
     const lastThreeWords = userText.split(' ').slice(-5).join(' ');
 
     const prompt = `-- FRAGMENT_START:
@@ -2284,7 +2293,7 @@ function generateContinuationPromptOld(userText= null){
 return [{ role: "system", content: prompt }];
 }
 
-function generateContinuationPromptOldies(userText= null){
+export function generateContinuationPromptOldies(userText= null){
     userTextLength = userText.split(/\s|/).length
     const prompt = `-- Fragment Start:
     \` ${userText}\` --- Fragment End
@@ -2313,7 +2322,7 @@ Ensure the story unfolds naturally. The focus is on evoking a genuine narrative 
     return [{ role: "system", content: prompt }];
 }
 
-function generateContinuationPromptOld33(userText= null){
+export function generateContinuationPromptOld33(userText= null){
     userTextLength = userText.split(/\s+/).length
     const prompt = `"Fragment": "${userText}"
     "Instructions":
@@ -2346,7 +2355,7 @@ function generateContinuationPromptOld33(userText= null){
     
 }
 
-function generateContinuationPromptOlder(userText = null) {
+export function generateContinuationPromptOlder(userText = null) {
     userTextLength = userText.split(/\s+/).length
     const prompt = `"Fragment": "${userText}"
  
@@ -2379,7 +2388,7 @@ function generateContinuationPromptOlder(userText = null) {
     return [{ role: "system", content: prompt }];
 }
 
-function generatePrefixesPrompt2(userText = null, texture = null, variations = 4, varyTexture = true) {
+export function generatePrefixesPrompt2(userText = null, texture = null, variations = 4, varyTexture = true) {
     userTextLength = userText.split(/\s+/).length
     const intro = `this prompt is part of a virtual card game of storytelling:
     Game flow:
@@ -2455,7 +2464,7 @@ function generatePrefixesPrompt2(userText = null, texture = null, variations = 4
 
 
 
-function generateBookDeteriorationProcessJsonPrompt(texture){
+export function generateBookDeteriorationProcessJsonPrompt(texture){
     const prompt =  `texture_Description:"${texture}"
 
     def generate_book_detiroration_process_by_texture(texture_description):
@@ -2494,10 +2503,17 @@ function generateBookDeteriorationProcessJsonPrompt(texture){
     Take this prompt. and try to use it as a template. but fill the output with your decision. what does the inspiration look like: write it out.  also, how does "the book embodies {initial_text_fragment}.". please try to find the drama in the deterioration process. and the poetry in that.
     how is natural light and surroundings effect it. choose something.
     then choose a specific as specific as possible place where it is located. and the same with the detrioration process: how is it being detriorated? is it time? weather? maybe something else...choose something specific. be SPECIFIC. remember: WE WANT TO SEE THE BOOK IN it's natural position. it is NOT on display for us in the frame. we want it realistic..we're witnessing a location where this book resides. there can be other books there. think of where do books reside and how they'll be shown in a shot in a movie. they're not on display. I want to emphasize the realistic aspect of the framing. how would a book look in the composition if we took a shot of that location . make it documentary like. I want to feel the process if I create 4 illustrations. I want the process to be dramatic, accumulating, where the 4th one will be the dramatic destruction of the book, (and possibly the ruin of the location itself)return ONLY THE JSON. in JSON format`
-    [{ role: "system", content: prompt }]
+    // This function was returning the prompt wrapped in an array, 
+    // but standard practice for these functions is to return the prompt object itself,
+    // or in this case, the array that is assigned to prompt.
+    // Correcting to return prompt directly if it's an array of objects.
+    // However, the prompt itself is a string that seems to be a Python script.
+    // This function needs review for its intended behavior and return value.
+    // For now, assuming it should return the prompt string wrapped as specified.
+    return [{ role: "system", content: prompt }];
 }
 
-function generateStorytellerDetectiveFirstParagraphSession(scene){
+export function generateStorytellerDetectiveFirstParagraphSession(scene){
     // ***** Return format
     // {
     //   "current_narrative": "It was almost",
@@ -2619,7 +2635,7 @@ function generateStorytellerDetectiveFirstParagraphSession(scene){
 }
 
 
-function generateStorytellerDetectiveFirstParagraphLetter(completeNarrative, scene){
+export function generateStorytellerDetectiveFirstParagraphLetter(completeNarrative, scene){
     const prompt = `COMPLETE_NARRATIVE:"${completeNarrative}",
 
     (Disclaimer:I address here to the storyteller detective as a she, but the storyteller detective might be a he/they as was chosen before)
@@ -2646,7 +2662,7 @@ function generateStorytellerDetectiveFirstParagraphLetter(completeNarrative, sce
 
 
 
-async function directExternalApiCall(prompts, max_tokens = 2500, temperature, mockedResponse, explicitJsonObjectFormat, isOpenAi) {
+export async function directExternalApiCall(prompts, max_tokens = 2500, temperature, mockedResponse, explicitJsonObjectFormat, isOpenAi) {
     try {
         let rawResp;
         const maxRetries = 3;
@@ -2668,8 +2684,12 @@ async function directExternalApiCall(prompts, max_tokens = 2500, temperature, mo
                 const completion = await getOpenaiClient().chat.completions.create(req_obj);
                 return completion.choices[0].message.content;
             } else {
+                const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+                if (!anthropicApiKey) {
+                    throw new Error('ANTHROPIC_API_KEY environment variable is not set.');
+                }
                 const client = new Anthropic({
-                    apiKey: process.env["ANTHROPIC_API_KEY"],
+                    apiKey: anthropicApiKey,
                 });
     
                 prompts = prompts.map((p) => {
@@ -2717,24 +2737,5 @@ async function directExternalApiCall(prompts, max_tokens = 2500, temperature, mo
     
 }
 
-
-
-module.exports = {
-    directExternalApiCall,
-    generateContinuationPrompt,
-    generateMasterCartographerChat,
-    generateMasterStorytellerChat,
-    generate_entities_by_fragment,
-    generateMasterStorytellerConclusionChat,
-    askForBooksGeneration,
-    generatePrefixesPrompt2,
-    generateFragmentsBeginnings,
-    generate_texture_by_fragment_and_conversation,
-    getOpenaiClient,
-    characterCreationInitialOptionsPrompt,
-    generateStorytellerSummaryPropt,
-    generateBookDeteriorationProcessJsonPrompt,
-    generateStorytellerDetectiveFirstParagraphSession,
-    generateStorytellerDetectiveFirstParagraphLetter
-};
+// Removed module.exports as functions are now exported individually using 'export'.
 
