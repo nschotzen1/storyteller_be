@@ -1,20 +1,50 @@
-const fs = require('fs'); 
-const mongoose = require('mongoose');
-const fsPromises = require('fs').promises; 
+import fs from 'fs';
+import mongoose from 'mongoose';
+import * as fsPromises from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const path = require('path')
-const { generateStorytellerGuidance, generate_cards, generate_seer_response } = require("../ai/openai/cardReadingPrompts");
-const { generate_texture_by_fragment_and_conversation, directExternalApiCall, generateMasterStorytellerChat, generateMasterStorytellerConclusionChat, askForBooksGeneration,
-  generateStorytellerSummaryPropt, generateStorytellerDetectiveFirstParagraphSession, generateStorytellerDetectiveFirstParagraphLetter, generate_entities_by_fragment } = require("../ai/openai/promptsUtils");
-const { text } = require('express');
+// Local AI utility imports
+import { generateStorytellerGuidance, generate_cards, generate_seer_response } from "../ai/openai/cardReadingPrompts.js";
+import { 
+  generate_texture_by_fragment_and_conversation, 
+  directExternalApiCall, 
+  generateMasterStorytellerChat, 
+  generateMasterStorytellerConclusionChat, 
+  askForBooksGeneration,
+  generateStorytellerSummaryPropt, 
+  generateStorytellerDetectiveFirstParagraphSession, 
+  generateStorytellerDetectiveFirstParagraphLetter, 
+  generate_entities_by_fragment 
+} from "../ai/openai/promptsUtils.js";
+import { textToImageOpenAi } from '../ai/textToImage/api.js';
 
+// Import 'text' from express, aliasing if necessary (though its usage here is unusual)
+import { text as expressText } from 'express';
+
+// Setup __dirname and __filename for ES6 modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Define paths using the new __dirname
 const storytellerSessions = path.join(__dirname, 'db', 'storytelling.json');
 const scriptTemplates = path.join(__dirname, 'script_templates', 'script_templates.json');
 const sessionsScenes = path.join(__dirname, 'script_templates', 'sessions_scenes.json');
 // const sessionDataStructre = {chat: [], fragment:'', textures:[], currentTexture:-1, character:[]}
 
+export async function ensureDirectoryExists(dirPath) {
+  try {
+    await fsPromises.mkdir(dirPath, { recursive: true });
+  } catch (error) {
+    // Log the error or handle specific errors if needed, but mkdir with recursive:true
+    // usually doesn't error if the directory already exists.
+    // It might error for other reasons (e.g., permissions).
+    console.error(`Error creating directory ${dirPath}:`, error);
+    throw error; // Re-throw the error if it's not an ignorable one
+  }
+}
 
-function mapEntity(rawEntity) {
+export function mapEntity(rawEntity) {
   // Create a new object with the mapped keys.
   // For keys that exist in multiple forms (like universal_traits),
   // you might merge them.
@@ -76,7 +106,7 @@ const narrativeFragmentSchema = new mongoose.Schema({
   turn: { type: Number },
 });
 
-const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFragmentSchema);
+export const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFragmentSchema);
 
 const entitySchema = new mongoose.Schema({
   session_id: { type: String, required: true },
@@ -120,7 +150,7 @@ const entitySchema = new mongoose.Schema({
   evolutionNotes: { type: String }
 });
 
-const NarrativeEntity = mongoose.model('NarrativeEntity', entitySchema);
+export const NarrativeEntity = mongoose.model('NarrativeEntity', entitySchema);
 
 const narrativeTextureSchema = new mongoose.Schema({
     session_id: { type: String, required: true },
@@ -142,7 +172,7 @@ const narrativeTextureSchema = new mongoose.Schema({
     text_for_entity: { type: String }
   });
   
-const NarrativeTexture = mongoose.model('NarrativeTexture', narrativeTextureSchema);
+export const NarrativeTexture = mongoose.model('NarrativeTexture', narrativeTextureSchema);
 
 
 const chatMessageSchema = new mongoose.Schema({
@@ -154,7 +184,57 @@ const chatMessageSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-module.exports = mongoose.model('ChatMessage', chatMessageSchema);
+// Export ChatMessage model correctly
+export const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
+
+// New Schemas and Models
+
+// SessionState Schema
+const SessionStateSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, unique: true, index: true },
+  turn: { type: Number, default: 0 },
+  currentTextureId: { type: String }, // For chooseTextureForSessionId
+  textures: [mongoose.Schema.Types.Mixed], // For setTexture
+  chatHistory: [mongoose.Schema.Types.Mixed], // For setChatSessions
+  detectiveHistory: [mongoose.Schema.Types.Mixed], // For setSessionDetectiveCreation
+  characterCreationData: [mongoose.Schema.Types.Mixed], // For setCharecterCreation & setCharacterCreationQuestionAndOptions
+  discussionSummary: { type: String }, // For getPreviousDiscussionSummary
+  lastUpdatedAt: { type: Date, default: Date.now }
+});
+export const SessionState = mongoose.model('SessionState', SessionStateSchema);
+
+// SceneTemplate Schema (Note: This seems more like for pre-defined templates, write operations are not specified for this in the task)
+const SceneTemplateSchema = new mongoose.Schema({
+  sceneName: { type: String, required: true, unique: true },
+  sceneGeneralDirectionGuideline: { type: String },
+  necessaryBackground: { type: String },
+  description: [mongoose.Schema.Types.Mixed],
+  promptFunction: { type: String },
+  order: { type: Number }
+});
+export const SceneTemplate = mongoose.model('SceneTemplate', SceneTemplateSchema);
+
+// SessionSceneState Schema
+const SessionSceneStateSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, index: true },
+  sceneName: { type: String, required: true }, // Added as it's likely needed context
+  currentStep: { type: Number, default: 0 },
+  currentOrder: { type: Number, default: 0 },
+  currentInfluences: {type: mongoose.Schema.Types.Mixed},
+  lastUpdatedAt: { type: Date, default: Date.now }
+});
+export const SessionSceneState = mongoose.model('SessionSceneState', SessionSceneStateSchema);
+
+// GeneratedContent Schema (Note: Write operations are not specified for this in the task)
+const GeneratedContentSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, index: true },
+  contentType: { type: String, enum: ['prefix', 'image_prompt', 'story_continuation'] },
+  contentData: mongoose.Schema.Types.Mixed,
+  turn: { type: Number },
+  createdAt: { type: Date, default: Date.now }
+});
+export const GeneratedContent = mongoose.model('GeneratedContent', GeneratedContentSchema);
+
 
 // Connect to MongoDB (adjust connection string as needed)
 mongoose.connect('mongodb://localhost:27017/storytelling', {
@@ -166,7 +246,7 @@ mongoose.connect('mongodb://localhost:27017/storytelling', {
   console.error("MongoDB connection error:", err);
 });
 
-async function getSessionTextures(sessionId){
+export async function getSessionTextures(sessionId){
   allData = await getStorytellerDb()
   if (!allData[sessionId]) {
       allData[sessionId] = initSessionDataStructure()
@@ -176,17 +256,25 @@ async function getSessionTextures(sessionId){
 }
 
 
-const setTexture = async (sessionId, texture) => {
-  allData = await getStorytellerDb()
-  if (!allData[sessionId]) {
-      allData[sessionId] = initSessionDataStructure()
+export const setTexture = async (sessionId, texture) => {
+  // Refactored to use MongoDB
+  try {
+    await SessionState.findOneAndUpdate(
+      { sessionId: sessionId },
+      { 
+        $push: { textures: texture },
+        $set: { lastUpdatedAt: new Date() } 
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  } catch (error) {
+    console.error(`Error in setTexture for sessionId ${sessionId}:`, error);
+    throw error;
   }
-  allData[sessionId].textures.push(texture)
-  await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData));
 };
 
 
-async function saveTextures(sessionId, textures){
+export async function saveTextures(sessionId, textures){
   try {
 
     textures = textures.map( texture => { 
@@ -220,23 +308,30 @@ async function saveTextures(sessionId, textures){
   }
 }
 
-async function chooseTextureForSessionId(sessionId, textureId){
-  allData = await getStorytellerDb()
-  if (!allData[sessionId]) {
-      allData[sessionId] = initSessionDataStructure()
+export async function chooseTextureForSessionId(sessionId, textureId){
+  // Refactored to use MongoDB
+  try {
+    await SessionState.findOneAndUpdate(
+      { sessionId: sessionId },
+      { 
+        $set: { currentTextureId: textureId, lastUpdatedAt: new Date() } 
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  } catch (error) {
+    console.error(`Error in chooseTextureForSessionId for sessionId ${sessionId}:`, error);
+    throw error;
   }
-  allData[sessionId].currentTexture = textureId
-  await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData));
 }
 
-async function getChosenTexture(sessionId){
+export async function getChosenTexture(sessionId){
   allData = await getStorytellerDb()
   return allData[sessionId].textures.find((texture) => { return texture.index == allData[sessionId].currentTexture})
 }
 
 
 // The setFragment function: update if exists, or insert a new document.
-async function setFragment(sessionId, fragment, turn) {
+export async function setFragment(sessionId, fragment, turn) {
   try {
     // Find a document by session_id and turn, update its fragment,
     // or create a new document if none exists.
@@ -253,7 +348,7 @@ async function setFragment(sessionId, fragment, turn) {
   }
 }
 
-async function getFragment(sessionId, turn) {
+export async function getFragment(sessionId, turn) {
   try {
     // Find a document by session_id and turn, update its fragment,
     // or create a new document if none exists.
@@ -271,7 +366,7 @@ async function getFragment(sessionId, turn) {
 }
 
 
-const setEntitiesForSession = async(sessionId, jsonEntities) => {
+export const setEntitiesForSession = async(sessionId, jsonEntities) => {
   try {
     // Find a document by session_id and turn, update its fragment,
     // or create a new document if none exists.
@@ -288,7 +383,7 @@ const setEntitiesForSession = async(sessionId, jsonEntities) => {
 }
 
   
-  async function getEntitiesForSession(sessionId) {
+export async function getEntitiesForSession(sessionId) {
     try {
       // Find a document by session_id and turn, update its fragment,
       // or create a new document if none exists.
@@ -312,7 +407,7 @@ const setEntitiesForSession = async(sessionId, jsonEntities) => {
 //   .catch(err => console.error("Operation failed:", err));
 
 
-const getStorytellerDb = async (storagePath=storytellerSessions) => {
+export const getStorytellerDb = async (storagePath=storytellerSessions) => {
     try {
         const data = await fsPromises.readFile(storagePath, 'utf8');
         return JSON.parse(data);
@@ -321,7 +416,7 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
         return {};
     }
   };
-  const getScenesDb = async (storagePath=scriptTemplates) => {
+  export const getScenesDb = async (storagePath=scriptTemplates) => {
     try {
         const data = await fsPromises.readFile(storagePath, 'utf8');
         return JSON.parse(data);
@@ -331,7 +426,7 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
     }
   };
 
-  const getSessionssDb = async (storagePath=sessionsScenes) => {
+  export const getSessionssDb = async (storagePath=sessionsScenes) => {
     try {
         const data = await fsPromises.readFile(storagePath, 'utf8');
         return JSON.parse(data);
@@ -340,13 +435,20 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
         return {};
     }
   };
-  const setChatSessions = async (sessionId, chatSession) => {
-    allData = await getStorytellerDb()
-    if (!allData[sessionId]) {
-        allData[sessionId] = initSessionDataStructure()
+  export const setChatSessions = async (sessionId, chatSession) => {
+    // Refactored to use MongoDB
+    try {
+      await SessionState.findOneAndUpdate(
+        { sessionId: sessionId },
+        { 
+          $set: { chatHistory: chatSession, lastUpdatedAt: new Date() } 
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (error) {
+      console.error(`Error in setChatSessions for sessionId ${sessionId}:`, error);
+      throw error;
     }
-    allData[sessionId].chat = chatSession
-    await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData));
   };
 
   // const setEntitiesForSession = async(sessionId, entities) => {
@@ -367,13 +469,20 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
   //   return allData[sessionId].entities
   // }
 
-  const setSessionDetectiveCreation = async (sessionId, detectiveHistory) => {
-    allData = await getStorytellerDb()
-    if (!allData[sessionId]) {
-        allData[sessionId] = initSessionDataStructure()
+  export const setSessionDetectiveCreation = async (sessionId, detectiveHistory) => {
+    // Refactored to use MongoDB
+    try {
+      await SessionState.findOneAndUpdate(
+        { sessionId: sessionId },
+        { 
+          $set: { detectiveHistory: detectiveHistory, lastUpdatedAt: new Date() } 
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (error) {
+      console.error(`Error in setSessionDetectiveCreation for sessionId ${sessionId}:`, error);
+      throw error;
     }
-    allData[sessionId].detective = detectiveHistory
-    await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData));
   };
 
   // async function setFragment(sessionId, fragment){
@@ -392,23 +501,32 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
   // }
 
 
-  async function updateTurn(sessionId){
-    allData = await getStorytellerDb()
-    if (!allData[sessionId]) {
-        allData[sessionId] = initSessionDataStructure()
+  export async function updateTurn(sessionId){
+    // Refactored to use MongoDB
+    try {
+      const updatedSession = await SessionState.findOneAndUpdate(
+        { sessionId: sessionId },
+        { 
+          $inc: { turn: 1 },
+          $set: { lastUpdatedAt: new Date() }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      return updatedSession.turn;
+    } catch (error) {
+      console.error(`Error in updateTurn for sessionId ${sessionId}:`, error);
+      // Decide on error handling: throw or return a default/error indicator
+      throw error; 
     }
-    allData[sessionId].turn += 1
-    await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData));
-    return allData[sessionId].turn
   }
 
-  async function getTurn(sessionId){
+  export async function getTurn(sessionId){
     allData = await getStorytellerDb()
     return allData[sessionId].turn
   }
 
 
-  function saveTextureToFileSystem(sessionId, texturePrompt, index){
+  export function saveTextureToFileSystem(sessionId, texturePrompt, index){
     const subfolderPath = path.join(__dirname, '../assets', String(sessionId));
     const textureSubfolderName = `texture_${index}_${Math.floor(Math.random() * (100) + 1)}`;
     const textureSubfolderPath = path.join(subfolderPath, textureSubfolderName);
@@ -420,7 +538,7 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
     fs.writeFileSync(path.join(textureSubfolderPath, 'texture_prompt.json'), JSON.stringify(texturePrompt));
   }
 
-  function saveFragmentToFileSystem(sessionId, fragment){
+  export function saveFragmentToFileSystem(sessionId, fragment){
     const subfolderPath = path.join(__dirname, '../assets', String(sessionId));
   
     if (!fs.existsSync(subfolderPath)){
@@ -431,23 +549,23 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
     return subfolderPath
   }
   
-  
-  async function saveFragment(sessionId, fragment, turn){
-    saveFragmentToFileSystem(sessionId, fragment)
-    await setFragment(sessionId, fragment)
-  }
+  // There are two definitions of saveFragment. Removing the first one.
+  // async function saveFragment(sessionId, fragment, turn){
+  //   saveFragmentToFileSystem(sessionId, fragment)
+  //   await setFragment(sessionId, fragment)
+  // }
 
-  async function saveFragment(sessionId, fragment, turn){
+  export async function saveFragment(sessionId, fragment, turn){
     await setFragment(sessionId, fragment, turn)
   }
   
 
-  function initSessionDataStructure(){
+  export function initSessionDataStructure(){
     return  {entities: [], chat: [], fragment:'', textures:[], currentTexture:-1, character: [], detective:[],
     discussion_summary: '', turn:0};
   }
   
-  async function getSessionChat(sessionId){
+  export async function getSessionChat(sessionId){
     allData = await getStorytellerDb()
     if (!allData[sessionId]) {
         allData[sessionId] = initSessionDataStructure()
@@ -455,7 +573,7 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
     return allData[sessionId].chat
   }
 
-  async function getSessionDetectiveCreation(sessionId){
+  export async function getSessionDetectiveCreation(sessionId){
     allData = await getStorytellerDb()
     if (!allData[sessionId]) {
         allData[sessionId] = initSessionDataStructure()
@@ -463,7 +581,7 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
     return allData[sessionId].detective
   }
 
-  async function getCharacterCreation(sessionId){
+  export async function getCharacterCreation(sessionId){
     allData = await getStorytellerDb()
     if (!allData[sessionId]) {
         allData[sessionId] = initSessionDataStructure()
@@ -471,48 +589,80 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
     return allData[sessionId].charecter
   }
 
-  const setCharecterCreation = async (sessionId, characterSession) => {
-    allData = await getStorytellerDb()
-    if (!allData[sessionId]) {
-        allData[sessionId] = initSessionDataStructure()
+  export const setCharecterCreation = async (sessionId, characterSession) => {
+    // Refactored to use MongoDB
+    try {
+      await SessionState.findOneAndUpdate(
+        { sessionId: sessionId },
+        { 
+          $set: { characterCreationData: characterSession, lastUpdatedAt: new Date() }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (error) {
+      console.error(`Error in setCharecterCreation for sessionId ${sessionId}:`, error);
+      throw error;
     }
-    allData[sessionId].character = characterSession
-    await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData));
   };
 
 
   
-  async function setCharacterCreationQuestionAndOptions(sessionId, data){
-     allData = await getStorytellerDb()
-     if (!allData[sessionId]) {
-      allData[sessionId] = initSessionDataStructure()
+  export async function setCharacterCreationQuestionAndOptions(sessionId, data){
+    // Refactored to use MongoDB
+    try {
+      await SessionState.findOneAndUpdate(
+        { sessionId: sessionId },
+        { 
+          $push: { characterCreationData: data },
+          $set: { lastUpdatedAt: new Date() }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (error) {
+      console.error(`Error in setCharacterCreationQuestionAndOptions for sessionId ${sessionId}:`, error);
+      throw error;
     }
-    if(! allData[sessionId].character)
-      allData[sessionId].character = [];
-    allData[sessionId].character.push(data)
-    await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData));
   }
 
-  async function getCharacterCreationSession(sessionId){
+  export async function getCharacterCreationSession(sessionId){
     allData = await getStorytellerDb()
     if(! allData[sessionId].character)
       allData[sessionId].character = []
    return allData[sessionId].character
  }
 
- async function getPreviousDiscussionSummary(sessionId){
-    allData = await getStorytellerDb()
-    if(! allData[sessionId].discussion_summary){
-      const previousDiscussion = await getSessionChat(sessionId);  
-      const discussionText = previousDiscussion.map((i) => { return i.content}).join("\n")
-      const originalFragment = await getFragment(sessionId)
-      const texture = await getChosenTexture(sessionId);
-      const summarize_prompt = generateStorytellerSummaryPropt(discussionText, originalFragment, texture.url.revised_prompt);
-      const summary_resp = await directExternalApiCall([{role: 'system', content:summarize_prompt}], 2500, 1);
-      allData[sessionId].discussion_summary = summary_resp;
-      await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData));
+ export async function getPreviousDiscussionSummary(sessionId){
+    // Read part remains from JSON for now
+    let allData = await getStorytellerDb(); // This still reads from JSON
+    if (!allData[sessionId] || !allData[sessionId].discussion_summary) {
+        const previousDiscussion = await getSessionChat(sessionId); // Reads from JSON
+        const discussionText = previousDiscussion.map((i) => { return i.content }).join("\n");
+        const originalFragment = await getFragment(sessionId); // Reads from DB
+        const texture = await getChosenTexture(sessionId); // Reads from JSON
+
+        const summarize_prompt = generateStorytellerSummaryPropt(discussionText, originalFragment, texture.url.revised_prompt);
+        const summary_resp = await directExternalApiCall([{ role: 'system', content: summarize_prompt }], 2500, 1);
+        
+        // Write part refactored to MongoDB
+        try {
+            await SessionState.findOneAndUpdate(
+                { sessionId: sessionId },
+                { 
+                  $set: { discussionSummary: summary_resp, lastUpdatedAt: new Date() }
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+        } catch (error) {
+            console.error(`Error saving discussionSummary to DB for sessionId ${sessionId}:`, error);
+            // Decide if we should throw or perhaps still update the JSON as a fallback / log error
+        }
+        // For consistency with the task (reads from JSON), update the in-memory allData for current call
+        if (!allData[sessionId]) allData[sessionId] = initSessionDataStructure();
+        allData[sessionId].discussion_summary = summary_resp;
+        // await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData)); // Original JSON write, removed as per task for this specific field
+        return summary_resp; // Return the newly generated summary
     }
-    return allData[sessionId].discussion_summary
+    return allData[sessionId].discussion_summary; // Return summary from JSON if already present
  }
   
 
@@ -550,7 +700,7 @@ const getStorytellerDb = async (storagePath=storytellerSessions) => {
 
 
 // Function 1: Generate Texture Descriptions (Text-to-Text)
-async function generateTexturesTextToText(sessionId, fragment, storytellerConversation, subset, openAiMock) {
+export async function generateTexturesTextToText(sessionId, fragment, storytellerConversation, subset, openAiMock) {
     const generateTexturesPrompt = generate_texture_by_fragment_and_conversation(fragment, storytellerConversation, subset);
     let textureJsons = await directExternalApiCall(generateTexturesPrompt, 2500, 1.03, openAiMock, true, true);
 
@@ -565,21 +715,23 @@ async function generateTexturesTextToText(sessionId, fragment, storytellerConver
     return textureJsons;
 }
 
-function createDirectorySafely(directoryPath) {
-  try {
-    if (!fs.existsSync(directoryPath)) {
-      fs.mkdirSync(directoryPath, { recursive: true });
-    }
-  } catch (error) {
-    console.error(`Error creating directory: ${directoryPath}`, error);
-    throw error;
-  }
-}
+// createDirectorySafely is already defined above and exported.
+// function createDirectorySafely(directoryPath) {
+//   try {
+//     if (!fs.existsSync(directoryPath)) {
+//       fs.mkdirSync(directoryPath, { recursive: true });
+//     }
+//   } catch (error) {
+//     console.error(`Error creating directory: ${directoryPath}`, error);
+//     throw error;
+//   }
+// }
 
 
 // Function 2: Convert Texture Descriptions to Images (Text-to-Image)
-async function generateTexturesTextToImage(sessionId, textureJsons, shouldMockImage) {
-  const { textToImageOpenAi } = require('../ai/textToImage/api');
+export async function generateTexturesTextToImage(sessionId, textureJsons, shouldMockImage) {
+  // Assuming textToImageOpenAi is available in the current scope (it's imported from ../ai/textToImage/api.js)
+  // const { textToImageOpenAi } = require('../ai/textToImage/api'); // This line would be problematic in ES6
     return await Promise.all(textureJsons.map(async (textureJson, index) => {
         const id = index; // Assign a unique ID (could also use a UUID generator)
         textureJson.id = id; // Add the ID to the texture
@@ -613,7 +765,7 @@ async function generateTexturesTextToImage(sessionId, textureJsons, shouldMockIm
 }
 
 
-async function generateTextures(sessionId, fragment, storytellerConversation, subset, openAiMock, shouldMockImage) {
+export async function generateTextures(sessionId, fragment, storytellerConversation, subset, openAiMock, shouldMockImage) {
   // Step 1: Generate Text-based Texture Descriptions
   const textureJsons = await generateTexturesTextToText(sessionId, fragment, storytellerConversation, subset, openAiMock);
 
@@ -626,7 +778,7 @@ async function generateTextures(sessionId, fragment, storytellerConversation, su
   return textures;
 }
 
-async function chatWithStoryteller(sessionId, fragmentText, userInput = '', mockedStorytellerResponse = null) {
+export async function chatWithStoryteller(sessionId, fragmentText, userInput = '', mockedStorytellerResponse = null) {
   let chatHistory = await getSessionChat(sessionId);
   let masterResponse;
 
@@ -710,7 +862,7 @@ async function chatWithStoryteller(sessionId, fragmentText, userInput = '', mock
   return masterResponse;
 }
 
-async function generateEntitiesFromFragment(sessionId, fragmentText, turn=1, existinEntities){
+export async function generateEntitiesFromFragment(sessionId, fragmentText, turn=1, existinEntities){
   const maxEntities = 8
   let commonEntities = []
   if(process.env["MOCK_ENTIITIES"] == 'true')
@@ -743,7 +895,7 @@ async function generateEntitiesFromFragment(sessionId, fragmentText, turn=1, exi
 
 
 
-function storytellerDetectivePrologueScene(){
+export function storytellerDetectivePrologueScene(){
   return `And so, it became to be that it was  ___ (1. a term that describes the time , like: "almost midnight", "right about noon", "in the thick fog of an early morning", "just as the sun began to set", "the early hours of morning", "half past 4 in the afternoon ", time of day, e.g., night/dark/noon) as the storyteller detective finally approached  ___ (2.a/an/the FOUND_ structure that stands out in where it's located, it's a rather an unusual place to find such a structure. how it relates to the specificity of the surroundings).  it was  ___ (3. more specific description, based on knowledge and synthesis, also mentioning the material/materials and physicality of the structure) 
   " ___" (4. (direct speech of the storyteller detective) + (verb: how the detective said it). direct speech: a subjective observative given by a very specific storyteller detective, who finally reaches to that specific structure and reacts differently to it . referencing about that structure, in the specificity of this location and also in the more wider surroundings) 
   as ___ (5. pronoun: he/she/they (determines gender))  ___ (6. specific single word verb indicating dismounting or stopping a very specific mode of transportation the storyteller detective used to get here), 
@@ -753,7 +905,7 @@ function storytellerDetectivePrologueScene(){
   __(10.something that catches the detective's attention in the location and structure that suggests something unexpected) . " ____(11. direct speech by the storyteller detective reacting to (10) and how it gave  the understanding of the immediate urgency following in which finding the book in here, and references to the detective's attitude and character in the light of that ) might be?"`
 }
 
-function getSpecificGuidlineForStep(stepNo){
+export function getSpecificGuidlineForStep(stepNo){
   if(stepNo == 2)
     return `(next choise: 2.FOUND_ OBJECT/PHENOMENON/STRUCTURE/RELIC - now for this choice, give a first impression, crude, a raw glimpse, vague, what it seems to be like....but whatever you choose, always remain CONCRETE in your description, and images. FACTUAL, GROUNDED, NO GENERIC BANALIC SUPERFICIAL IMAGERY!! DO NOT INTERPRET, JUST OBSERVE! BE Himengway) `
   else if(stepNo == 9)
@@ -762,7 +914,7 @@ function getSpecificGuidlineForStep(stepNo){
     return `(ensure the seamless direct continuation and the logic of the current narrative. you may make fine adjustments to the script template to ensure the cohesive and natural seamless unfolding of the narrative! make it captivating!all options should be grounded, show don't tell. don't interpret. remain using the senses and factual facts. minimalism and subtle suggestion is ALWAYS ADVISED!)`
 }
 
-function journalEntryTemplateScene(){
+export function journalEntryTemplateScene(){
   return `But instead of getting right in, the storyteller detective took out what seemed to be like a ___(1. material, or texture, or a sequence of adjectives verbs describing the physicality of the journal)  journal. it was worn. she skimmed it fast, back and forth, until she found the page she was looking for: and then as fast as she was searching for it, she tore it off the journal. she did the same for two more times. she folded them neatly. the she took out a ___(2. medium of writing) and started to write:  "I finally found it" ___(1. describing how the storyteller detective wrote those words, the instrument for writing and how the words look on the page markings that show excitement. either font size, exclamantion marks, boldness., penmanship, style..etc). The ___(2. a specific place or entity. factual. grounded. specific, it's a location with a name, not generic. SPECIFIC). she she  starts to draw hastily a map of her surroundings that shows___(3. key geographical elements and maybe roads, with marking her current location as the destination of the map suggesting the last piece of the journey that she made to get there). she adds then a small legend to her amateurish map showing __(4. shortlist of items in the map legend).  she adds a few arrows pointed toward ___(5. where do they point in the map). and continues to write.
   "not much of a map maker I know...but , you'll have to work with that, I guess.
   oh..and you have to look for this...or I mean..it would look different, of course.. but try to find it:. she stops and draws.   this time it looks like   ___(6. some sort of entity, a place, an item, a creature, flora, fauna). she writes under it ___(7. the title she gives to her drawing and mention of how the font and writing style looks like).she then circles around it and writes: "FIND IT!!!" 
@@ -771,7 +923,7 @@ function journalEntryTemplateScene(){
   this is where you need to stay the first night you arrive to :  ___(8. options for specific places in our world which would be in the distance of 5 days journey suitable to have the initial scene as a location for a movie) Don't worry. from there you'll need to travel to ___(9. the exact location that would be suitable for a location for the COMPLETE_NARRATIVE  ) by ___(10. means of transportation). it's much worse than it sounds, i'm afraid... jokes aside. make sure you know at least something about ___(11. some skill or knowledge). you'll need it. and also don't forget to bring ___(12). you'll thank me later.  I will send the fragments, I promise. whatever is left of them, I guess. you have to remember what you wrote. You ARE the storyteller". Then, the storyteller detective takes out a ___(13. specific model of camera 100-70 years old), and takes a picture of ___(14. some entity or entities that are present in the current scene, with shot size and composition). continues writing: "I hope you'll get that picture too. That's it. i'm getting in. I will see you on the other side". `
 }
 
-async function getSceneStepForSessionId(sessionId){
+export async function getSceneStepForSessionId(sessionId){
   const db = await getScenesDb();
   const sessionDb = await getSessionssDb()
   if (! (sessionId in sessionDb.sessions))
@@ -787,27 +939,74 @@ async function getSceneStepForSessionId(sessionId){
   return {prompt_function, scene_name, scene_general_direction_guideline, necessary_background, step: description[step]}  
 }
 
-async function updateSessionScenePosition(sessionId, newPos={}){
-  const scenes_db = await getScenesDb()
-  const sessions_db = await getSessionssDb()
-  if(! Object.keys(newPos).length)
-  {
-    const {step, order} = sessions_db.sessions[sessionId]
-    if(scenes_db.scenes[order].description.length == step)
-      newPos = {order:order+1, step:0}
-    else
-      newPos = {order:order, step:step+1}
+export async function updateSessionScenePosition(sessionId, newPos={}){
+  // This function originally read from getScenesDb and getSessionssDb (JSON files)
+  // and then wrote back to sessionsScenes.json.
+  // Refactoring write to MongoDB (SessionSceneState model). Read remains from JSON for now.
+
+  const scenes_db = await getScenesDb(); // Reads from JSON
+  const sessions_db = await getSessionssDb(); // Reads from JSON
+  
+  let sceneName; // Need to determine sceneName, assuming it's part of session data or newPos.
+                 // For now, let's assume a default or it needs to be passed in.
+                 // This is a gap from the original structure not having sceneName in sessions_db.sessions[sessionId]
+
+  let updateData = {};
+  if (Object.keys(newPos).length > 0) {
+    updateData.currentStep = newPos.step !== undefined ? newPos.step : sessions_db.sessions[sessionId]?.step;
+    updateData.currentOrder = newPos.order !== undefined ? newPos.order : sessions_db.sessions[sessionId]?.order;
+    sceneName = newPos.sceneName || sessions_db.sessions[sessionId]?.sceneName || 'defaultScene'; // Determine sceneName
+  } else {
+    const currentSessionSceneData = sessions_db.sessions[sessionId];
+    if (!currentSessionSceneData) {
+        console.error(`Session data not found for sessionId ${sessionId} in JSON files.`);
+        // Initialize with defaults if not found, or handle error
+        updateData.currentStep = 0;
+        updateData.currentOrder = 0;
+        sceneName = 'defaultScene'; // Fallback scene name
+    } else {
+        const { step, order } = currentSessionSceneData;
+        sceneName = currentSessionSceneData.sceneName || 'defaultScene'; // Fallback scene name
+        if (scenes_db.scenes[order] && scenes_db.scenes[order].description.length == step) {
+            updateData.currentOrder = order + 1;
+            updateData.currentStep = 0;
+        } else {
+            updateData.currentOrder = order;
+            updateData.currentStep = step + 1;
+        }
+    }
   }
-  sessions_db.sessions[sessionId]= {...sessions_db.sessions[sessionId], ...newPos}
-  await fsPromises.writeFile(sessionsScenes, JSON.stringify(sessions_db));
+  updateData.lastUpdatedAt = new Date();
+
+  if (!sceneName) {
+    console.error("Scene name could not be determined for updateSessionScenePosition.");
+    // Fallback or error handling
+    sceneName = "unknownScene"; 
+  }
+
+
+  try {
+    await SessionSceneState.findOneAndUpdate(
+      { sessionId: sessionId, sceneName: sceneName }, // Assuming sceneName is key; might need adjustment
+      { $set: updateData },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  } catch (error) {
+    console.error(`Error in updateSessionScenePosition for sessionId ${sessionId}:`, error);
+    throw error;
+  }
+
+  // Original JSON write is removed:
+  // sessions_db.sessions[sessionId]= {...sessions_db.sessions[sessionId], ...newPos};
+  // await fsPromises.writeFile(sessionsScenes, JSON.stringify(sessions_db));
 }
 
 
-function findSuffix(mainStr, suffixStr) {
+export function findSuffix(mainStr, suffixStr) {
   return mainStr.endsWith(suffixStr);
 }
 
-async function findCurrentInflunences(sessionId, conversationHistory, userInput) {
+export async function findCurrentInflunences(sessionId, conversationHistory, userInput) {
   if (conversationHistory.length === 0) return []; 
 
   const prevAssistant = conversationHistory[conversationHistory.length - 1];
@@ -837,7 +1036,7 @@ async function findCurrentInflunences(sessionId, conversationHistory, userInput)
 }
 
 
-async function storytellerDetectiveFirstParagraphCreation(sessionId, userInput=''){
+export async function storytellerDetectiveFirstParagraphCreation(sessionId, userInput=''){
 
   const detectiveHistory = await getSessionDetectiveCreation(sessionId);
   const scene = await getSceneStepForSessionId(sessionId)
@@ -909,27 +1108,7 @@ async function storytellerDetectiveFirstParagraphCreation(sessionId, userInput='
   return newNarrativeOptions;
 }
 
-
-
-module.exports = {
-    chatWithStoryteller,
-    saveFragment,
-    updateTurn,
-    getTurn,
-    getFragment,
-    saveTextures,
-    chooseTextureForSessionId,
-    getSessionChat,
-    setTexture,
-    getChosenTexture,
-    setCharacterCreationQuestionAndOptions,
-    getCharacterCreationSession,
-    getPreviousDiscussionSummary,
-    storytellerDetectiveFirstParagraphCreation,
-    generateEntitiesFromFragment,
-    getEntitiesForSession,
-    setEntitiesForSession
-};
+// module.exports removed, functions are exported individually.
 
 
 

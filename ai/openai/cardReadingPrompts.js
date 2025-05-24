@@ -1,11 +1,10 @@
 
-const { directExternalApiCall, generate_texture_by_fragment_and_conversation} = require('./promptsUtils')
-const fs = require('fs');
+import { directExternalApiCall, generate_texture_by_fragment_and_conversation } from './promptsUtils.js';
+import fs from 'fs'; // fs is imported but not used in the provided code snippet.
 
 
-
-async function generate_cards(fragmentText, chatHistory, entities, texture) {
-    const response = await externalApiCall({
+export async function generate_cards(fragmentText, chatHistory, entities, texture) {
+    const response = await directExternalApiCall({ // Changed externalApiCall to directExternalApiCall
         prompt: `
         Generate a high-rank card + supporting constellation based on the storytelling fragment.
 
@@ -48,8 +47,8 @@ async function generate_cards(fragmentText, chatHistory, entities, texture) {
     return response;
 }
 
-async function generate_seer_response(cardsJson, texture) {
-    const response = await directExternalApiCall({
+export async function generate_seer_response(cardsJson, texture) {
+    const response = await directExternalApiCall({ // Changed externalApiCall to directExternalApiCall
         prompt: `
         ### **Narrative Perspective**
 The response should include both:
@@ -97,7 +96,7 @@ ${JSON.stringify(cardsJson)}
     return response;
 }
 
-function generateStorytellerGuidance(fragmentText, chatHistory) {
+export function generateStorytellerGuidance(fragmentText, chatHistory) {
     const prompt = `
         You are the Storyteller Seer, continuing your exploration of the lost storytelling universe.
         You have already begun a reading for the Weaver, analyzing their fragment.
@@ -130,7 +129,7 @@ function generateStorytellerGuidance(fragmentText, chatHistory) {
 
 
 module.exports = {
-    generate_seer_response,
-    generate_cards,
-    generateStorytellerGuidance,
+    // generate_seer_response, // Functions are exported individually
+    // generate_cards,
+    // generateStorytellerGuidance,
 };

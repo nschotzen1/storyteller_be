@@ -5,13 +5,46 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import {generateInitialChatPrompt, generateInitialScenePrompt} from './ai/openai/prompts.js';
 import ChatMessage  from './models/models.js';
-import { directExternalApiCall } from './ai/openai/promptsUtils.js';
+import { directExternalApiCall, generateContinuationPrompt } from './ai/openai/promptsUtils.js';
 import { getMockResponse } from './mocks.js';
 import { fileURLToPath } from 'url';
 
+// Storyteller utils and models
+import { 
+    getTurn, 
+    saveFragment, 
+    storytellerDetectiveFirstParagraphCreation, 
+    GeneratedContent, 
+    NarrativeFragment, 
+    NarrativeEntity, 
+    NarrativeTexture, 
+    SessionState, 
+    SessionSceneState
+    // ChatMessage is already imported below
+    getSessionChat, // Added for chatWithMasterWorking
+    setChatSessions,  // Added for chatWithMasterWorking
+    generateEntitiesFromFragment, // Added for generateEntitiesPostHandler
+    updateTurn, // Added for generateTexturesPostHandler
+    // saveFragment is already imported
+} from './storyteller/utils.js';
+import { characterCreationForSessionId } from './character/utils.js';
+import { 
+    generateMasterCartographerChat, // Added for chatWithMasterWorking
+    generateFragmentsBeginnings, // Added for dynamicPrefixesPostHandler
+    // directExternalApiCall is already imported
+    // generateContinuationPrompt is already imported
+ } from './ai/openai/promptsUtils.js';
+import { 
+    developEntity, // Added for developEntityPostHandler
+    generateTextureOptionsByText // Added for generateTexturesPostHandler
+} from './ai/textToImage/api.js';
 
-let CHAT_MOCK = true; // Set to false to use the actual OpenAI API
-let NARRATION_MOCK = true; // Toggle mock mode here or in your config
+
+// Configuration from environment variables
+const CHAT_MOCK_MODE = process.env.CHAT_MOCK_MODE === 'true';
+const NARRATION_MOCK_MODE = process.env.NARRATION_MOCK_MODE === 'true';
+const STORYTELLING_DEMO_MODE = process.env.STORYTELLING_DEMO_MODE === 'true'; // For /api/storytelling2
+const PREFIX_MOCK_MODE = process.env.PREFIX_MOCK_MODE === 'true'; // For /api/prefixes (already correct)
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -77,7 +110,7 @@ app.post('/api/sendMessage', async (req, res) => {
 
     // 🛰️ Send to OpenAI or external API
     let gptResponse;
-    if (CHAT_MOCK) {
+    if (CHAT_MOCK_MODE) { // Updated to CHAT_MOCK_MODE
       gptResponse = getMockResponse();
     }
     else {
@@ -303,7 +336,7 @@ app.post('/api/getNarrationScript', async (req, res) => {
 
     let gptResponse;
 
-    if (NARRATION_MOCK) {
+    if (NARRATION_MOCK_MODE) { // Updated to NARRATION_MOCK_MODE
       console.log(`(MOCK) Narration requested for sceneId: ${sceneId}`);
       gptResponse = {
         narrationScript: [
@@ -349,5 +382,442 @@ app.post('/api/getNarrationScript', async (req, res) => {
 
 
 app.use('/assets', express.static(path.join(__dirname, 'assets'))); 
+
+
+// Helper function (can be placed in a shared utility file later)
+const sanitizeString = (str) => {
+  if (typeof str !== 'string') {
+    return 'invalid_input'; // Or throw an error, or handle as appropriate
+  }
+  return str.replace(/[^a-zA-Z0-9-_]/g, '_');
+};
+
+
+// Refactored Route Handlers from serverold.js
+
+const storytellingRouteHandler = async (req, res) => {
+  try {
+    const { userText, textureId, sessionId } = req.body; // textureId is not used in the core logic here but kept for signature consistency
+    
+    if (!sessionId || !userText) {
+        return res.status(400).json({ message: 'Missing sessionId or userText in request body.' });
+    }
+
+    const turn = await getTurn(sessionId); // Still reads from JSON for now
+
+    await saveFragment(sessionId, userText, turn); // Writes to MongoDB
+
+    const prompts = generateContinuationPrompt(userText);
+    const prefixesFromAI = await directExternalApiCall(prompts, 2500, 1.04);
+
+    // Save prefixes to GeneratedContent
+    const generatedPrefixes = new GeneratedContent({
+      sessionId: sessionId,
+      contentType: 'prefix', // As per instruction
+      contentData: prefixesFromAI, // Storing the direct AI response
+      turn: turn
+    });
+    await generatedPrefixes.save();
+
+    res.json({
+      prefixes: prefixesFromAI, // Send the AI response directly
+      current_narrative: userText
+    });
+  } catch (err) {
+    console.error('Error in /api/storytelling:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+const storytelling2RouteHandler = async (req, res) => {
+  try {
+    const { userText, textureId, sessionId } = req.body; // textureId is not used here
+    
+    if (!sessionId) { 
+        return res.status(400).json({ message: 'Missing sessionId in request body.' });
+    }
+    
+    let prefixesResponse;
+    let currentTurn; // To store turn for GeneratedContent if applicable
+
+    if (!STORYTELLING_DEMO_MODE) { // Updated to STORYTELLING_DEMO_MODE
+      if (!userText) { // userText is required if not in DEMO_MODE
+        return res.status(400).json({ message: 'Missing userText in request body for non-demo mode.' });
+      }
+      prefixesResponse = await storytellerDetectiveFirstParagraphCreation(sessionId, userText);
+      currentTurn = await getTurn(sessionId); // Get current turn for logging
+
+      // Save prefixes to GeneratedContent
+      const generatedPrefixes = new GeneratedContent({
+        sessionId: sessionId,
+        contentType: 'prefix_options', // Differentiating content type
+        contentData: prefixesResponse.options || prefixesResponse.choices, 
+        turn: currentTurn 
+      });
+      await generatedPrefixes.save();
+
+    } else {
+      // DEMO_MODE logic
+      prefixesResponse = {
+        current_narrative: "It was almost", 
+        choices: { 
+          choice_1: { 
+            options: [
+              { continuation: "dusk", storytelling_points: 1, fontName: "Tangerine", fontSize: "100px", fontColor: "black" },
+              { continuation: "midnight", storytelling_points: 2, fontName: "Tangerine", fontSize: "70px", fontColor: "black" },
+              { continuation: "early morning", storytelling_points: 1, fontName: "Tangerine", fontSize: "70px", fontColor: "black" },
+              { continuation: "noon", storytelling_points: 1, fontName: "Tangerine", fontSize: "70px", fontColor: "black" },
+              { continuation: "the breaking of dawn", storytelling_points: 3, fontName: "Tangerine", fontSize: "70px", fontColor: "black" }
+            ]
+          }
+        }
+      };
+      const generatedPrefixesDemo = new GeneratedContent({
+        sessionId: sessionId,
+        contentType: 'prefix_options_demo',
+        contentData: prefixesResponse.choices.choice_1.options,
+        turn: 0 // Placeholder turn for demo
+      });
+      await generatedPrefixesDemo.save();
+    }
+    
+    let responseOptions;
+    if (prefixesResponse.options) { 
+        responseOptions = prefixesResponse.options;
+    } else if (prefixesResponse.choices && prefixesResponse.choices.choice_1 && prefixesResponse.choices.choice_1.options) { 
+        responseOptions = prefixesResponse.choices.choice_1.options;
+    } else {
+        console.error("Unexpected prefixesResponse structure:", prefixesResponse);
+        return res.status(500).json({ message: "Internal server error due to unexpected data structure." });
+    }
+
+    res.json({
+      prefixes: responseOptions.map(option => ({
+        prefix: option.continuation,
+        storytelling_points: option.storytelling_points,
+        fontName: option.fontName || "Tangerine", 
+        fontSize: option.fontSize || "60px", 
+        fontColor: option.fontColor || "black" 
+      })),
+      current_narrative: prefixesResponse.current_narrative || userText 
+    });
+  } catch (err) {
+    console.error('Error in /api/storytelling2:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Add new routes
+app.post('/api/storytelling', storytellingRouteHandler);
+app.post('/api/storytelling2', storytelling2RouteHandler);
+
+// Character Creation Route Handlers
+
+const characterCreationGetHandler = async (req, res) => {
+  try {
+    const sessionId = req.query.sessionId || 'Unknown Session';
+    const userInput = req.query.userInput || ''; 
+
+    const data = await characterCreationForSessionId(sessionId, userInput, null); 
+    
+    res.json(data);
+  } catch (err) {
+    console.error('Error in /charactercreation:', err);
+    if (err.name === 'CastError') {
+        return res.status(400).json({ message: 'Invalid ID format provided.' });
+    }
+    res.status(500).json({ message: 'Server error during character creation process.' });
+  }
+};
+
+const createCharacterGetHandler = async (req, res) => {
+  try {
+    const sessionId = req.query.sessionId;
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Session ID is required.' });
+    }
+
+    const session = await SessionState.findOneAndUpdate(
+      { sessionId: sessionId }, 
+      { $setOnInsert: { sessionId: sessionId, lastUpdatedAt: new Date() } }, 
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    res.status(200).json({ 
+      message: `Session for ${sessionId} ensured/initialized.`,
+      sessionData: { 
+          sessionId: session.sessionId,
+          turn: session.turn, 
+          lastUpdatedAt: session.lastUpdatedAt
+      }
+    });
+
+  } catch (err) {
+    console.error('Error in /createCharacter:', err);
+    res.status(500).json({ message: 'Server error during session initialization.' });
+  }
+};
+
+// Add new character creation GET routes
+app.get('/charactercreation', characterCreationGetHandler);
+app.get('/createCharacter', createCharacterGetHandler);
+
+// Chat With Master Working Route Handler
+const chatWithMasterWorkingGetHandler = async (req, res) => {
+  try {
+    const { masterName, userInput, sessionId, fragmentText, mock: mockQuery } = req.query;
+    const mock = mockQuery === 'true';
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Session ID is required.' });
+    }
+    if (!fragmentText && !mock) { 
+        return res.status(400).json({ message: 'fragmentText is required for non-mock requests.' });
+    }
+
+    let chatHistory = await getSessionChat(sessionId); 
+
+    if (userInput) {
+      chatHistory.push({ role: 'user', content: userInput });
+    }
+
+    let masterResponseText;
+
+    if (!mock) {
+      const initialPrompts = generateMasterCartographerChat(fragmentText);
+      const fullPromptHistory = initialPrompts.concat(chatHistory.map(item => ({role: item.role, content: item.content}))); 
+      
+      const aiResponse = await directExternalApiCall(fullPromptHistory);
+      
+      if (!aiResponse || !aiResponse.guardianOfRealmsReply) {
+        console.error("Invalid AI Response structure:", aiResponse);
+        return res.status(500).json({ message: 'Error processing AI response.' });
+      }
+
+      masterResponseText = aiResponse.guardianOfRealmsReply;
+      const discoveredEntities = aiResponse.discoveredEntities;
+
+      const masterChatContent = new GeneratedContent({
+        sessionId: sessionId,
+        contentType: 'masterChatResponse',
+        contentData: {
+            guardianOfRealmsReply: masterResponseText,
+            discoveredEntities: discoveredEntities,
+        },
+        fragmentText: fragmentText, 
+      });
+      await masterChatContent.save();
+
+      if (masterResponseText) {
+        chatHistory.push({ role: 'system', content: masterResponseText });
+      }
+    } else {
+      masterResponseText = `Hello, ${masterName || 'Master'}. Session ID: ${sessionId}. Fragment: ${fragmentText || 'N/A'}. You said: "${userInput || ''}". This is a mock response.`;
+      chatHistory.push({ role: 'system', content: masterResponseText });
+    }
+
+    await setChatSessions(sessionId, chatHistory); 
+
+    res.json({ text: masterResponseText });
+
+  } catch (err) {
+    console.error('Error in /chatWithMasterWorking:', err);
+    res.status(500).json({ message: 'Server error during master chat.' });
+  }
+};
+
+// Add the new GET route (simplified name)
+app.get('/api/chatWithMaster', chatWithMasterWorkingGetHandler);
+
+// Entity Development and Generation Route Handlers
+
+// Placeholder function for checking storytelling points
+async function checkIfEnoughStorytellingPoints(sessionId, points) {
+  // In a real implementation, this would check against SessionState or another source
+  console.log(`Checking storytelling points for session ${sessionId}: ${points} points requested.`);
+  return true; // Placeholder, always returns true
+}
+
+// Helper function copied from serverold.js
+function processEntitiesToGroups(data) {
+  if (!Array.isArray(data)) {
+    console.error("processEntitiesToGroups: input data is not an array", data);
+    return []; // Return empty array or handle error as appropriate
+  }
+  let groups = [];
+  let processedIds = new Set();
+
+  data.forEach(entity => {
+    if (!entity || typeof entity.name === 'undefined' || !Array.isArray(entity.connections)) {
+      console.warn("processEntitiesToGroups: skipping invalid entity", entity);
+      return; // Skip malformed entities
+    }
+    if (!processedIds.has(entity.name)) {
+      let group = [];
+      let queue = [entity];
+
+      while (queue.length) {
+        let current = queue.shift();
+        if (!processedIds.has(current.name)) {
+          processedIds.add(current.name);
+          group.push(current);
+          current.connections.forEach(connection => {
+            if (!connection || typeof connection.entity === 'undefined') {
+              console.warn("processEntitiesToGroups: skipping invalid connection in entity", current.name, connection);
+              return; // Skip malformed connections
+            }
+            let connectedEntity = data.find(e => e && e.name === connection.entity);
+            if (connectedEntity && !processedIds.has(connectedEntity.name)) {
+              queue.push(connectedEntity);
+            }
+          });
+        }
+      }
+
+      if (group.length) {
+        groups.push(group);
+      }
+    }
+  });
+  return groups;
+}
+
+const developEntityPostHandler = async (req, res) => {
+  try {
+    const { sessionId, entityId, development_points: developmentPoints } = req.body;
+
+    if (!sessionId || !entityId || developmentPoints === undefined) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId, entityId, or development_points.' });
+    }
+
+    const hasEnoughPoints = await checkIfEnoughStorytellingPoints(sessionId, developmentPoints);
+    if (!hasEnoughPoints) {
+      return res.status(400).json({ message: 'Not enough storytelling points for development.' });
+    }
+
+    const updatedEntityData = await developEntity({ sessionId, entityId, developmentPoints });
+    
+    if (!updatedEntityData) {
+        return res.status(500).json({ message: 'Entity development process did not return data.' });
+    }
+
+    return res.status(200).json({ success: true, updatedEntity: updatedEntityData });
+  } catch (error) {
+    console.error('Error in /api/developEntity:', error);
+    if (error.message.includes("could not find entity")) { 
+        return res.status(404).json({ message: 'Entity not found for development.' });
+    }
+    res.status(500).json({ message: 'Server error during entity development.' });
+  }
+};
+
+const generateEntitiesPostHandler = async (req, res) => {
+  try {
+    const { userText, sessionId } = req.body;
+
+    if (!sessionId || !userText) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or userText.' });
+    }
+
+    const entities = await generateEntitiesFromFragment(sessionId, userText);
+    const groupedEntities = processEntitiesToGroups(entities); 
+    // console.log("Grouped Entities (not returned in response):", groupedEntities);
+
+    res.status(200).json({ entities: entities, message: "Entities generated and saved." }); 
+
+  } catch (error) {
+    console.error('Error in /api/generateEntities:', error);
+    res.status(500).json({ message: 'Server error during entity generation.' });
+  }
+};
+
+// Add new POST routes for entity development and generation
+app.post('/api/developEntity', developEntityPostHandler);
+app.post('/api/generateEntities', generateEntitiesPostHandler);
+
+// Texture Generation and Prefixes Route Handlers
+
+const generateTexturesPostHandler = async (req, res) => {
+  try {
+    const { userText, sessionId } = req.body;
+
+    if (!sessionId || userText === undefined) { 
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or userText.' });
+    }
+    const fragment = userText; 
+
+    const turn = await updateTurn(sessionId); 
+    await saveFragment(sessionId, fragment, turn); 
+
+    const { entitiesWithIllustrations } = await generateTextureOptionsByText({ sessionId, turn, shouldMockImage: false });
+
+    res.json({ cards: entitiesWithIllustrations });
+
+  } catch (error) {
+    console.error('Error in /api/generateTextures:', error);
+    res.status(500).json({ message: 'Server error during texture generation.' });
+  }
+};
+
+const dynamicPrefixesPostHandler = async (req, res) => {
+  const mockPrefixes = [
+    {"fontName":"Tangerine", "prefix": "it wasn't unusual for them to see wolf tracks so close to the farm, but this one was different, its grand size imprinting a distinct story on the soft soil", "fontSize":"34px"},
+    {"fontName":"Tangerine", "prefix": "It was almost dark as they finally reached", "fontSize": "34px"},
+    {"fontName":"Tangerine", "prefix": "she grasped her amulet strongly, as the horses started galloping", "fontSize": "34px"},
+    {"fontName":"Tangerine", "prefix": "Run! Now! and don't look back until you reach the river", "fontSize": "34px"},
+    {"fontName":"Tangerine", "prefix": "I admit it, seeing the dark woods for the first time was scary", "fontSize": "34px"}
+  ];
+
+  try {
+    const { sessionId, contextText, useMock } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Session ID is required.' });
+    }
+
+    if (useMock || PREFIX_MOCK_MODE) {
+      const mockPrefixLog = new GeneratedContent({
+        sessionId: sessionId,
+        contentType: 'dynamicPrefixList_mock',
+        contentData: mockPrefixes,
+        createdAt: new Date()
+      });
+      await mockPrefixLog.save();
+      return res.json(mockPrefixes);
+    }
+
+    if (!contextText) {
+      return res.status(400).json({ message: 'contextText is required for non-mock mode.' });
+    }
+
+    const aiPrompts = generateFragmentsBeginnings(contextText, 5); 
+    const generatedPrefixesFromAI = await directExternalApiCall(aiPrompts); 
+
+    if (!Array.isArray(generatedPrefixesFromAI)) {
+        console.error("AI did not return an array for prefixes:", generatedPrefixesFromAI);
+        return res.status(500).json({ message: "Error processing AI response for prefixes."});
+    }
+    
+    const prefixLog = new GeneratedContent({
+      sessionId: sessionId,
+      contentType: 'dynamicPrefixList',
+      contentData: generatedPrefixesFromAI,
+      createdAt: new Date()
+    });
+    await prefixLog.save();
+
+    res.json(generatedPrefixesFromAI);
+
+  } catch (error) {
+    console.error('Error in /api/prefixes POST:', error);
+    res.status(500).json({ message: 'Server error during prefix generation.' });
+  }
+};
+
+// Add new POST routes for texture generation and prefixes
+app.post('/api/generateTextures', generateTexturesPostHandler);
+app.post('/api/prefixes', dynamicPrefixesPostHandler);
+
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));

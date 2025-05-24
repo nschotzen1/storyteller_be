@@ -1,4 +1,4 @@
-function developEntityprompt(entity, restOfEntities, fragment, developmentPoints){
+export function developEntityprompt(entity, restOfEntities, fragment, developmentPoints){
     let prompt = `CYou are a worldbuilder expanding a storytelling entity into a richer, more meaningful version of itself. 
 
 **Step 1: Contextual Expansion**
@@ -41,5 +41,5 @@ return [{ role: "system", content: prompt }];
 
 
 module.exports = {
-    developEntityprompt,
+    // developEntityprompt, // No longer needed here as it's exported directly
 }
