@@ -15,6 +15,11 @@ const chatMessageSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+const narrativeFragmentSchema = new mongoose.Schema({
+  session_id: { type: String, required: true },
+  fragment: { type: mongoose.Schema.Types.Mixed, required: true },
+  turn: { type: Number },
+});
 
 mongoose.connect('mongodb://localhost:27017/storytelling', {
   useNewUrlParser: true,
@@ -25,5 +30,5 @@ mongoose.connect('mongodb://localhost:27017/storytelling', {
   console.error("MongoDB connection error:", err);
 });
 
-
-export default mongoose.model('ChatMessage', chatMessageSchema);
+export const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
+export const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFragmentSchema);

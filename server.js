@@ -4,36 +4,35 @@ import cors from 'cors';
 import { promises as fs } from 'fs';
 import path from 'path';
 import {generateInitialChatPrompt, generateInitialScenePrompt} from './ai/openai/prompts.js';
-import ChatMessage  from './models/models.js';
-import { directExternalApiCall, generateContinuationPrompt } from './ai/openai/promptsUtils.js';
+import { ChatMessage, NarrativeFragment } from './models/models.js'; // Consolidated and corrected ChatMessage import
+import { 
+    directExternalApiCall, 
+    generateContinuationPrompt,
+    generateMasterCartographerChat, // Moved from below
+    generateFragmentsBeginnings, // Moved from below
+    generateTypewriterPrompt // Moved from below and verified for /api/send_typewriter_text
+} from './ai/openai/promptsUtils.js';
 import { getMockResponse } from './mocks.js';
 import { fileURLToPath } from 'url';
 
 // Storyteller utils and models
 import { 
     getTurn, 
-    saveFragment, 
     storytellerDetectiveFirstParagraphCreation, 
     GeneratedContent, 
-    NarrativeFragment, 
     NarrativeEntity, 
     NarrativeTexture, 
     SessionState, 
-    SessionSceneState
-    // ChatMessage is already imported below
+    SessionSceneState,
     getSessionChat, // Added for chatWithMasterWorking
     setChatSessions,  // Added for chatWithMasterWorking
     generateEntitiesFromFragment, // Added for generateEntitiesPostHandler
-    updateTurn, // Added for generateTexturesPostHandler
-    // saveFragment is already imported
+    saveFragment, // Verified for /api/send_typewriter_text
+    updateTurn // Verified for /api/send_typewriter_text
 } from './storyteller/utils.js';
+// import { NarrativeFragment } from './models/models.js'; // Moved to consolidated import above
 import { characterCreationForSessionId } from './character/utils.js';
-import { 
-    generateMasterCartographerChat, // Added for chatWithMasterWorking
-    generateFragmentsBeginnings, // Added for dynamicPrefixesPostHandler
-    // directExternalApiCall is already imported
-    // generateContinuationPrompt is already imported
- } from './ai/openai/promptsUtils.js';
+// Removed redundant/split import block for ai/openai/promptsUtils.js
 import { 
     developEntity, // Added for developEntityPostHandler
     generateTextureOptionsByText // Added for generateTexturesPostHandler
@@ -45,6 +44,7 @@ const CHAT_MOCK_MODE = process.env.CHAT_MOCK_MODE === 'true';
 const NARRATION_MOCK_MODE = process.env.NARRATION_MOCK_MODE === 'true';
 const STORYTELLING_DEMO_MODE = process.env.STORYTELLING_DEMO_MODE === 'true'; // For /api/storytelling2
 const PREFIX_MOCK_MODE = process.env.PREFIX_MOCK_MODE === 'true'; // For /api/prefixes (already correct)
+const TYPEWRITER_MOCK_MODE = process.env.TYPEWRITER_MOCK_MODE === 'true';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -208,40 +208,96 @@ app.post('/api/send_typewriter_text', async (req, res) => {
 
     console.log(`✍️ Typewriter API — Session: ${sessionId} — Message: ${message}`);
 
-    const wordCount = message.trim().split(/\s+/).length;
+    if (TYPEWRITER_MOCK_MODE) {
+      const wordCount = message.trim().split(/\s+/).length;
+      let mockResponse;
 
-    let mockResponse;
+      if (wordCount <= 5) {
+        // Short addition
+        mockResponse = {
+          content: "Yes. That’s where it begins.",
+          font: "'Uncial Antiqua', serif",
+          font_size: "1.8rem",
+          font_color: "#3b1d15",
+          time_to_fade: 7
+        };
+      } else if (wordCount <= 12) {
+        // Medium addition
+        mockResponse = {
+          content: "Something beneath the ink stirred — it remembered the shape of your thought.",
+          font: "'IM Fell English SC', serif",
+          font_size: "1.9rem",
+          font_color: "#2a120f",
+          time_to_fade: 12
+        };
+      } else {
+        // Long addition
+        mockResponse = {
+          content: "But the words you wrote had already been written — long ago, by another hand. It had only waited for your ink to remember.",
+          font: "'EB Garamond', serif",
+          font_size: "2.0rem",
+          font_color: "#1f0e08",
+          time_to_fade: 18
+        };
+      }
 
-    if (wordCount <= 5) {
-      // Short addition
-      mockResponse = {
-        content: "Yes. That’s where it begins.",
-        font: "'Uncial Antiqua', serif",
-        font_size: "1.8rem",
-        font_color: "#3b1d15"
+      // Save fragments
+      const userTurn = await updateTurn(sessionId);
+      const userFragment = {
+        type: 'user_input',
+        timestamp: new Date().toISOString(),
+        text: message
       };
-    } else if (wordCount <= 12) {
-      // Medium addition
-      mockResponse = {
-        content: "Something beneath the ink stirred — it remembered the shape of your thought.",
-        font: "'IM Fell English SC', serif",
-        font_size: "1.9rem",
-        font_color: "#2a120f"
+      await saveFragment(sessionId, userFragment, userTurn);
+
+      const systemTurn = await updateTurn(sessionId);
+      const systemFragmentData = mockResponse; // Already determined
+      const systemFragment = {
+        type: 'system_response',
+        timestamp: new Date().toISOString(),
+        data: systemFragmentData
       };
+      await saveFragment(sessionId, systemFragment, systemTurn);
+      
+      return res.status(200).json(mockResponse);
     } else {
-      // Long addition
-      mockResponse = {
-        content: "But the words you wrote had already been written — long ago, by another hand. It had only waited for your ink to remember.",
-        font: "'EB Garamond', serif",
-        font_size: "2.0rem",
-        font_color: "#1f0e08"
-      };
-    }
+      let aiResponse;
+      try {
+        const prompt = generateTypewriterPrompt(message);
+        aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true);
+        
+        // Save fragments
+        const userTurn = await updateTurn(sessionId);
+        const userFragment = {
+          type: 'user_input',
+          timestamp: new Date().toISOString(),
+          text: message
+        };
+        await saveFragment(sessionId, userFragment, userTurn);
 
-    return res.status(200).json(mockResponse);
+        const systemTurn = await updateTurn(sessionId);
+        const systemFragmentData = aiResponse; // Already determined
+        const systemFragment = {
+          type: 'system_response',
+          timestamp: new Date().toISOString(),
+          data: systemFragmentData
+        };
+        await saveFragment(sessionId, systemFragment, systemTurn);
+
+        return res.status(200).json(aiResponse);
+      } catch (aiError) {
+        console.error('Error calling AI for typewriter response or saving fragments:', aiError);
+        // If aiResponse is undefined because the AI call failed, we still might want to save the user part
+        // but the current logic structure saves both after AI response or mock is determined.
+        // For now, if AI call fails, nothing is saved from this block.
+        return res.status(500).json({ error: 'Failed to get AI response for typewriter or save fragments' });
+      }
+    }
   } catch (error) {
     console.error('Error in /api/send_typewriter_text:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'Internal Server Error in typewriter route' });
+    }
   }
 });
 
