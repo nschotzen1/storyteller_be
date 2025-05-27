@@ -37,9 +37,3 @@ A JSON object representing the evolved entity with deeper lore, richer sensory e
 `
 return [{ role: "system", content: prompt }];
 }
-
-
-
-module.exports = {
-    // developEntityprompt, // No longer needed here as it's exported directly
-}
