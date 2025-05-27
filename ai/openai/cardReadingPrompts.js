@@ -126,10 +126,3 @@ export function generateStorytellerGuidance(fragmentText, chatHistory) {
     `;
     return [{ role: "system", content: prompt }]
 }
-
-
-module.exports = {
-    // generate_seer_response, // Functions are exported individually
-    // generate_cards,
-    // generateStorytellerGuidance,
-};
