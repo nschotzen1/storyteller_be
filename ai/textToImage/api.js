@@ -2,7 +2,8 @@ import fs from 'fs'; // fs.createWriteStream will remain sync for pipeline, fs.u
 import https from 'https';
 import path from 'path';
 import fetch from 'node-fetch';
-import { generateAsync } from 'stability-client';
+import pkg from 'stability-client';
+const { generateAsync } = pkg;
 import { generate_texture_by_fragment_and_conversation, directExternalApiCall, getOpenaiClient } from '../openai/promptsUtils.js';
 import { developEntityprompt } from '../openai/morePrompts.js';
 import { 

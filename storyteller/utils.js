@@ -1,6 +1,7 @@
 import fs from 'fs';
 import mongoose from 'mongoose';
 import * as fsPromises from 'fs/promises';
+import { NarrativeFragment, ChatMessage } from '../models/models.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -99,14 +100,6 @@ export function mapEntity(rawEntity) {
 }
 
 
-// Define the schema
-const narrativeFragmentSchema = new mongoose.Schema({
-  session_id: { type: String, required: true },
-  fragment: { type: mongoose.Schema.Types.Mixed, required: true },
-  turn: { type: Number },
-});
-
-export const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFragmentSchema);
 
 const entitySchema = new mongoose.Schema({
   session_id: { type: String, required: true },
@@ -175,17 +168,6 @@ const narrativeTextureSchema = new mongoose.Schema({
 export const NarrativeTexture = mongoose.model('NarrativeTexture', narrativeTextureSchema);
 
 
-const chatMessageSchema = new mongoose.Schema({
-  sessionId: { type: String, required: true, index: true },
-  order: { type: Number, required: true },
-  type: { type: String, enum: ['initial', 'response', 'user'], default: 'user' },
-  sender: { type: String, enum: ['user', 'system'], required: true },
-  content: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now }
-});
-
-// Export ChatMessage model correctly
-export const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
 
 // New Schemas and Models
 

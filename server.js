@@ -215,21 +215,62 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       if (wordCount <= 5) {
         // Short addition
         mockResponse = {
-          content: "Yes. That’s where it begins.",
-          font: "'Uncial Antiqua', serif",
-          font_size: "1.8rem",
-          font_color: "#3b1d15",
-          time_to_fade: 7
-        };
+                writing_sequence: [
+                  { action: 'type', text: 'It was almost', delay: 0 },
+                  { action: 'pause', delay: 4000 },
+                  { action: 'type', text: ' night', delay: 0 },
+                  { action: 'pause', delay: 6000 },
+                  { action: 'type', text: ' as the band finally', delay: 0 },
+                  { action: 'pause', delay: 8000 },
+                  { action: 'type', text: ' approached', delay: 0 },
+                  { action: 'pause', delay: 5000 },
+                  { action: 'type', text: ' what seemed to be like', delay: 0 },
+                  { action: 'pause', delay: 9000 },
+                  { action: 'type', text: ' a broken Ter', delay: 0 },
+                  { action: 'pause', delay: 3000 },
+                  { action: 'type', text: 'ra', delay: 0 },
+                  { action: 'delete', count: 1, delay: 500 },   // deletes 'a' in 'Tera'
+                  { action: 'retype', text: 'a', delay: 0 },    // retypes 'a', hesitation
+                  { action: 'type', text: 'ce.', delay: 0 },
+                  { action: 'pause', delay: 16000 },
+                  // Fade-out steps
+                  { action: 'fade', phase: 1, to_text: 'It was night. The band approached a terrace.', delay: 2000 },
+                  { action: 'fade', phase: 2, to_text: 'Night. They arrived.', delay: 1800 },
+                  { action: 'fade', phase: 3, to_text: 'A band. Night.', delay: 1200 },
+                  { action: 'fade', phase: 4, to_text: '', delay: 900 }
+                ],
+                metadata: {
+                  font: "'Uncial Antiqua', serif",
+                  font_size: "1.8rem",
+                  font_color: "#3b1d15"
+                }
+              }
+
       } else if (wordCount <= 12) {
         // Medium addition
         mockResponse = {
-          content: "Something beneath the ink stirred — it remembered the shape of your thought.",
-          font: "'IM Fell English SC', serif",
-          font_size: "1.9rem",
-          font_color: "#2a120f",
-          time_to_fade: 12
-        };
+        writing_sequence: [
+          { action: 'type', text: 'She clutched her amulet to her coat.', delay: 0 },
+          { action: 'pause', delay: 5000 },
+          { action: 'type', text: ' As the horses carrying her carriage gal', delay: 0 },
+          { action: 'pause', delay: 6000 },
+          { action: 'type', text: 'lo', delay: 0 },
+          { action: 'delete', count: 2, delay: 300 }, // deletes 'lo' (as if typo)
+          { action: 'retype', text: 'lop', delay: 0 }, // corrects to 'lop'
+          { action: 'type', text: 'ped through the front gate', delay: 0 },
+          { action: 'pause', delay: 8000 },
+          // Fade-out steps
+          { action: 'fade', phase: 1, to_text: 'She clutched the amulet as the carriage entered the gate.', delay: 2000 },
+          { action: 'fade', phase: 2, to_text: 'Amulet. Horses. Gate.', delay: 1800 },
+          { action: 'fade', phase: 3, to_text: 'Night. Movement.', delay: 1200 },
+          { action: 'fade', phase: 4, to_text: '', delay: 900 }
+        ],
+        metadata: {
+          font: "'Uncial Antiqua', serif",
+          font_size: "1.8rem",
+          font_color: "#3b1d15"
+        }
+      }
       } else {
         // Long addition
         mockResponse = {
