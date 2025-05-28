@@ -1,14 +1,28 @@
-const { directExternalApiCall, characterCreationInitialOptionsPrompt } = require("../ai/openai/promptsUtils.js")
-const {  textToImageOpenAi, characterCreationOptionPrompt} = require("../ai/textToImage/api.js")
-const {  getChosenTexture, getSessionChat, getFragment, getCharacterCreationSession, setCharacterCreationQuestionAndOptions, getPreviousDiscussionSummary } = require("../storyteller/utils.js")
-const path = require('path');
-const fsPromises = require('fs').promises;
-const fs = require('fs')
-const characterCreationSessionsDbPath = path.join(__dirname, 'db', 'characterCreationSessions.json');
-const shouldMock = true
+import { directExternalApiCall, characterCreationInitialOptionsPrompt } from "../ai/openai/promptsUtils.js";
+import { textToImageOpenAi, characterCreationOptionPrompt } from "../ai/textToImage/api.js";
+import { 
+    getChosenTexture, 
+    getSessionChat, 
+    getFragment, 
+    getCharacterCreationSession, 
+    setCharacterCreationQuestionAndOptions, 
+    getPreviousDiscussionSummary,
+    ensureDirectoryExists // Import the new utility
+} from "../storyteller/utils.js";
+import path from 'path';
+import * as fsPromises from 'fs/promises';
+// import fs from 'fs'; // fs.existsSync and fs.mkdirSync will be removed
+import { fileURLToPath } from 'url';
+
+// Setup __dirname for ES6 modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// const characterCreationSessionsDbPath = path.join(__dirname, 'db', 'characterCreationSessions.json'); // Commented out: To be deprecated
+const shouldMock = true; // This is used in the original file but its purpose here isn't clear from the context of this function alone. Keeping it for now.
 
 
-
+/* Commenting out old JSON DB functions as they are being replaced by MongoDB via storyteller/utils.js
 const getCharacterSessions = async (storagePath=characterCreationSessionsDbPath) => {
     try {
         const data = await fsPromises.readFile(storagePath, 'utf8');
@@ -22,17 +36,18 @@ const getCharacterSessions = async (storagePath=characterCreationSessionsDbPath)
   const setCharacterSessions = async (sessions, storagePath=characterCreationSessionsDbPath) => {
     await fsPromises.writeFile(storagePath,sessions);
   };
+*/
 
   
   
-
+  
+  
   async function textToImageGenerateCharacterCards(options, sessionId, texture, question) {
-    let imgPromises = options.map((option, idx) => {
+    let imgPromises = options.map(async (option, idx) => { // Added async here to use await inside map
         try {
             const subfolderPath = path.join(__dirname, '../../assets', `${sessionId}/character/${Math.floor(Math.random() * 1000)}`);
-            if (!fs.existsSync(subfolderPath)){
-                  fs.mkdirSync(subfolderPath, { recursive: true });
-            }
+            await ensureDirectoryExists(subfolderPath); // Use new async function
+            
             const imagePrompt = characterCreationOptionPrompt({ ...option, texture, option_number:idx });
             return textToImageOpenAi(imagePrompt, 1, `${subfolderPath}/${idx}.png`)
                    .then(imageResult => ({...option, ...imageResult, imagePrompt}))
@@ -80,7 +95,7 @@ function stylizePreviousChat(characterSession) {
 }
 
 
-async function characterCreationForSessionId(sessionId, userInput=null, optionsMock){
+export async function characterCreationForSessionId(sessionId, userInput=null, optionsMock){
   const previousDiscussionSummary = await getPreviousDiscussionSummary(sessionId)
   const originalFragment = await getFragment(sessionId)
   const texture = await getChosenTexture(sessionId);
@@ -105,6 +120,7 @@ async function characterCreationForSessionId(sessionId, userInput=null, optionsM
 }
 
 
-module.exports = {
-    characterCreationForSessionId
-  };
+// module.exports removed as characterCreationForSessionId is now a named export.
+// module.exports = {
+//     characterCreationForSessionId
+//   };
