@@ -56,6 +56,58 @@ app.use(express.json());
 app.use(cors());
 
 
+function chooseStorytellerMock(sessionId, currentText) {
+  // This could use sessionId and currentText for more advanced logic in the future
+
+  const sessionStorytellers = [
+    {
+      id: "elara-candlelight",
+      display_name: "Elara Candlelight",
+      friend_or_foe: "friend",
+      motive: "She wishes to guide wandering souls, lighting paths through shadowed tales.",
+      style: "Warm, nurturing, quietly lyrical.",
+      signature: "The scent of lavender and the flicker of gentle flames.",
+      appearance: "A graceful woman with fire-bright hair, cloaked in a shawl stitched with constellations.",
+      current_mood: "Encouraging and hopeful.",
+      directive: "Inspire the PC to notice beauty, hope, or comfort, even in the dusk."
+    },
+    {
+      id: "mask-of-crows",
+      display_name: "The Mask of Crows",
+      friend_or_foe: "foe",
+      motive: "He seeks to ensnare the unwary, sowing seeds of doubt and darkness.",
+      style: "Sharp, unsettling, poetic but with a bitter edge.",
+      signature: "A flutter of black feathers and the scent of storm-wet stone.",
+      appearance: "A tall, faceless figure draped in ragged, midnight plumage.",
+      current_mood: "Menacing, quietly mocking.",
+      directive: "Turn the PC’s thoughts toward danger, regret, or uncertainty."
+    },
+    {
+      id: "madame-mirle",
+      display_name: "Madame Mirle",
+      friend_or_foe: "ambiguous",
+      motive: "She yearns for stories to twist and transform—neither helper nor hinderer, but always curious.",
+      style: "Enigmatic, questioning, often playful.",
+      signature: "A silver coin spinning on the typewriter, and a faint, sweet chime.",
+      appearance: "A woman whose eyes reflect shifting colors, her smile always half a secret.",
+      current_mood: "Intrigued, challenging the PC to make a choice.",
+      directive: "Present a crossroads or dilemma, asking the PC to decide what happens next."
+    }
+  ];
+
+  // For now: random selection. Later: factor in sessionId/currentText as needed.
+  const chosenStoryteller = sessionStorytellers[
+    Math.floor(Math.random() * sessionStorytellers.length)
+  ];
+
+  // (Optional: logging)
+  console.log(`[Storyteller Selection] Session: ${sessionId} Text: "${currentText}" — Chosen: ${chosenStoryteller.display_name}`);
+
+  return chosenStoryteller;
+}
+
+
+
 app.use('/assets', express.static(path.join(__dirname, 'assets'))); 
 const PORT = process.env.PORT || 5001;
 
@@ -210,7 +262,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
 
     console.log(`✍️ Typewriter API — Session: ${sessionId} — Message: ${message}`);
 
-    if (TYPEWRITER_MOCK_MODE) {
+    if (1==1) {
       const wordCount = message.trim().split(/\s+/).length;
       let mockAIResponse; // Renamed for clarity to avoid conflict with mockResponse variable if it's in a broader scope
 
@@ -443,27 +495,26 @@ app.post('/api/send_typewriter_text', async (req, res) => {
 
 app.post('/api/shouldGenerateContinuation', async (req, res) => {
   try {
-    const { currentText, latestAddition, latestPauseSeconds } = req.body;
+    const goldenRatio = 1.61;
+    const minWords = 3;
+    const { currentText, latestAddition, latestPauseSeconds, lastGhostwriterWordCount } = req.body;
 
     if (!currentText || !latestAddition || typeof latestPauseSeconds !== 'number') {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
     const wordCount = latestAddition.trim().split(/\s+/).filter(Boolean).length;
+    const goldenThreshold = Math.max(minWords, Math.floor((lastGhostwriterWordCount || 1) / goldenRatio));
+    if (wordCount < goldenThreshold) {
+      console.log(`[shouldGenerate] user wrote ${wordCount}, required ${goldenThreshold} (golden ratio). Blocked.`);
+      return res.status(200).json({ shouldGenerate: false });
+    }
+
     const totalLength = currentText.trim().split(/\s+/).length;
-
-    // Base wait time
     const basePause = 1.8;
-
-    // Longer current text = longer delay
-    const scaleFactor = Math.min(3, totalLength * 0.05); // caps at +3s
-
-    // Bigger additions require more time
-    const additionFactor = Math.min(1.5, wordCount * 0.2); // caps at +1.5s
-
-    // Add random variation (mild unpredictability)
-    const randomness = Math.random() * 0.7 - 0.3; // between -0.3s and +0.4s
-
+    const scaleFactor = Math.min(3, totalLength * 0.05);
+    const additionFactor = Math.min(1.5, wordCount * 0.2);
+    const randomness = Math.random() * 0.7 - 0.3;
     const requiredPause = basePause + scaleFactor + additionFactor + randomness;
 
     const shouldGenerate = latestPauseSeconds > requiredPause;
@@ -476,6 +527,7 @@ app.post('/api/shouldGenerateContinuation', async (req, res) => {
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
 
 
 

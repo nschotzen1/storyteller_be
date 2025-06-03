@@ -2,8 +2,9 @@ import fs from 'fs'; // fs.createWriteStream will remain sync for pipeline, fs.u
 import https from 'https';
 import path from 'path';
 import fetch from 'node-fetch';
-import pkg from 'stability-client';
-const { generateAsync } = pkg;
+
+
+
 import { generate_texture_by_fragment_and_conversation, directExternalApiCall, getOpenaiClient } from '../openai/promptsUtils.js';
 import { developEntityprompt } from '../openai/morePrompts.js';
 import { 
@@ -20,6 +21,9 @@ import {
 import { promisify } from 'util';
 import stream from 'stream'; // Imported stream
 const pipeline = promisify(stream.pipeline); // Used stream.pipeline
+
+import stabilityClient from 'stability-client';
+const { generateAsync } = stabilityClient;
 
 // Define the API options
 const API_TYPES = {
