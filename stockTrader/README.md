@@ -7,7 +7,10 @@ This module implements a configurable stock trading algorithm, a backtesting eng
 -   **`config.js`**: Holds configuration variables, including the Alpha Vantage API key, algorithm parameters (like PHI, sell-off tolerance), and backtesting defaults (like the default stock universe). **This file requires user configuration.**
 -   **`dataFetcher.js`**: Responsible for fetching historical minute-by-minute stock data from the Alpha Vantage API.
 -   **`algorithm.js`**: Contains the `StockTracker` class, which implements the core trading logic. It tracks a single stock, identifies "climbing up" periods, calculates accumulated gain (`x`), and applies the primary sell condition: sell if the price drops from the climb's peak by more than `x / PHI` (where PHI is the golden ratio).
--   **`scanner.js`**: Implements the `findNewStockCandidate` function. It analyzes a list of stocks, fetching their previous month's data, to find a stock that is currently climbing and whose current climb gain is 50% or less than its immediate past climb's gain.
+-   **`scanner.js`**: Implements the `findNewStockCandidate` function. It analyzes a list of stocks by fetching their recent intraday data (latest ~100 1-minute data points). It determines if a stock is a candidate by:
+        1.  Checking if the stock is climbing in the most recent 15-minute window (gain > 0).
+        2.  Verifying that the 15-minute window immediately preceding it was also a climb (its gain > 0).
+        3.  Ensuring the gain in the current 15-minute climb is 50% or less than the gain of the previous 15-minute climb.
 -   **`backtester.js`**: Contains the `runPortfolioBacktest` function. This orchestrates the backtest by:
     -   Fetching data for a universe of stocks over a specified period.
     -   Processing price data chronologically on a unified timeline.
@@ -15,6 +18,7 @@ This module implements a configurable stock trading algorithm, a backtesting eng
     -   When a stock is sold, it uses `scanner.js` to find a new candidate stock.
     -   Records all simulated trades and provides a performance summary.
 -   **`algorithm.test.js`**: Unit tests for the `StockTracker` class.
+-   **`scanner.test.js`**: Unit tests for the `analyzeRecentClimbPattern` function in `scanner.js`.
 
 ## Setup
 

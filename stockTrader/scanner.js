@@ -94,51 +94,146 @@ function analyzeClimbingPattern(intradayData) {
   };
 }
 
+/**
+ * Analyzes recent intraday data for a stock to determine climb patterns
+ * based on the last two 15-minute windows.
+ *
+ * @param {string} symbol - The stock symbol.
+ * @returns {Promise<object|null>} Object with { gain_current_15min, gain_previous_15min, is_currently_climbing, latest_price, error }
+ *                                 Returns null or object with error if analysis cannot be performed.
+ */
+export async function analyzeRecentClimbPattern(symbol) {
+  // Fetch latest 100 data points (1-minute interval)
+  const intradayData = await fetchIntradayData(symbol, null, '1min'); // month=null for latest compact
+
+  if (!intradayData) {
+    // console.warn(`[${symbol}] analyzeRecentClimbPattern: No intraday data returned by fetcher.`);
+    return { error: 'No intraday data returned by fetcher.', gain_current_15min: 0, gain_previous_15min: 0, is_currently_climbing: false, latest_price: null };
+  }
+
+  const sortedTimestamps = Object.keys(intradayData).sort();
+
+  if (sortedTimestamps.length < 30) { // Need at least 30 points for two full 15-min windows and their start/end points
+    // console.warn(`[${symbol}] analyzeRecentClimbPattern: Insufficient data points (${sortedTimestamps.length}). Need at least 30.`);
+    return { error: `Insufficient data points (${sortedTimestamps.length}). Need at least 30.`, gain_current_15min: 0, gain_previous_15min: 0, is_currently_climbing: false, latest_price: null };
+  }
+
+  // Extract closing prices in chronological order (latest price at the end)
+  const prices = sortedTimestamps.map(ts => parseFloat(intradayData[ts]['4. close']));
+
+  if (prices.some(isNaN)) {
+    // console.warn(`[${symbol}] analyzeRecentClimbPattern: Contains NaN prices.`);
+    return { error: 'Data contains NaN prices.', gain_current_15min: 0, gain_previous_15min: 0, is_currently_climbing: false, latest_price: null };
+  }
+
+  // We need prices at T0, T-15, T-30 (approximately, based on 1-minute intervals)
+  // Array is sorted chronologically, so latest price is at prices[prices.length - 1]
+
+  const p_T0 = prices[prices.length - 1];                 // Latest price
+  const p_T_minus_15 = prices[prices.length - 1 - 15];    // Price 15 minutes ago
+  const p_T_minus_30 = prices[prices.length - 1 - 30];    // Price 30 minutes ago
+
+  if (typeof p_T0 === 'undefined' || typeof p_T_minus_15 === 'undefined' || typeof p_T_minus_30 === 'undefined') {
+      // This check is somewhat redundant due to sortedTimestamps.length < 30, but good for safety.
+      // console.warn(`[${symbol}] analyzeRecentClimbPattern: Not enough data points for T0, T-15, T-30 price points after mapping.`);
+      return { error: 'Could not define T0, T-15, T-30 price points.', gain_current_15min: 0, gain_previous_15min: 0, is_currently_climbing: false, latest_price: p_T0 };
+  }
+
+  const gain_current_15min = p_T0 - p_T_minus_15;
+  const gain_previous_15min = p_T_minus_15 - p_T_minus_30;
+  const is_currently_climbing = gain_current_15min > 0;
+
+  return {
+    gain_current_15min,
+    gain_previous_15min,
+    is_currently_climbing,
+    latest_price: p_T0,
+    error: null
+  };
+}
+
 
 /**
- * Scans a list of stocks to find a candidate that is climbing up,
- * with the current climb being NEW_STOCK_CLIMB_PERCENTAGE_MAX or less than its previous period of climbing up.
+ * Scans a list of stocks to find a candidate based on recent 15-minute climb patterns.
+ * The chosen stock should be currently climbing, have had a positive climb in the previous 15-min window,
+ * and its current 15-min climb gain should be no more than NEW_STOCK_CLIMB_PERCENTAGE_MAX
+ * of its previous 15-min climb gain.
  *
- * @param {string[]} stockList - Array of stock symbols to scan.
- * @param {string} [interval='1min'] - The interval for intraday data.
+ * @param {string[]} stockList - Array of stock symbols to scan. Defaults to DEFAULT_STOCK_UNIVERSE.
+ * @param {string} [interval='1min'] - This parameter is currently not directly used by analyzeRecentClimbPattern
+ *                                     as it defaults to '1min' for fetching compact data, but kept for signature consistency.
  * @returns {Promise<string|null>} The symbol of the first matching stock, or null if none found.
  */
 export async function findNewStockCandidate(stockList = DEFAULT_STOCK_UNIVERSE, interval = '1min') {
   if (ALPHA_VANTAGE_API_KEY === 'YOUR_API_KEY_HERE') {
-    console.error('Error: Alpha Vantage API key is not set in stockTrader/config.js for scanner.');
+    console.error('[Scanner] Error: Alpha Vantage API key is not set in stockTrader/config.js.');
     return null;
   }
 
-  const monthToFetch = getPreviousMonthYYYYMM();
-  console.log(`Scanner: Will attempt to fetch data for month ${monthToFetch} for analysis of ${stockList.length} stocks.`);
+  console.log(`[Scanner] Starting scan for new stock candidate from list: [${stockList.join(', ')}]`);
+  let reasonsForNoCandidates = []; // To collect reasons if no stock is found
 
   for (const symbol of stockList) {
-    console.log(`Scanning ${symbol}...`);
-    const intradayData = await fetchIntradayData(symbol, monthToFetch, interval);
+    // console.log(`[Scanner] Evaluating symbol: ${symbol}`);
+    const analysisResult = await analyzeRecentClimbPattern(symbol); // This function fetches its own data
 
-    if (intradayData) {
-      const analysis = analyzeClimbingPattern(intradayData);
-      if (analysis && analysis.pastClimbGain > 0 && analysis.currentClimbGain > 0) {
-        console.log(`Analyzed ${symbol}: Current Gain=${analysis.currentClimbGain.toFixed(2)}, Past Gain=${analysis.pastClimbGain.toFixed(2)}`);
-        if (analysis.currentClimbGain <= (analysis.pastClimbGain * NEW_STOCK_CLIMB_PERCENTAGE_MAX)) {
-          console.log(`SUCCESS: ${symbol} is a candidate! Current climb gain (${analysis.currentClimbGain.toFixed(2)}) is <= ${NEW_STOCK_CLIMB_PERCENTAGE_MAX*100}% of past climb gain (${analysis.pastClimbGain.toFixed(2)}).`);
-          return symbol;
-        }
-      }
-    } else {
-      console.warn(`Scanner: No data fetched for ${symbol} for month ${monthToFetch}.`);
+    if (analysisResult.error) {
+      const reason = `[${symbol}] Analysis error: ${analysisResult.error}`;
+      console.warn(reason);
+      reasonsForNoCandidates.push(reason);
+      // Delay even on error to manage API rate, as an API call was attempted
+      await new Promise(resolve => setTimeout(resolve, 13000));
+      continue;
     }
-    // Alpha Vantage free tier allows 5 calls per minute. Add delay to be safe.
-    // 2 calls per stock (potentially, if we refine data fetching) would be 2 * N calls.
-    // For now, 1 call per stock as we fetch one month.
-    await new Promise(resolve => setTimeout(resolve, 13000)); // Approx 4-5 calls per minute
+
+    const { gain_current_15min, gain_previous_15min, is_currently_climbing, latest_price } = analysisResult;
+    // console.log(`[Scanner] Analysis for ${symbol}: Current15mGain=${gain_current_15min.toFixed(2)}, Prev15mGain=${gain_previous_15min.toFixed(2)}, Climbing=${is_currently_climbing}, LatestPrice=${latest_price}`);
+
+    if (!is_currently_climbing) {
+      const reason = `[${symbol}] Not a candidate: Not climbing in current 15min (gain: ${gain_current_15min.toFixed(2)}). Latest price: ${latest_price !== null ? latest_price.toFixed(2) : 'N/A'}`;
+      console.log(reason);
+      reasonsForNoCandidates.push(reason);
+      await new Promise(resolve => setTimeout(resolve, 13000));
+      continue;
+    }
+
+    if (gain_previous_15min <= 0) {
+      const reason = `[${symbol}] Not a candidate: Previous 15min period was not a climb (gain: ${gain_previous_15min.toFixed(2)}). Current 15m gain: ${gain_current_15min.toFixed(2)}. Latest price: ${latest_price !== null ? latest_price.toFixed(2) : 'N/A'}`;
+      console.log(reason);
+      reasonsForNoCandidates.push(reason);
+      await new Promise(resolve => setTimeout(resolve, 13000));
+      continue;
+    }
+
+    if (gain_current_15min > (gain_previous_15min * NEW_STOCK_CLIMB_PERCENTAGE_MAX)) {
+      const reason = `[${symbol}] Not a candidate: Current 15min climb gain (${gain_current_15min.toFixed(2)}) is > ${NEW_STOCK_CLIMB_PERCENTAGE_MAX * 100}% of previous 15min climb gain (${gain_previous_15min.toFixed(2)}). Latest price: ${latest_price !== null ? latest_price.toFixed(2) : 'N/A'}`;
+      console.log(reason);
+      reasonsForNoCandidates.push(reason);
+      await new Promise(resolve => setTimeout(resolve, 13000));
+      continue;
+    }
+
+    // If all conditions pass
+    console.log(`[Scanner] SUCCESS: ${symbol} IS A CANDIDATE! Current 15m gain: ${gain_current_15min.toFixed(2)}, Previous 15m gain: ${gain_previous_15min.toFixed(2)}. Latest price: ${latest_price !== null ? latest_price.toFixed(2) : 'N/A'}`);
+    return symbol;
+
+    // The delay has been moved inside the loop conditions to ensure it runs after each symbol processing that involves an API call.
   }
 
-  console.log("Scanner: No suitable stock candidate found from the list.");
+  console.log("[Scanner] No suitable candidate found after checking all stocks.");
+  if (reasonsForNoCandidates.length > 0 && reasonsForNoCandidates.length === stockList.length) {
+      console.log("[Scanner] Summary of reasons for no candidates (or errors):");
+      reasonsForNoCandidates.forEach(reason => console.log(reason));
+  } else if (stockList.length === 0) {
+      console.log("[Scanner] Stock list for scanning was empty.");
+  }
   return null;
 }
 
 // --- Example Usage (comment out or remove for integration) ---
+// The example usage would now primarily test findNewStockCandidate with analyzeRecentClimbPattern
+// The old analyzeClimbingPattern and getPreviousMonthYYYYMM are no longer used by findNewStockCandidate.
+// They could be removed if they are not used by any other part of the application.
 /*
 (async () => {
   if (ALPHA_VANTAGE_API_KEY === 'YOUR_API_KEY_HERE') {
