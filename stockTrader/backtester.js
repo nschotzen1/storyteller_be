@@ -1,176 +1,189 @@
-// stockTrader/backtester.js (Modified for portfolio)
+// stockTrader/backtester.js
 import { fetchIntradayData } from './dataFetcher.js';
-import { StockTracker, Signal, StockStatus } from './algorithm.js'; // Assuming StockStatus might be useful for logging/state checking
+import { StockTracker, Signal, StockStatus } from './algorithm.js';
 import { findNewStockCandidate } from './scanner.js';
-import { ALPHA_VANTAGE_API_KEY, DEFAULT_STOCK_UNIVERSE, DEFAULT_HISTORICAL_PERIOD_MONTHS } from './config.js';
+import {
+  ALPHA_VANTAGE_API_KEY,
+  DEFAULT_STOCK_UNIVERSE,
+  DEFAULT_HISTORICAL_PERIOD_MONTHS,
+  ALLOW_LIVE_API_CALLS_FOR_BACKTESTING,
+  TARGET_MONTH_FOR_LOCAL_DATA
+} from './config.js';
 
-/**
- * Helper function to get the year and month string for 'n' months ago from a given date.
- */
+// getYearMonthString might still be needed if ALLOW_LIVE_API_CALLS_FOR_BACKTESTING is true
+// and multi-month live fetching is fully supported. For now, it might be simplified.
 function getYearMonthString(currentDate, monthsAgo) {
   const targetDate = new Date(currentDate);
   targetDate.setMonth(targetDate.getMonth() - monthsAgo);
   const year = targetDate.getFullYear();
-  const month = (targetDate.getMonth() + 1).toString().padStart(2, '0'); // getMonth() is 0-indexed
+  const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
   return `${year}-${month}`;
 }
 
 /**
- * Runs a portfolio backtest, dynamically switching stocks based on sell signals and scanner results.
+ * Runs a portfolio backtest, dynamically switching stocks.
+ * Prioritizes local data for TARGET_MONTH_FOR_LOCAL_DATA if ALLOW_LIVE_API_CALLS_FOR_BACKTESTING is false.
  *
  * @param {string} initialSymbol The starting stock symbol.
- * @param {number} numMonths The number of past months to backtest.
- * @param {string} [endMonthYYYYMM] The most recent month to include in 'YYYY-MM' format. Defaults to the month before current.
- * @param {string[]} [stockUniverse=DEFAULT_STOCK_UNIVERSE] Array of stock symbols to consider for scanning.
- * @param {string} [interval='1min'] The interval for intraday data.
+ * @param {number} numMonths The number of past months (largely ignored if in local-only mode).
+ * @param {string} [endMonthYYYYMM] The most recent month (largely ignored if in local-only mode).
+ * @param {string[]} [stockUniverse=DEFAULT_STOCK_UNIVERSE] Array of stock symbols.
+ * @param {string} [interval='1min'] The interval for intraday data (fixed to '1min' in local-only mode).
  * @returns {Promise<object>} An object containing backtest results.
  */
 export async function runPortfolioBacktest(
   initialSymbol,
-  numMonths = DEFAULT_HISTORICAL_PERIOD_MONTHS,
-  endMonthYYYYMM,
+  numMonths = DEFAULT_HISTORICAL_PERIOD_MONTHS, // Will be largely ignored in local-only mode
+  endMonthYYYYMM, // Will be largely ignored in local-only mode
   stockUniverse = DEFAULT_STOCK_UNIVERSE,
-  interval = '1min'
+  interval = '1min' // Will be fixed to '1min' for local data from TARGET_MONTH
 ) {
-  if (ALPHA_VANTAGE_API_KEY === 'YOUR_API_KEY_HERE') {
-    console.error('Error: Alpha Vantage API key is not set in stockTrader/config.js.');
-    return { trades: [], summary: { error: 'API key not set.' } };
+  // API key check is crucial if live calls might be made
+  if (ALLOW_LIVE_API_CALLS_FOR_BACKTESTING && (ALPHA_VANTAGE_API_KEY === 'YOUR_API_KEY_HERE')) {
+    console.error('[Backtester] Error: Alpha Vantage API key is not set and live API calls are enabled. Set API key or disable live calls.');
+    return { trades: [], summary: { error: 'API key not set for live calls.' } };
   }
 
-  console.log(`Starting PORTFOLIO backtest. Initial: ${initialSymbol}, Universe: [${stockUniverse.join(', ')}], Period: ${numMonths} month(s) ending ${endMonthYYYYMM || 'last available month'}`);
-
-  const allStocksData = {}; // { symbol: { timestamp: ohlcv, ... }, ... }
-  const allUniqueTimestamps = new Set();
+  let effectiveStockUniverse = [...new Set([initialSymbol, ...stockUniverse])];
+  const effectiveInterval = '1min'; // Scanner and local data are based on 1min interval analysis.
   const trades = [];
 
-  const today = new Date();
-  let baseDateForMonthCalc = today;
-  if (endMonthYYYYMM) {
-    const [year, month] = endMonthYYYYMM.split('-').map(Number);
-    baseDateForMonthCalc = new Date(year, month - 1, 15);
+  if (!ALLOW_LIVE_API_CALLS_FOR_BACKTESTING) {
+    console.log(`[Backtester] Running in LOCAL DATA mode for month: ${TARGET_MONTH_FOR_LOCAL_DATA}, interval: ${effectiveInterval}`);
+    console.log(`[Backtester] Universe: [${effectiveStockUniverse.join(', ')}]`);
+  } else {
+    console.log(`[Backtester] Running in LIVE API mode. Initial: ${initialSymbol}, Universe: [${effectiveStockUniverse.join(', ')}], Period: ${numMonths} month(s) ending ${endMonthYYYYMM || 'last available month'}, interval: ${interval}`);
   }
 
-  // 1. Fetch data for ALL stocks in the universe for the entire period
-  console.log("\n--- Phase 1: Fetching all historical data ---");
-  for (const symbol of stockUniverse) {
-    allStocksData[symbol] = {};
-    console.log(`Fetching data for ${symbol}...`);
-    for (let i = numMonths - 1; i >= 0; i--) {
-      let monthToFetch;
-      if (endMonthYYYYMM) {
-        monthToFetch = getYearMonthString(baseDateForMonthCalc, i);
-      } else {
-        monthToFetch = getYearMonthString(new Date(today.getFullYear(), today.getMonth(), 1), i + 1);
-      }
+  const allStocksData = {}; // Structure: { SYMBOL: dataForTargetMonth, ... }
+  const allUniqueTimestamps = new Set();
 
-      // console.log(`  Fetching ${symbol} for month: ${monthToFetch}`);
-      const monthlyData = await fetchIntradayData(symbol, monthToFetch, interval);
-      if (monthlyData) {
-        // console.log(`  Fetched ${Object.keys(monthlyData).length} points for ${symbol} in ${monthToFetch}.`);
-        for (const ts in monthlyData) {
-          allStocksData[symbol][ts] = monthlyData[ts];
-          allUniqueTimestamps.add(ts);
-        }
+  console.log("\n--- Phase 1: Fetching historical data ---");
+  if (!ALLOW_LIVE_API_CALLS_FOR_BACKTESTING) {
+    for (const symbol of effectiveStockUniverse) {
+      const dataForOneMonth = await fetchIntradayData(symbol, TARGET_MONTH_FOR_LOCAL_DATA, effectiveInterval);
+      if (dataForOneMonth && Object.keys(dataForOneMonth).length > 0) {
+        allStocksData[symbol] = dataForOneMonth;
+        Object.keys(dataForOneMonth).forEach(ts => allUniqueTimestamps.add(ts));
+        console.log(`[Backtester] Loaded ${Object.keys(dataForOneMonth).length} local data points for ${symbol} for ${TARGET_MONTH_FOR_LOCAL_DATA}.`);
       } else {
-        // console.warn(`  No data for ${symbol} in ${monthToFetch}.`);
-      }
-      // Delay between API calls for different months of the *same stock* is handled by fetchIntradayData implicitly if needed
-      // However, explicit delay if fetching many symbols * many months
-      if (stockUniverse.length * numMonths > 5) { // Heuristic for many calls
-         await new Promise(resolve => setTimeout(resolve, 12000)); // AlphaVantage free tier: ~5 calls/min
+        console.warn(`[Backtester] No local data found or data empty for ${symbol} for ${TARGET_MONTH_FOR_LOCAL_DATA}. It will be excluded.`);
+        effectiveStockUniverse = effectiveStockUniverse.filter(s => s !== symbol);
       }
     }
-    console.log(`Finished fetching data for ${symbol}. Total points: ${Object.keys(allStocksData[symbol]).length}`);
+  } else {
+    // Simplified live fetching: Focus on a single month period for consistency with allStocksData structure
+    // This means numMonths > 1 or complex endMonthYYYYMM logic for live mode is simplified here.
+    console.warn("[Backtester] Live API data fetching is simplified to target one month period for this refactor (endMonthYYYYMM or TARGET_MONTH_FOR_LOCAL_DATA).");
+    const today = new Date();
+    let monthToFetchLive;
+    if (endMonthYYYYMM) {
+        monthToFetchLive = endMonthYYYYMM;
+    } else {
+        // Default to TARGET_MONTH_FOR_LOCAL_DATA if no specific end month, or a more complex date calc for "last month"
+        // For simplicity, let's use TARGET_MONTH_FOR_LOCAL_DATA as a fallback if endMonthYYYYMM is not set.
+        // A more robust live mode might use getYearMonthString(today, 1) for "last completed month".
+        monthToFetchLive = TARGET_MONTH_FOR_LOCAL_DATA;
+        console.log(`[Backtester] Live mode: endMonthYYYYMM not specified, defaulting to TARGET_MONTH_FOR_LOCAL_DATA (${monthToFetchLive}) for fetching.`);
+    }
+
+    for (let i = 0; i < effectiveStockUniverse.length; i++) {
+      const symbol = effectiveStockUniverse[i];
+      console.log(`[Backtester] Fetching LIVE data for ${symbol}, month ${monthToFetchLive}, interval ${interval}`);
+      const dataForOneMonth = await fetchIntradayData(symbol, monthToFetchLive, interval);
+      if (dataForOneMonth && Object.keys(dataForOneMonth).length > 0) {
+        allStocksData[symbol] = dataForOneMonth;
+        Object.keys(dataForOneMonth).forEach(ts => allUniqueTimestamps.add(ts));
+        console.log(`[Backtester] Fetched ${Object.keys(dataForOneMonth).length} live data points for ${symbol} for ${monthToFetchLive}.`);
+      } else {
+        console.warn(`[Backtester] No live data found or data empty for ${symbol} for ${monthToFetchLive}. It will be excluded.`);
+        effectiveStockUniverse = effectiveStockUniverse.filter(s => s !== symbol);
+        i--; // Adjust index due to removal
+      }
+      // Delay between API calls for different symbols in live mode
+      if (i < effectiveStockUniverse.length - 1 && effectiveStockUniverse.length > 1) {
+         await new Promise(resolve => setTimeout(resolve, 15000)); // Using a fixed 15s delay
+      }
+    }
   }
 
   const sortedGlobalTimeline = Array.from(allUniqueTimestamps).sort();
   if (sortedGlobalTimeline.length === 0) {
-    console.error("No historical data found for any stock in the universe for the specified period.");
-    return { trades: [], summary: { totalPL: 0, tradesCount: 0, error: 'No data found for universe.' } };
+    console.error("[Backtester] No historical data loaded for any stock in the universe. Cannot proceed.");
+    return { trades: [], summary: { totalPL: 0, tradesCount: 0, error: 'No data found for any stock in universe.' } };
   }
-  console.log(`--- Data fetching complete. Unified timeline has ${sortedGlobalTimeline.length} unique timestamps ---`);
+  console.log(`[Backtester] Data fetching complete. Unified timeline has ${sortedGlobalTimeline.length} unique timestamps.`);
 
   // 2. Main Backtesting Loop
   console.log("\n--- Phase 2: Running simulation ---");
+
+  // Ensure initialSymbol has data, otherwise, try to pick first from effectiveStockUniverse
+  if (!allStocksData[initialSymbol] || Object.keys(allStocksData[initialSymbol]).length === 0) {
+    console.warn(`[Backtester] Data for initialSymbol '${initialSymbol}' not found or empty. Attempting to use first available stock from universe.`);
+    initialSymbol = effectiveStockUniverse.find(s => allStocksData[s] && Object.keys(allStocksData[s]).length > 0) || null;
+    if (!initialSymbol) {
+      console.error("[Backtester] No data available for any stock in the universe. Cannot start simulation.");
+      return { trades: [], summary: { totalPL: 0, tradesCount: 0, error: 'No data for any stock to start simulation.'}};
+    }
+    console.log(`[Backtester] New initialSymbol: ${initialSymbol}`);
+  }
+
   let currentSymbol = initialSymbol;
-  let currentTracker = new StockTracker(currentSymbol);
+  let currentTracker = new StockTracker(currentSymbol); // Initialize with the (potentially new) initialSymbol
   let holdingStock = false;
   let buyPrice = 0;
   let buyTimestamp = '';
-  let lastScanTime = 0; // To avoid scanning too frequently if no stock is held
+  // Removed lastScanTime, will attempt scan on every applicable tick if not holding
 
   for (const timestamp of sortedGlobalTimeline) {
-    const currentTickDataForSymbol = currentSymbol ? allStocksData[currentSymbol]?.[timestamp] : null;
+    const tickDataForCurrentSymbol = currentSymbol ? allStocksData[currentSymbol]?.[timestamp] : null;
 
     if (!holdingStock) {
-      if (currentSymbol && currentTickDataForSymbol) {
-        // Attempt to buy currentSymbol
-        buyPrice = parseFloat(currentTickDataForSymbol['4. close']);
+      if (currentSymbol && tickDataForCurrentSymbol) {
+        buyPrice = parseFloat(tickDataForCurrentSymbol['4. close']);
         if (isNaN(buyPrice)) {
-            console.warn(`[${currentSymbol}@${timestamp}] Invalid buy price: ${currentTickDataForSymbol['4. close']}. Skipping buy.`);
-            continue;
+          console.warn(`[${currentSymbol}@${timestamp}] Invalid buy price: ${tickDataForCurrentSymbol['4. close']}. Skipping buy.`);
+          continue;
         }
         buyTimestamp = timestamp;
         holdingStock = true;
-        // currentTracker should be already initialized for currentSymbol (either initial or after scan)
         console.log(`[${currentSymbol}@${timestamp}] --- Portfolio BUY at ${buyPrice} ---`);
-        currentTracker.processMinuteData({ ...currentTickDataForSymbol, timestamp, close: buyPrice }); // Process this tick to start climb
+        currentTracker.processMinuteData({ ...tickDataForCurrentSymbol, timestamp, close: buyPrice });
       } else if (!currentSymbol) {
-        // No current symbol to trade, try to scan periodically
-        const now = Date.now(); // Using system time for scan frequency, not backtest time
-        if (now - lastScanTime > 60000) { // Scan at most once per minute (of real time) to find a new stock
-            console.log(`[Timeline@${timestamp}] Currently not holding. Scanning for new stock...`);
-            // Ensure stockUniverse is not empty and filters out potential nulls if any were added
-            const candidateUniverse = stockUniverse.filter(s => s && typeof s === 'string');
-            if (candidateUniverse.length === 0) {
-                console.log(`[Timeline@${timestamp}] No valid stock universe to scan from.`);
-                lastScanTime = now; // Update scan time even if universe is empty
-                continue;
-            }
-            const newCandidate = await findNewStockCandidate(candidateUniverse);
-            if (newCandidate) {
-                console.log(`[Timeline@${timestamp}] Scanner found new candidate: ${newCandidate}`);
-                currentSymbol = newCandidate;
-                currentTracker = new StockTracker(currentSymbol); // Prepare for next buy opportunity
-            } else {
-                console.log(`[Timeline@${timestamp}] Scanner found no new candidate. Will remain without a stock.`);
-                currentSymbol = null; // Explicitly stay null
-            }
-            lastScanTime = now;
+        // Not holding and no current symbol, try to find one
+        // console.log(`[Timeline@${timestamp}] Currently not holding. Scanning for new stock...`);
+        const candidateUniverse = effectiveStockUniverse.filter(s => s && typeof s === 'string');
+        if (candidateUniverse.length > 0) {
+          const newCandidate = findNewStockCandidate(candidateUniverse, allStocksData); // Pass allStocksData
+          if (newCandidate) {
+            console.log(`[Timeline@${timestamp}] Scanner found new candidate: ${newCandidate}. Will attempt to buy on next tick.`);
+            currentSymbol = newCandidate;
+            currentTracker = new StockTracker(currentSymbol);
+          } else {
+            // console.log(`[Timeline@${timestamp}] Scanner found no new candidate. Will remain without a stock for this tick.`);
+            currentSymbol = null; // Explicitly stay null
+          }
+        } else {
+            // console.log(`[Timeline@${timestamp}] No valid stock universe to scan from.`);
         }
       }
-      // If currentSymbol is set but no data for it at this specific global timestamp, just wait for its data.
     } else { // Holding stock
-      if (!currentTickDataForSymbol) {
-        // Data gap for the currently held stock on the global timeline.
+      if (!tickDataForCurrentSymbol) {
         // console.warn(`[${currentSymbol}@${timestamp}] Data gap for held stock. Holding.`);
         continue;
       }
-
-      const tickPrice = parseFloat(currentTickDataForSymbol['4. close']);
-       if (isNaN(tickPrice)) {
-            console.warn(`[${currentSymbol}@${timestamp}] Invalid tick price in held stock: ${currentTickDataForSymbol['4. close']}. Holding.`);
-            // Consider how StockTracker handles this. It might need previousPrice to be set.
-            // For now, the tracker's own NaN check should handle it.
-            // currentTracker.previousPrice = tickPrice; // Potentially problematic if tracker expects valid previous.
-            // Let's rely on tracker's internal handling for now.
-            const signal = currentTracker.processMinuteData({ ...currentTickDataForSymbol, timestamp, close: tickPrice }); // it will return HOLD
-            continue;
-        }
-
-      const signal = currentTracker.processMinuteData({ ...currentTickDataForSymbol, timestamp, close: tickPrice });
+      const tickPrice = parseFloat(tickDataForCurrentSymbol['4. close']);
+      if (isNaN(tickPrice)) {
+        console.warn(`[${currentSymbol}@${timestamp}] Invalid tick price in held stock: ${tickDataForCurrentSymbol['4. close']}. Holding.`);
+        currentTracker.processMinuteData({ ...tickDataForCurrentSymbol, timestamp, close: tickPrice }); // Let tracker handle it
+        continue;
+      }
+      const signal = currentTracker.processMinuteData({ ...tickDataForCurrentSymbol, timestamp, close: tickPrice });
 
       if (signal === Signal.SELL) {
         const sellPrice = tickPrice;
         const profitOrLoss = sellPrice - buyPrice;
-        trades.push({
-          symbol: currentSymbol,
-          buyTimestamp,
-          buyPrice,
-          sellTimestamp: timestamp,
-          sellPrice,
-          profitOrLoss,
-        });
+        trades.push({ symbol: currentSymbol, buyTimestamp, buyPrice, sellTimestamp: timestamp, sellPrice, profitOrLoss });
         console.log(`[${currentSymbol}@${timestamp}] --- Portfolio SELL at ${sellPrice} --- P&L: ${profitOrLoss.toFixed(2)}`);
 
         const soldSymbol = currentSymbol;
@@ -181,31 +194,31 @@ export async function runPortfolioBacktest(
         buyTimestamp = '';
 
         console.log(`[Timeline@${timestamp}] Sold ${soldSymbol}. Scanning for new stock (excluding ${soldSymbol})...`);
-        const candidateUniverse = stockUniverse.filter(s => s && typeof s === 'string' && s !== soldSymbol);
+        const candidateUniverse = effectiveStockUniverse.filter(s => s && typeof s === 'string' && s !== soldSymbol);
         if (candidateUniverse.length === 0) {
-            console.log(`[Timeline@${timestamp}] No valid stock universe to scan from after selling ${soldSymbol}.`);
-            lastScanTime = Date.now(); // Update scan time
-            currentSymbol = null; // Ensure it stays null
-            continue;
-        }
-        const newCandidate = await findNewStockCandidate(candidateUniverse);
-        if (newCandidate) {
-          console.log(`[Timeline@${timestamp}] Scanner found new candidate: ${newCandidate}`);
-          currentSymbol = newCandidate;
-          currentTracker = new StockTracker(currentSymbol);
+          console.log(`[Timeline@${timestamp}] No valid stock universe to scan from after selling ${soldSymbol}.`);
+          currentSymbol = null;
         } else {
-          console.log(`[Timeline@${timestamp}] Scanner found no new candidate after selling ${soldSymbol}. Will wait.`);
-          currentSymbol = null; // No stock to track now
+          const newCandidate = findNewStockCandidate(candidateUniverse, allStocksData); // Pass allStocksData
+          if (newCandidate) {
+            console.log(`[Timeline@${timestamp}] Scanner found new candidate: ${newCandidate}. Will attempt to buy on next tick.`);
+            currentSymbol = newCandidate;
+            currentTracker = new StockTracker(currentSymbol);
+          } else {
+            console.log(`[Timeline@${timestamp}] Scanner found no new candidate after selling ${soldSymbol}. Will wait.`);
+            currentSymbol = null;
+          }
         }
-        lastScanTime = Date.now();
       }
     }
   }
 
   const totalPL = trades.reduce((sum, trade) => sum + trade.profitOrLoss, 0);
   const summary = {
-    initialSymbol,
-    stockUniverse: stockUniverse.join(', '),
+    mode: ALLOW_LIVE_API_CALLS_FOR_BACKTESTING ? 'Live API' : 'Local Data',
+    testedMonth: ALLOW_LIVE_API_CALLS_FOR_BACKTESTING ? (endMonthYYYYMM || TARGET_MONTH_FOR_LOCAL_DATA) : TARGET_MONTH_FOR_LOCAL_DATA,
+    initialSymbol: initialSymbol, // This might have changed if original initialSymbol had no data
+    stockUniverse: effectiveStockUniverse.join(', '),
     totalPL: parseFloat(totalPL.toFixed(2)),
     tradesCount: trades.length,
     dataPointsInTimeline: sortedGlobalTimeline.length,

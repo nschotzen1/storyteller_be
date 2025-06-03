@@ -14,6 +14,11 @@ export const DEFAULT_STOCK_UNIVERSE = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA'];
 // API Configuration
 export const ALPHA_VANTAGE_BASE_URL = 'https://www.alphavantage.co/query';
 
+// Local Data Testing Configuration
+export const TARGET_MONTH_FOR_LOCAL_DATA = '2023-05'; // Target month for local data seeding and testing
+export const TARGET_STOCKS_FOR_LOCAL_DATA = ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'TSLA']; // Target stocks for local data
+export const ALLOW_LIVE_API_CALLS_FOR_BACKTESTING = false; // Set to true to allow fallback to live API if local data not found
+
 // It's good practice to inform the user if the API key is missing.
 if (ALPHA_VANTAGE_API_KEY === 'YOUR_API_KEY_HERE') {
   console.warn("ALPHA_VANTAGE_API_KEY is not set in stockTrader/config.js. Please obtain a free API key from https://www.alphavantage.co/support/#api-key and update the config file.");
