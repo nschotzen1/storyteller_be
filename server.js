@@ -1,4 +1,3 @@
-
 import express from 'express';
 import cors from 'cors';
 import { promises as fs } from 'fs';
@@ -37,6 +36,10 @@ import {
     developEntity, // Added for developEntityPostHandler
     generateTextureOptionsByText // Added for generateTexturesPostHandler
 } from './ai/textToImage/api.js';
+
+// Stock Trader imports
+import { runPortfolioBacktest } from './stockTrader/backtester.js';
+import { DEFAULT_STOCK_UNIVERSE, DEFAULT_HISTORICAL_PERIOD_MONTHS } from './stockTrader/config.js';
 
 
 // Configuration from environment variables
@@ -915,6 +918,70 @@ const dynamicPrefixesPostHandler = async (req, res) => {
 // Add new POST routes for texture generation and prefixes
 app.post('/api/generateTextures', generateTexturesPostHandler);
 app.post('/api/prefixes', dynamicPrefixesPostHandler);
+
+// --- Stock Trader Backtest Route ---
+app.get('/backtest/portfolio', async (req, res) => {
+  try {
+    const {
+      initialSymbol,
+      numMonths: numMonthsStr,
+      endMonthYYYYMM,
+      stockUniverse: stockUniverseStr,
+      interval: intervalStr
+    } = req.query;
+
+    if (!initialSymbol) {
+      return res.status(400).json({ error: 'Missing required query parameter: initialSymbol' });
+    }
+
+    const numMonths = numMonthsStr ? parseInt(numMonthsStr, 10) : DEFAULT_HISTORICAL_PERIOD_MONTHS;
+    if (isNaN(numMonths) || numMonths <= 0) {
+      return res.status(400).json({ error: 'Invalid numMonths parameter. Must be a positive integer.' });
+    }
+
+    const stockUniverse = stockUniverseStr
+      ? stockUniverseStr.split(',').map(s => s.trim()).filter(s => s)
+      : DEFAULT_STOCK_UNIVERSE;
+    if (!Array.isArray(stockUniverse) || stockUniverse.length === 0) {
+        return res.status(400).json({ error: 'stockUniverse must be a non-empty array or provide a valid comma-separated string.' });
+    }
+
+    let effectiveStockUniverse = [...new Set(stockUniverse)]; // Use Set to remove duplicates then spread to array
+    if (!effectiveStockUniverse.includes(initialSymbol)) {
+        effectiveStockUniverse.push(initialSymbol);
+    }
+
+
+    const interval = intervalStr || '1min';
+    const validIntervals = ['1min', '5min', '15min', '30min', '60min'];
+    if (!validIntervals.includes(interval)) {
+        return res.status(400).json({ error: `Invalid interval. Must be one of: ${validIntervals.join(', ')}` });
+    }
+
+    console.log(`Received /backtest/portfolio request: initialSymbol=${initialSymbol}, numMonths=${numMonths}, endMonth=${endMonthYYYYMM || 'not set'}, universe=[${effectiveStockUniverse.join(',')}], interval=${interval}`);
+
+    const results = await runPortfolioBacktest(
+      initialSymbol,
+      numMonths,
+      endMonthYYYYMM, // This can be undefined
+      effectiveStockUniverse,
+      interval
+    );
+
+    if (results && results.summary && results.summary.error) {
+      // Specific error from backtester (e.g. API key missing, no data)
+      const statusCode = results.summary.error.toLowerCase().includes("api key") ? 401 : 400;
+      return res.status(statusCode).json({ error: results.summary.error, details: results });
+    }
+
+    return res.status(200).json(results);
+
+  } catch (error) {
+    console.error('Error in /backtest/portfolio route:', error);
+    // Catch unexpected errors from runPortfolioBacktest or other issues
+    return res.status(500).json({ error: 'Internal Server Error while running backtest.', details: error.message });
+  }
+});
 
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
