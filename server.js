@@ -215,70 +215,89 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       if (wordCount <= 5) {
         // Short addition
         mockResponse = {
-                writing_sequence: [
-                  { action: 'type', text: 'It was almost', delay: 0 },
-                  { action: 'pause', delay: 4000 },
-                  { action: 'type', text: ' night', delay: 0 },
-                  { action: 'pause', delay: 6000 },
-                  { action: 'type', text: ' as the band finally', delay: 0 },
-                  { action: 'pause', delay: 8000 },
-                  { action: 'type', text: ' approached', delay: 0 },
-                  { action: 'pause', delay: 5000 },
-                  { action: 'type', text: ' what seemed to be like', delay: 0 },
-                  { action: 'pause', delay: 9000 },
-                  { action: 'type', text: ' a broken Ter', delay: 0 },
-                  { action: 'pause', delay: 3000 },
-                  { action: 'type', text: 'ra', delay: 0 },
-                  { action: 'delete', count: 1, delay: 500 },   // deletes 'a' in 'Tera'
-                  { action: 'retype', text: 'a', delay: 0 },    // retypes 'a', hesitation
-                  { action: 'type', text: 'ce.', delay: 0 },
-                  { action: 'pause', delay: 16000 },
-                  // Fade-out steps
-                  { action: 'fade', phase: 1, to_text: 'It was night. The band approached a terrace.', delay: 2000 },
-                  { action: 'fade', phase: 2, to_text: 'Night. They arrived.', delay: 1800 },
-                  { action: 'fade', phase: 3, to_text: 'A band. Night.', delay: 1200 },
-                  { action: 'fade', phase: 4, to_text: '', delay: 900 }
-                ],
-                metadata: {
-                  font: "'Uncial Antiqua', serif",
-                  font_size: "1.8rem",
-                  font_color: "#3b1d15"
-                }
-              }
-
+          writing_sequence: [
+            { action: 'type', thoughtProcess: 'Initial thought for typing', existing_fragment: message, continuation: 'It was almost', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 4000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' night', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 6000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' as the band finally', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 8000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' approached', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 5000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' what seemed to be like', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 9000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' a broken Ter', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 3000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: 'ra', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'delete', thoughtProcess: 'Correcting a detail', existing_fragment: "Previously typed text...", continuation: "", count: 1, string_to_delete: "a", delay: 500, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: 'a', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } }, // retype 'a'
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: 'ce.', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 16000 }
+          ],
+          fade_sequence: [
+            { action: 'fade', phase: 1, thoughtProcess: 'Exploring fade option 1: Simple statement of arrival', existing_fragment: message, continuation: 'It was simply night. The band found a terrace.', delay: 2000, style: { fontName: "'Times New Roman', serif", fontSize: 1.0, fontColor: "#000000" } },
+            { action: 'fade', phase: 2, thoughtProcess: 'Exploring fade option 2: Slightly more descriptive', existing_fragment: message, continuation: 'Darkness fell. They reached a structure with a view.', delay: 1800, style: { fontName: "'Courier New', monospace", fontSize: 0.9, fontColor: "#111111" } },
+            { action: 'fade', phase: 3, thoughtProcess: 'Exploring fade option 3: Focus on weariness and discovery', existing_fragment: message, continuation: 'The moon rose. A weary group stumbled upon a stone patio.', delay: 1200, style: { fontName: "'Arial', sans-serif", fontSize: 1.1, fontColor: "#222222" } },
+            { action: 'fade', phase: 4, thoughtProcess: 'Exploring fade option 4: Concise and direct', existing_fragment: message, continuation: 'Night claimed the sky. Shelter was found on an open veranda.', delay: 900, style: { fontName: "'Verdana', sans-serif", fontSize: 0.8, fontColor: "#333333" } }
+          ],
+          metadata: {
+            font: "'Uncial Antiqua', serif",
+            font_size: 1.8,
+            font_color: "#3b1d15"
+          }
+        };
       } else if (wordCount <= 12) {
         // Medium addition
         mockResponse = {
-        writing_sequence: [
-          { action: 'type', text: 'She clutched her amulet to her coat.', delay: 0 },
-          { action: 'pause', delay: 5000 },
-          { action: 'type', text: ' As the horses carrying her carriage gal', delay: 0 },
-          { action: 'pause', delay: 6000 },
-          { action: 'type', text: 'lo', delay: 0 },
-          { action: 'delete', count: 2, delay: 300 }, // deletes 'lo' (as if typo)
-          { action: 'retype', text: 'lop', delay: 0 }, // corrects to 'lop'
-          { action: 'type', text: 'ped through the front gate', delay: 0 },
-          { action: 'pause', delay: 8000 },
-          // Fade-out steps
-          { action: 'fade', phase: 1, to_text: 'She clutched the amulet as the carriage entered the gate.', delay: 2000 },
-          { action: 'fade', phase: 2, to_text: 'Amulet. Horses. Gate.', delay: 1800 },
-          { action: 'fade', phase: 3, to_text: 'Night. Movement.', delay: 1200 },
-          { action: 'fade', phase: 4, to_text: '', delay: 900 }
-        ],
-        metadata: {
-          font: "'Uncial Antiqua', serif",
-          font_size: "1.8rem",
-          font_color: "#3b1d15"
-        }
-      }
+          writing_sequence: [
+            { action: 'type', thoughtProcess: 'Initial thought for typing', existing_fragment: message, continuation: 'She clutched her amulet to her coat.', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 5000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' As the horses carrying her carriage gal', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 6000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: 'lo', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'delete', thoughtProcess: 'Correcting a detail', existing_fragment: "Previously typed text...", continuation: "", count: 2, string_to_delete: "lo", delay: 300, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: 'lop', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } }, // retype 'lop'
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: 'ped through the front gate', delay: 0, style: { fontName: "'Uncial Antiqua', serif", fontSize: 1.8, fontColor: "#3b1d15" } },
+            { action: 'pause', delay: 8000 }
+          ],
+          fade_sequence: [
+            { action: 'fade', phase: 1, thoughtProcess: 'Exploring fade option 1: Direct action', existing_fragment: message, continuation: 'Clutching her amulet, she rode through the gates.', delay: 2000, style: { fontName: "'Times New Roman', serif", fontSize: 1.0, fontColor: "#000000" } },
+            { action: 'fade', phase: 2, thoughtProcess: 'Exploring fade option 2: Focus on movement', existing_fragment: message, continuation: 'The horses galloped, bringing her safely within the estate.', delay: 1800, style: { fontName: "'Courier New', monospace", fontSize: 0.9, fontColor: "#111111" } },
+            { action: 'fade', phase: 3, thoughtProcess: 'Exploring fade option 3: Sensory detail', existing_fragment: message, continuation: 'Her amulet felt cold as the carriage passed the entrance.', delay: 1200, style: { fontName: "'Arial', sans-serif", fontSize: 1.1, fontColor: "#222222" } },
+            { action: 'fade', phase: 4, thoughtProcess: 'Exploring fade option 4: Imposing imagery', existing_fragment: message, continuation: 'Through the imposing gates, her journey continued.', delay: 900, style: { fontName: "'Verdana', sans-serif", fontSize: 0.8, fontColor: "#333333" } }
+          ],
+          metadata: {
+            font: "'Uncial Antiqua', serif",
+            font_size: 1.8,
+            font_color: "#3b1d15"
+          }
+        };
       } else {
-        // Long addition
+        // Long addition - restructured
         mockResponse = {
-          content: "But the words you wrote had already been written — long ago, by another hand. It had only waited for your ink to remember.",
-          font: "'EB Garamond', serif",
-          font_size: "2.0rem",
-          font_color: "#1f0e08",
-          time_to_fade: 18
+          writing_sequence: [
+            { action: 'type', thoughtProcess: 'Initial thought for typing', existing_fragment: message, continuation: 'But the words you wrote', delay: 0, style: { fontName: "'EB Garamond', serif", fontSize: 2.0, fontColor: "#1f0e08" } },
+            { action: 'pause', delay: 2000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' had already been written — long ago,', delay: 0, style: { fontName: "'EB Garamond', serif", fontSize: 2.0, fontColor: "#1f0e08" } },
+            { action: 'pause', delay: 3000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' by another hand.', delay: 0, style: { fontName: "'EB Garamond', serif", fontSize: 2.0, fontColor: "#1f0e08" } },
+            { action: 'pause', delay: 2000 },
+            { action: 'delete', thoughtProcess: 'Correcting a detail', existing_fragment: "Previously typed text...", continuation: "", count: 5, string_to_delete: " hand", delay: 500, style: { fontName: "'EB Garamond', serif", fontSize: 2.0, fontColor: "#1f0e08" } },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' voice.', delay: 0, style: { fontName: "'EB Garamond', serif", fontSize: 2.0, fontColor: "#1f0e08" } },
+            { action: 'pause', delay: 4000 },
+            { action: 'type', thoughtProcess: 'Adding more to the narrative', existing_fragment: "Previously typed text...", continuation: ' It had only waited for your ink to remember.', delay: 0, style: { fontName: "'EB Garamond', serif", fontSize: 2.0, fontColor: "#1f0e08" } }
+          ],
+          fade_sequence: [
+            { action: 'fade', phase: 1, thoughtProcess: 'Exploring fade option 1: Warning and location', existing_fragment: message, continuation: "'Do not go near the ravine tonight,' he warned, looking towards the Yunata.", delay: 2000, style: { fontName: "'Times New Roman', serif", fontSize: 1.0, fontColor: "#000000" } },
+            { action: 'fade', phase: 2, thoughtProcess: 'Exploring fade option 2: Focus on advice and gaze', existing_fragment: message, continuation: "He advised them to stay, his eyes fixed on the dark ravine.", delay: 1800, style: { fontName: "'Courier New', monospace", fontSize: 0.9, fontColor: "#111111" } },
+            { action: 'fade', phase: 3, thoughtProcess: 'Exploring fade option 3: Clear danger', existing_fragment: message, continuation: "The warning was clear: The Yunata Ravine was perilous after dark.", delay: 1200, style: { fontName: "'Arial', sans-serif", fontSize: 1.1, fontColor: "#222222" } },
+            { action: 'fade', phase: 4, thoughtProcess: 'Exploring fade option 4: Firm statement', existing_fragment: message, continuation: "'The ravine is treacherous. Wait for morning,' he stated firmly.", delay: 900, style: { fontName: "'Verdana', sans-serif", fontSize: 0.8, fontColor: "#333333" } }
+          ],
+          metadata: {
+            font: "'EB Garamond', serif",
+            font_size: 2.0,
+            font_color: "#1f0e08"
+          }
         };
       }
 
@@ -304,7 +323,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     } else {
       let aiResponse;
       try {
-        const prompt = generateTypewriterPrompt(message);
+        const prompt = generateTypewriterPrompt(message, 50, 4);
         aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true);
         
         // Save fragments
