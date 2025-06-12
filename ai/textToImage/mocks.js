@@ -65,11 +65,71 @@ const optionsMock = {
 
     const mockedTextureOptionsPrompts = [{prompt: 'texturePrompt1', font: 'font1'}, {prompt: 'texturePrompt2', font: 'font2'},{prompt: 'texturePrompt3', font: 'font3'},{prompt: 'texturePrompt4', font: 'font4'}]
 
+const mockGenerateTexturesResponse = {
+  cards: [
+    {
+      url: {
+        revised_prompt: "Example revised prompt for image generation.",
+        url: "https://example.com/image.png", // Placeholder image URL
+        localPath: "/path/to/local/image.png" // Placeholder local path
+      },
+      entity: {
+        name: "Example Entity Name",
+        ner_type: "Example NER Type",
+        ner_subtype: "Example NER Subtype",
+        description: "Detailed description of the example entity.",
+        relevance: "Relevance of this entity to the story or context.",
+        evolution_notes: "Notes on how this entity might evolve or change.",
+        connections: [
+          { entity: "Another Entity", type: "connection_type" }
+        ]
+      },
+      selectedTexture: {
+        prompt: "Example texture prompt.",
+        font: "Example Font",
+        card_material: "Example Card Material",
+        major_cultural_influences_references: ["Influence 1", "Influence 2"],
+        localPath: "/path/to/local/texture.png", // Placeholder local path for texture
+        id: 0, // Example ID
+        text_for_entity: "Example Entity Name" // Should match entity.name
+      }
+    },
+    {
+      url: {
+        revised_prompt: "Second example revised prompt for image generation.",
+        url: "https://example.com/image2.png", // Placeholder image URL
+        localPath: "/path/to/local/image2.png" // Placeholder local path
+      },
+      entity: {
+        name: "Second Example Entity Name",
+        ner_type: "Second Example NER Type",
+        ner_subtype: "Second Example NER Subtype",
+        description: "Detailed description of the second example entity.",
+        relevance: "Relevance of this second entity to the story or context.",
+        evolution_notes: "Notes on how this second entity might evolve or change.",
+        connections: [
+          { entity: "Third Entity", type: "another_connection_type" }
+        ]
+      },
+      selectedTexture: {
+        prompt: "Second example texture prompt.",
+        font: "Second Example Font",
+        card_material: "Second Example Card Material",
+        major_cultural_influences_references: ["Influence 3", "Influence 4"],
+        localPath: "/path/to/local/texture2.png", // Placeholder local path for texture
+        id: 1, // Example ID
+        text_for_entity: "Second Example Entity Name" // Should match entity.name
+      }
+    }
+  ]
+};
+
     module.exports = {
         optionsMock,
         fragment,
         userResponses,
         mockedStorytellerResponses,
-        mockedTextureOptionsPrompts
+        mockedTextureOptionsPrompts,
+        mockGenerateTexturesResponse
     };
     
