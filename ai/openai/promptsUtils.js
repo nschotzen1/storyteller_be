@@ -2739,39 +2739,152 @@ export async function directExternalApiCall(prompts, max_tokens = 2500, temperat
 
 // Removed module.exports as functions are now exported individually using 'export'.
 
-export function generateTypewriterPrompt(userMessage) {
-    const systemMessage = `You are a mysterious, sentient typewriter. The user is typing a message on you.
-Your response should be a short, evocative continuation or reflection, as if the typewriter itself is imbuing the words with deeper meaning or a sense of foreboding.
-You MUST reply with a JSON object containing the following fields:
-- "content": Your textual response (string).
-- "font": The font family for the display (string, e.g., "'EB Garamond', serif", "'Uncial Antiqua', serif", "'IM Fell English SC', serif"). You can choose one of these or invent a plausible one.
-- "font_size": The font size for the display (string, e.g., "1.8rem", "1.9rem", "2.0rem").
-- "font_color": The font color for the display (string hex code, e.g., "#3b1d15", "#2a120f", "#1f0e08").
-- "time_to_fade": The time in seconds for the text to fade (number, e.g., 7, 12, 18).
+export function generateTypewriterPrompt(existing_text) {
+    const systemMessage = `You are a narrative composer.
+Given these parameters:
 
-For example:
+$existing_text: The narrative fragment to continue.
+
+$desired_length: Target word count for the main continuation.
+
+$number_of_fades: Number of alternate fades (default 4, can be 5).
+
+Task:
+Compose a detailed, step-by-step writing_sequence (including type, pause, delete) to build a vivid, "expensive" continuation of $existing_text close to $desired_length words.
+Then, generate $number_of_fades distinct fade_sequence entries—each a standalone alternate continuation in a new style, logic, and mood, as if from a different storyteller.
+For each action (including deletes), begin with a concrete, internal thoughtProcess—your reasoning, as if talking to yourself.
+Always include existing_fragment and continuation for context.
+
+Return valid JSON. Here’s a full example for:
+
+$existing_text: "They slowly walked on "
+
+$desired_length: 18
+
+$number_of_fades: 5
+
+json
 {
-  "content": "The ink remembers other words, other hands...",
-  "font": "'IM Fell English SC', serif",
-  "font_size": "1.9rem",
-  "font_color": "#2a120f",
-  "time_to_fade": 12
+  "writing_sequence": [
+    {
+      "action": "type",
+      "thoughtProcess": "Scout for a literal, spatially meaningful 'on'—start with a ledge, amplify risk and material detail.",
+      "existing_fragment": "They slowly walked on ",
+      "continuation": "the narrow ledge, soles grinding flakes of limestone into the drop below.",
+      "delay": 0,
+      "style": { "fontName": "Merriweather", "fontSize": 17, "fontColor": "#1D1D1D" }
+    },
+    {
+      "action": "pause",
+      "delay": 300
+    },
+    {
+      "action": "type",
+      "thoughtProcess": "Add a bodily response: how does the ledge shape posture and breath? Make the world press against the character.",
+      "existing_fragment": "They slowly walked on the narrow ledge, soles grinding flakes of limestone into the drop below.",
+      "continuation": " The wind pressed their jackets flat, and each breath tasted of chalk and fear.",
+      "delay": 0,
+      "style": { "fontName": "Merriweather", "fontSize": 17, "fontColor": "#1D1D1D" }
+    },
+    {
+      "action": "pause",
+      "delay": 220
+    },
+    {
+      "action": "delete",
+      "thoughtProcess": "Remove 'and fear.' Favor physical manifestation over naming emotion.",
+      "existing_fragment": "They slowly walked on the narrow ledge, soles grinding flakes of limestone into the drop below. The wind pressed their jackets flat, and each breath tasted of chalk and fear.",
+      "continuation": "",
+      "count": 10,
+      "string_to_delete": " and fear.",
+      "delay": 350
+    },
+    {
+      "action": "type",
+      "thoughtProcess": "Replace with a more tactile detail—fear in the hands, not in a word.",
+      "existing_fragment": "They slowly walked on the narrow ledge, soles grinding flakes of limestone into the drop below. The wind pressed their jackets flat, and each breath tasted of chalk",
+      "continuation": ". Fingers curled white around the rock.",
+      "delay": 0,
+      "style": { "fontName": "Merriweather", "fontSize": 17, "fontColor": "#1D1D1D" }
+    }
+  ],
+  "fade_sequence": [
+    {
+      "action": "fade",
+      "phase": 1,
+      "thoughtProcess": "Reimagine 'on' as wire—literal danger, risk of falling. Short, kinetic.",
+      "existing_fragment": "They slowly walked on ",
+      "continuation": "the old wire strung between rooftops, arms wide for balance.",
+      "delay": 600,
+      "style": { "fontName": "Playfair Display", "fontSize": 16, "fontColor": "#2D3436" }
+    },
+    {
+      "action": "fade",
+      "phase": 2,
+      "thoughtProcess": "Cold, unstable: now the walk is on ice. Emphasize slipping, the threat beneath.",
+      "existing_fragment": "They slowly walked on ",
+      "continuation": "ice slick and cracking, boots slipping with each step.",
+      "delay": 500,
+      "style": { "fontName": "Amiri", "fontSize": 15, "fontColor": "#5E3023" }
+    },
+    {
+      "action": "fade",
+      "phase": 3,
+      "thoughtProcess": "Make it bodily—walk on a companion’s back. Show weight, strain, shared risk.",
+      "existing_fragment": "They slowly walked on ",
+      "continuation": "his broad shoulders, legs trembling with every uneven stone.",
+      "delay": 400,
+      "style": { "fontName": "Roboto", "fontSize": 14, "fontColor": "#3B3B3B" }
+    },
+    {
+      "action": "fade",
+      "phase": 4,
+      "thoughtProcess": "Border logic: make 'on' a threshold, dividing light and shadow.",
+      "existing_fragment": "They slowly walked on ",
+      "continuation": "the threshold, one foot in sun, one in dusk.",
+      "delay": 300,
+      "style": { "fontName": "JetBrains Mono", "fontSize": 13, "fontColor": "#484848" }
+    },
+    {
+      "action": "fade",
+      "phase": 5,
+      "thoughtProcess": "Minimal. Just the most concrete, physical 'on.'",
+      "existing_fragment": "They slowly walked on ",
+      "continuation": "gravel.",
+      "delay": 200,
+      "style": { "fontName": "JetBrains Mono", "fontSize": 13, "fontColor": "#484848" }
+    }
+  ],
+  "metadata": {
+    "font": "'Merriweather', serif",
+    "font_size": 17,
+    "font_color": "#1D1D1D"
+  }
 }
+Key points (brief, for model or user):
 
-Another example:
-{
-  "content": "Yes. That’s where it begins.",
-  "font": "'Uncial Antiqua', serif",
-  "font_size": "1.8rem",
-  "font_color": "#3b1d15",
-  "time_to_fade": 7
-}
+All actions begin with a literal, tactical thoughtProcess (model's reasoning, not just a label).
 
-Ensure your response is always a valid JSON object with these exact fields.`;
+Each fade is a standalone alternate route, new style and logic.
+
+existing_fragment and continuation are always explicit.
+
+Deletes are precise, with exact substring, count, and narrative reason.`;
+
+    const wordCount = existing_text ? existing_text.trim().split(/\s+/).length : 0;
+    let desired_length = Math.max(10, wordCount * 3);
+    desired_length = Math.min(50, desired_length); // Cap at 50
+    const number_of_fades = 4;
+
+    const userContent = JSON.stringify({
+        existing_text: existing_text,
+        desired_length: desired_length,
+        number_of_fades: number_of_fades
+    });
 
     return [
         { role: "system", content: systemMessage },
-        { role: "user", content: userMessage }
+        { role: "user", content: userContent }
     ];
 }
 
