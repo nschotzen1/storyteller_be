@@ -37,6 +37,7 @@ import {
     developEntity, // Added for developEntityPostHandler
     generateTextureOptionsByText // Added for generateTexturesPostHandler
 } from './ai/textToImage/api.js';
+import { mockGenerateTexturesResponse } from './ai/textToImage/mocks.js';
 
 
 // Configuration from environment variables
@@ -45,6 +46,7 @@ const NARRATION_MOCK_MODE = process.env.NARRATION_MOCK_MODE === 'true';
 const STORYTELLING_DEMO_MODE = process.env.STORYTELLING_DEMO_MODE === 'true'; // For /api/storytelling2
 const PREFIX_MOCK_MODE = process.env.PREFIX_MOCK_MODE === 'true'; // For /api/prefixes (already correct)
 const TYPEWRITER_MOCK_MODE = process.env.TYPEWRITER_MOCK_MODE === 'true';
+const SHOULD_MOCK_GENERATE_TEXTURES = true;
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -838,6 +840,11 @@ app.post('/api/generateEntities', generateEntitiesPostHandler);
 const generateTexturesPostHandler = async (req, res) => {
   try {
     const { userText, sessionId } = req.body;
+
+    if (SHOULD_MOCK_GENERATE_TEXTURES) {
+      console.log('Serving mock response for /api/generateTextures');
+      return res.json(mockGenerateTexturesResponse);
+    }
 
     if (!sessionId || userText === undefined) { 
       return res.status(400).json({ message: 'Missing required parameters: sessionId or userText.' });
