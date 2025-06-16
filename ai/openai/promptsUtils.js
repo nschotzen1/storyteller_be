@@ -2815,8 +2815,12 @@ json
       "thoughtProcess": "Reimagine 'on' as wire—literal danger, risk of falling. Short, kinetic.",
       "existing_fragment": "They slowly walked on ",
       "continuation": "the old wire strung between rooftops, arms wide for balance.",
-      "delay": 600,
+      "delay": 0,
       "style": { "fontName": "Playfair Display", "fontSize": 16, "fontColor": "#2D3436" }
+    },
+    {
+      "action": "pause",
+      "delay": 500
     },
     {
       "action": "fade",
@@ -2824,8 +2828,12 @@ json
       "thoughtProcess": "Cold, unstable: now the walk is on ice. Emphasize slipping, the threat beneath.",
       "existing_fragment": "They slowly walked on ",
       "continuation": "ice slick and cracking, boots slipping with each step.",
-      "delay": 500,
+      "delay": 0,
       "style": { "fontName": "Amiri", "fontSize": 15, "fontColor": "#5E3023" }
+    },
+    {
+      "action": "pause",
+      "delay": 400
     },
     {
       "action": "fade",
@@ -2833,8 +2841,12 @@ json
       "thoughtProcess": "Make it bodily—walk on a companion’s back. Show weight, strain, shared risk.",
       "existing_fragment": "They slowly walked on ",
       "continuation": "his broad shoulders, legs trembling with every uneven stone.",
-      "delay": 400,
+      "delay": 0,
       "style": { "fontName": "Roboto", "fontSize": 14, "fontColor": "#3B3B3B" }
+    },
+    {
+      "action": "pause",
+      "delay": 300
     },
     {
       "action": "fade",
@@ -2842,8 +2854,12 @@ json
       "thoughtProcess": "Border logic: make 'on' a threshold, dividing light and shadow.",
       "existing_fragment": "They slowly walked on ",
       "continuation": "the threshold, one foot in sun, one in dusk.",
-      "delay": 300,
+      "delay": 0,
       "style": { "fontName": "JetBrains Mono", "fontSize": 13, "fontColor": "#484848" }
+    },
+    {
+      "action": "pause",
+      "delay": 200
     },
     {
       "action": "fade",
@@ -2851,7 +2867,7 @@ json
       "thoughtProcess": "Minimal. Just the most concrete, physical 'on.'",
       "existing_fragment": "They slowly walked on ",
       "continuation": "gravel.",
-      "delay": 200,
+      "delay": 0,
       "style": { "fontName": "JetBrains Mono", "fontSize": 13, "fontColor": "#484848" }
     }
   ],
@@ -2866,6 +2882,9 @@ Key points (brief, for model or user):
 All actions begin with a literal, tactical thoughtProcess (model's reasoning, not just a label).
 
 Each fade is a standalone alternate route, new style and logic.
+
+IMPORTANT: All 'fade' actions must have their 'delay' property set to 0.
+Between every two 'fade' actions, a 'pause' action will be automatically inserted. The 'delay' for this 'pause' action will be the original 'delay' of the second 'fade' action in the pair.
 
 existing_fragment and continuation are always explicit.
 
