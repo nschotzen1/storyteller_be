@@ -124,12 +124,12 @@ const mockGenerateTexturesResponse = {
   ]
 };
 
-    module.exports = {
-        optionsMock,
-        fragment,
-        userResponses,
-        mockedStorytellerResponses,
-        mockedTextureOptionsPrompts,
-        mockGenerateTexturesResponse
-    };
     
+export {
+    optionsMock,
+    fragment,
+    userResponses,
+    mockedStorytellerResponses,
+    mockedTextureOptionsPrompts,
+    mockGenerateTexturesResponse
+};
