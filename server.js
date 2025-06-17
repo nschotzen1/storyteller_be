@@ -261,8 +261,8 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     }
 
     console.log(`✍️ Typewriter API — Session: ${sessionId} — Message: ${message}`);
-
-    if (1==1) {
+    let should_mock = false
+    if (should_mock) {
       const wordCount = message.trim().split(/\s+/).length;
       let mockAIResponse; // Renamed for clarity to avoid conflict with mockResponse variable if it's in a broader scope
 
@@ -294,13 +294,13 @@ app.post('/api/send_typewriter_text', async (req, res) => {
                 { action: "pause", thoughtProcess: "Pausing for dramatic effect before fade.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 16000 }
             ],
             fade_sequence: [
-                { action: "fade", phase: 1, thoughtProcess: "Fading text: First stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "It was night. The band approached a terrace.", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+                { action: "fade", phase: 1, thoughtProcess: "Fading text: First stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "It was night. The band approached a terrace.", delay: 12000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
                 { action: "pause", delay: 1800 },
-                { action: "fade", phase: 2, thoughtProcess: "Fading text: Second stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. They arrived.", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+                { action: "fade", phase: 2, thoughtProcess: "Fading text: Second stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. They arrived.", delay: 8000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
                 { action: "pause", delay: 1200 },
-                { action: "fade", phase: 3, thoughtProcess: "Fading text: Third stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "A band. Night.", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+                { action: "fade", phase: 3, thoughtProcess: "Fading text: Third stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "A band. Night.", delay: 6000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
                 { action: "pause", delay: 900 },
-                { action: "fade", phase: 4, thoughtProcess: "Fading text: Final stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } }
+                { action: "fade", phase: 4, thoughtProcess: "Fading text: Final stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 5000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } }
             ],
             metadata: shortMetadata
         };
@@ -324,13 +324,13 @@ app.post('/api/send_typewriter_text', async (req, res) => {
                 { action: "pause", thoughtProcess: "Pausing for dramatic effect before fade.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 8000 }
             ],
             fade_sequence: [
-                { action: "fade", phase: 1, thoughtProcess: "Fading text: Summarizing the action.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "She clutched the amulet as the carriage entered the gate.", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+                { action: "fade", phase: 1, thoughtProcess: "Fading text: Summarizing the action.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "She clutched the amulet as the carriage entered the gate.", delay: 15000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
                 { action: "pause", delay: 1800 },
-                { action: "fade", phase: 2, thoughtProcess: "Fading text: Key elements.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Amulet. Horses. Gate.", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+                { action: "fade", phase: 2, thoughtProcess: "Fading text: Key elements.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Amulet. Horses. Gate.", delay: 10000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
                 { action: "pause", delay: 1200 },
-                { action: "fade", phase: 3, thoughtProcess: "Fading text: Atmosphere.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. Movement.", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+                { action: "fade", phase: 3, thoughtProcess: "Fading text: Atmosphere.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. Movement.", delay: 8000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
                 { action: "pause", delay: 900 },
-                { action: "fade", phase: 4, thoughtProcess: "Fading text: Final fade out.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } }
+                { action: "fade", phase: 4, thoughtProcess: "Fading text: Final fade out.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 5000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } }
             ],
             metadata: mediumMetadata
         };
