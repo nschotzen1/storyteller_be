@@ -2750,7 +2750,8 @@ $desired_length: Target word count for the main continuation.
 $number_of_fades: Number of alternate fades (default 4, can be 5).
 
 Task:
-Compose a detailed, step-by-step writing_sequence (including type, pause, delete) to build a vivid, "expensive" continuation of $existing_text close to $desired_length words.
+Compose a detailed, step-by-step writing_sequence (including type, pause, delete) to build a vivid, "expensive" continuation of $existing_text. The continuation's word count must be strictly close to $desired_length.
+The narrative style for the main continuation should be grounded, factual, and sensory, weaving the narrative closely with tangible details.
 Then, generate $number_of_fades distinct fade_sequence entries—each a standalone alternate continuation in a new style, logic, and mood, as if from a different storyteller.
 For each action (including deletes), begin with a concrete, internal thoughtProcess—your reasoning, as if talking to yourself.
 Always include existing_fragment and continuation for context.
@@ -2776,7 +2777,7 @@ json
     },
     {
       "action": "pause",
-      "delay": 300
+      "delay": 600
     },
     {
       "action": "type",
@@ -2788,7 +2789,7 @@ json
     },
     {
       "action": "pause",
-      "delay": 220
+      "delay": 500
     },
     {
       "action": "delete",
