@@ -2672,7 +2672,7 @@ export async function directExternalApiCall(prompts, max_tokens = 2500, temperat
             if (isOpenAi) {
                 let req_obj = {
                     max_tokens,
-                    model: 'gpt-4o-mini',
+                    model: 'gpt-4.1-mini',
                     messages: prompts,
                     temperature: 1.08,
                     presence_penalty: 0.0
@@ -2811,42 +2811,32 @@ json
   "fade_sequence": [
     {
       "action": "fade",
-      "phase": 1,
+      "phase": 1, 
       "thoughtProcess": "Reimagine 'on' as wire—literal danger, risk of falling. Short, kinetic.",
       "existing_fragment": "They slowly walked on ",
-      "continuation": "the old wire strung between rooftops, arms wide for balance.",
-      "delay": 0,
+      "continuation": "the old wire strung between rooftops, arms wide for balance.", //each phase of the fade should be shorter than the other...
+      "delay": 15000,
       "style": { "fontName": "Playfair Display", "fontSize": 16, "fontColor": "#2D3436" }
     },
-    {
-      "action": "pause",
-      "delay": 500
-    },
+    
     {
       "action": "fade",
       "phase": 2,
       "thoughtProcess": "Cold, unstable: now the walk is on ice. Emphasize slipping, the threat beneath.",
       "existing_fragment": "They slowly walked on ",
       "continuation": "ice slick and cracking, boots slipping with each step.",
-      "delay": 0,
+      "delay": 10000,
       "style": { "fontName": "Amiri", "fontSize": 15, "fontColor": "#5E3023" }
     },
-    {
-      "action": "pause",
-      "delay": 400
-    },
+    
     {
       "action": "fade",
       "phase": 3,
       "thoughtProcess": "Make it bodily—walk on a companion’s back. Show weight, strain, shared risk.",
       "existing_fragment": "They slowly walked on ",
       "continuation": "his broad shoulders, legs trembling with every uneven stone.",
-      "delay": 0,
+      "delay": 8000,
       "style": { "fontName": "Roboto", "fontSize": 14, "fontColor": "#3B3B3B" }
-    },
-    {
-      "action": "pause",
-      "delay": 300
     },
     {
       "action": "fade",
@@ -2854,12 +2844,8 @@ json
       "thoughtProcess": "Border logic: make 'on' a threshold, dividing light and shadow.",
       "existing_fragment": "They slowly walked on ",
       "continuation": "the threshold, one foot in sun, one in dusk.",
-      "delay": 0,
+      "delay": 6500,
       "style": { "fontName": "JetBrains Mono", "fontSize": 13, "fontColor": "#484848" }
-    },
-    {
-      "action": "pause",
-      "delay": 200
     },
     {
       "action": "fade",
@@ -2867,7 +2853,7 @@ json
       "thoughtProcess": "Minimal. Just the most concrete, physical 'on.'",
       "existing_fragment": "They slowly walked on ",
       "continuation": "gravel.",
-      "delay": 0,
+      "delay": 5000,
       "style": { "fontName": "JetBrains Mono", "fontSize": 13, "fontColor": "#484848" }
     }
   ],
@@ -2891,7 +2877,7 @@ existing_fragment and continuation are always explicit.
 Deletes are precise, with exact substring, count, and narrative reason.`;
 
     const wordCount = existing_text ? existing_text.trim().split(/\s+/).length : 0;
-    let desired_length = Math.max(10, wordCount * 3);
+    let desired_length = parseInt(Math.max(3, wordCount * 1.61));
     desired_length = Math.min(50, desired_length); // Cap at 50
     const number_of_fades = 4;
 
