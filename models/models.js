@@ -21,14 +21,34 @@ const narrativeFragmentSchema = new mongoose.Schema({
   turn: { type: Number },
 });
 
-mongoose.connect('mongodb://localhost:27017/storytelling', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
-  console.log("Connected to MongoDB.");
-}).catch(err => {
-  console.error("MongoDB connection error:", err);
-});
+const storytellerSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  immediate_ghost_appearance: { type: String },
+  typewriter_key: { type: Object },
+  influences: { type: [String] },
+  known_universes: { type: [String] },
+  level: { type: Number },
+  voice_creation: { type: Object },
+  vector: { type: [Number] },
+}, { timestamps: true });
+
+const defaultMongoUri = 'mongodb://localhost:27017/storytelling';
+
+export const connectDB = async (uri) => {
+  const mongoUri = uri || defaultMongoUri;
+  try {
+    await mongoose.connect(mongoUri, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log(`Connected to MongoDB at ${mongoUri}`);
+  } catch (err) {
+    console.error("MongoDB connection error:", err);
+    // Propagate the error or handle it as needed
+    throw err;
+  }
+};
 
 export const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
 export const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFragmentSchema);
+export const Storyteller = mongoose.model('Storyteller', storytellerSchema);
