@@ -1,3 +1,12 @@
+// storyteller/utils.js
+// This file contains utility functions for storyteller profiles, embeddings, and search.
+// Environment Variables:
+// - MOCK_MODE: Set to 'true' to enable mock embedding generation (random vectors)
+//              and mock search results (random/simple text match from MongoDB).
+//              If not 'true' or undefined, real mode is active.
+// - QDRANT_URL: Configure in `db/qdrant_client.js` or via environment variable. Used for real search.
+// Note: The HuggingFace embedding model ('Xenova/Supabase-gte-small') is currently hardcoded.
+
 import fs from 'fs';
 import mongoose from 'mongoose';
 import * as fsPromises from 'fs/promises';
@@ -5,7 +14,32 @@ import { NarrativeFragment, ChatMessage } from '../models/models.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { pipeline, env } from '@xenova/transformers';
+// To prevent warnings about local models and simplify setup for this context
+env.allowLocalModels = false;
+env.useBrowserCache = false; // Disable browser cache if running in Node
+
+let embedding_pipeline_instance = null;
+const MODEL_NAME = 'Xenova/Supabase-gte-small'; // 384 dimensions
+
+async function get_embedding_pipeline() {
+  if (embedding_pipeline_instance === null) {
+    try {
+      console.log('Loading embedding model:', MODEL_NAME);
+      embedding_pipeline_instance = await pipeline('feature-extraction', MODEL_NAME, {
+        quantized: true // Use quantized version for efficiency if available
+      });
+      console.log('Embedding model loaded successfully.');
+    } catch (error) {
+      console.error('Failed to load embedding model:', error);
+      throw error; // Re-throw to indicate critical failure
+    }
+  }
+  return embedding_pipeline_instance;
+}
+
 // Local AI utility imports
+import { qdrantClient, COLLECTION_NAME as QDRANT_COLLECTION_NAME } from '../db/qdrant_client.js';
 import { generateStorytellerGuidance, generate_cards, generate_seer_response } from "../ai/openai/cardReadingPrompts.js";
 import { 
   generate_texture_by_fragment_and_conversation, 
@@ -42,6 +76,101 @@ export async function ensureDirectoryExists(dirPath) {
     // It might error for other reasons (e.g., permissions).
     console.error(`Error creating directory ${dirPath}:`, error);
     throw error; // Re-throw the error if it's not an ignorable one
+  }
+}
+
+export async function search_storytellers_by_fragment(fragment_embedding, universe_tags, top_k = 5) {
+  if (process.env.MOCK_MODE === 'true') {
+    console.log('search_storytellers_by_fragment: MOCK_MODE enabled.');
+    // Mock implementation:
+    // For this mock, we'll simulate fetching some entities from MongoDB
+    // and then randomly picking or doing a simple text match.
+    // This assumes NarrativeEntity might have tags or relevant text fields.
+
+    let mock_candidates = [];
+    try {
+      // Fetch a broader set of entities to simulate a larger dataset
+      // We limit to avoid pulling too much data, even in mock mode.
+      mock_candidates = await NarrativeEntity.find({}).limit(50).lean();
+    } catch (dbError) {
+      console.error('search_storytellers_by_fragment: MOCK_MODE - Error fetching mock candidates from DB:', dbError);
+      return [];
+    }
+
+    if (mock_candidates.length === 0) {
+      console.warn('search_storytellers_by_fragment: MOCK_MODE - No mock candidates found in DB.');
+      return [];
+    }
+
+    let filtered_candidates = mock_candidates;
+    if (universe_tags && universe_tags.length > 0) {
+      filtered_candidates = mock_candidates.filter(entity => {
+        const searchable_text = [
+          entity.name,
+          entity.description,
+          entity.lore,
+          entity.type,
+          entity.subtype,
+          ...(entity.universalTraits || [])
+        ].filter(Boolean).join(' ').toLowerCase();
+
+        return universe_tags.some(tag => searchable_text.includes(tag.toLowerCase()));
+      });
+    }
+
+    // If not enough candidates after filtering, use original list or return fewer
+    if (filtered_candidates.length < top_k && mock_candidates.length >= top_k) {
+        // To ensure we return something if filtering is too aggressive
+        // we can fall back to a random selection from the original candidates
+        // or simply return the filtered ones. For simplicity, return filtered.
+    }
+
+    // Shuffle and pick top_k
+    const shuffled_candidates = filtered_candidates.sort(() => 0.5 - Math.random());
+    return shuffled_candidates.slice(0, top_k);
+
+  } else {
+    console.log(`search_storytellers_by_fragment: REAL_MODE - Searching Qdrant collection '${QDRANT_COLLECTION_NAME}'.`);
+    try {
+      const qdrantFilter = { must: [] };
+      if (universe_tags && universe_tags.length > 0) {
+        // Example: Filter by 'universalTraits' containing any of the tags.
+        // Assumes 'universalTraits' is an array of strings in the payload.
+        qdrantFilter.must.push({
+          key: 'universalTraits',
+          match: { any: universe_tags }
+        });
+        // You could also add other conditions to qdrantFilter.must, for example:
+        // qdrantFilter.must.push({ key: 'type', match: { value: 'Character' } });
+      }
+
+      const searchConfig = {
+        vector: fragment_embedding,
+        limit: top_k,
+        with_payload: true,
+        // score_threshold: 0.5, // Optional: Adjust as needed
+      };
+
+      if (qdrantFilter.must.length > 0) {
+        searchConfig.filter = qdrantFilter;
+      }
+
+      const searchResult = await qdrantClient.search(QDRANT_COLLECTION_NAME, searchConfig);
+
+      console.log(`search_storytellers_by_fragment: Qdrant search returned ${searchResult.length} results.`);
+
+      // Map Qdrant ScoredPoint results to a more usable format
+      // (e.g., the original entity structure or just payload with id and score)
+      return searchResult.map(hit => ({
+        id: hit.id, // This is the MongoDB _id string
+        score: hit.score,
+        ...hit.payload // Spread the payload fields (name, description, type, etc.)
+      }));
+
+    } catch (qdrantError) {
+      console.error(`search_storytellers_by_fragment: Error during Qdrant search in collection '${QDRANT_COLLECTION_NAME}':`, qdrantError);
+      return []; // Fallback in case of error
+    }
   }
 }
 
@@ -108,6 +237,7 @@ const entitySchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String },
   lore: { type: String },
+  embedding: { type: [Number] }, // Added embedding field
   
   // Classification/Type Info
   type: { type: String },           // from ner_type
@@ -350,19 +480,65 @@ export async function getFragment(sessionId, turn) {
 
 export const setEntitiesForSession = async(sessionId, jsonEntities) => {
   try {
-    // Find a document by session_id and turn, update its fragment,
-    // or create a new document if none exists.
-    jsonEntities = jsonEntities.map( e => { return mapEntity(e)})
-    const entities = await NarrativeEntity.insertMany(
-      jsonEntities
-    );
-    console.log("created entity:", entities);
-    return entities;
+    let mappedEntities = jsonEntities.map(e => mapEntity(e)); // map first
+
+    // Add embeddings
+    for (let entity of mappedEntities) {
+      const embeddingVector = await embed_storyteller(entity); // Pass the mapped entity
+      entity.embedding = embeddingVector;
+    }
+
+    const createdEntities = await NarrativeEntity.insertMany(mappedEntities); // then insert
+    console.log("created entity with embeddings:", createdEntities.map(e => ({ name: e.name, embedding_preview: e.embedding ? e.embedding.slice(0,3) : null })));
+
+    if (process.env.MOCK_MODE !== 'true') {
+      if (!createdEntities || createdEntities.length === 0) {
+        console.log('setEntitiesForSession: No entities were created, skipping Qdrant upsert.');
+      } else {
+        try {
+          console.log(`setEntitiesForSession: Preparing to upsert ${createdEntities.length} points to Qdrant collection '${QDRANT_COLLECTION_NAME}'.`);
+          const points = createdEntities.map(dbEntity => ({
+            id: dbEntity._id.toString(), // Qdrant point ID
+            vector: dbEntity.embedding,   // The embedding vector
+            payload: {                    // Metadata for filtering/retrieval
+              session_id: dbEntity.session_id,
+              name: dbEntity.name,
+              description: dbEntity.description,
+              lore: dbEntity.lore,
+              type: dbEntity.type,
+              subtype: dbEntity.subtype,
+              universalTraits: dbEntity.universalTraits || [], // Ensure it's an array
+              // Add any other fields from dbEntity that might be useful for filtering
+            }
+          }));
+
+          if (points.length > 0) {
+            // Before upserting, ensure all vectors are of the correct dimension and not null/empty
+            const validPoints = points.filter(p => p.vector && p.vector.length > 0);
+            if (validPoints.length !== points.length) {
+                console.warn(`setEntitiesForSession: Some entities had missing or empty embeddings. Only upserting ${validPoints.length} valid points to Qdrant.`);
+            }
+
+            if (validPoints.length > 0) {
+                await qdrantClient.upsertPoints(QDRANT_COLLECTION_NAME, { points: validPoints });
+                console.log(`setEntitiesForSession: Successfully upserted ${validPoints.length} points to Qdrant collection '${QDRANT_COLLECTION_NAME}'.`);
+            } else {
+                console.log('setEntitiesForSession: No valid points with embeddings to upsert to Qdrant.');
+            }
+          }
+        } catch (qdrantError) {
+          console.error(`setEntitiesForSession: Error upserting points to Qdrant collection '${QDRANT_COLLECTION_NAME}':`, qdrantError);
+          // Decide on error handling: log, throw, or proceed without Qdrant storage
+          // For now, we just log the error and the function will still return createdEntities from MongoDB.
+        }
+      }
+    }
+    return createdEntities;
   } catch (error) {
-    console.error("Error creating entities:", error);
+    console.error("Error creating entities with embeddings:", error);
     throw error;
   }
-}
+};
 
   
 export async function getEntitiesForSession(sessionId) {
@@ -1088,6 +1264,49 @@ export async function storytellerDetectiveFirstParagraphCreation(sessionId, user
   await setSessionDetectiveCreation(sessionId, detectiveHistory);
   await updateSessionScenePosition(sessionId)
   return newNarrativeOptions;
+}
+
+export async function embed_storyteller(profile) {
+  const target_dim = 384; // For Supabase/gte-small
+
+  if (process.env.MOCK_MODE === 'true') {
+    console.log('embed_storyteller: MOCK_MODE enabled, returning random vector.');
+    return Array.from({ length: target_dim }, () => Math.random());
+  } else {
+    const textToEmbed = [
+      profile.name,
+      profile.description,
+      profile.lore,
+      // Add other relevant fields from NarrativeEntity as needed
+      // For example, profile.type, profile.subtype, (profile.universalTraits || []).join(' ')
+    ].filter(Boolean).join(' \n\n ');
+
+    if (!textToEmbed || textToEmbed.trim() === '') {
+      console.warn('embed_storyteller: No text content found in profile to embed. Returning zero vector.');
+      return Array.from({ length: target_dim }, () => 0);
+    }
+
+    try {
+      console.log(`embed_storyteller: Generating embedding for text: "${textToEmbed.substring(0, 100)}..."`);
+      const extractor = await get_embedding_pipeline();
+      if (!extractor) {
+          console.error('embed_storyteller: Embedding pipeline not available. Returning zero vector.');
+          return Array.from({ length: target_dim }, () => 0);
+      }
+      const output = await extractor(textToEmbed, { pooling: 'mean', normalize: true });
+      const embedding = Array.from(output.data);
+
+      if (!embedding || embedding.length !== target_dim) {
+        console.error(`embed_storyteller: Invalid embedding received from model. Expected ${target_dim} dimensions, got ${embedding ? embedding.length : 'null'}.`);
+        return Array.from({ length: target_dim }, () => 0); // Fallback
+      }
+      console.log(`embed_storyteller: Successfully generated ${embedding.length}-dim embedding.`);
+      return embedding;
+    } catch (error) {
+      console.error('embed_storyteller: Error during real embedding generation:', error);
+      return Array.from({ length: target_dim }, () => 0); // Fallback in case of error
+    }
+  }
 }
 
 // module.exports removed, functions are exported individually.
