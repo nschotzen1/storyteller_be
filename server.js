@@ -39,6 +39,16 @@ import {
 } from './ai/textToImage/api.js';
 import { mockGenerateTexturesResponse } from './ai/textToImage/mocks.js';
 
+// Storyteller controller imports
+import {
+    createStoryteller,
+    getAllStorytellers,
+    getStorytellerByName,
+    updateStoryteller,
+    deleteStoryteller,
+    upsertStoryteller
+} from './storyteller/storyteller_controller.js';
+
 
 // Configuration from environment variables
 const CHAT_MOCK_MODE = process.env.CHAT_MOCK_MODE === 'true';
@@ -1079,5 +1089,80 @@ const dynamicPrefixesPostHandler = async (req, res) => {
 app.post('/api/generateTextures', generateTexturesPostHandler);
 app.post('/api/prefixes', dynamicPrefixesPostHandler);
 
+// Storyteller CRUD Routes
+app.post('/storytellers', async (req, res) => {
+    try {
+        const storyteller = await createStoryteller(req.body);
+        res.status(201).json(storyteller);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
 
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+app.get('/storytellers', async (req, res) => {
+    try {
+        const storytellers = await getAllStorytellers();
+        res.status(200).json(storytellers);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.get('/storytellers/:name', async (req, res) => {
+    try {
+        const storyteller = await getStorytellerByName(req.params.name);
+        if (storyteller) {
+            res.status(200).json(storyteller);
+        } else {
+            res.status(404).json({ message: 'Storyteller not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.put('/storytellers/:name', async (req, res) => {
+    try {
+        const storyteller = await updateStoryteller(req.params.name, req.body);
+        if (storyteller) {
+            res.status(200).json(storyteller);
+        } else {
+            res.status(404).json({ message: 'Storyteller not found' });
+        }
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+app.delete('/storytellers/:name', async (req, res) => {
+    try {
+        const result = await deleteStoryteller(req.params.name);
+        if (result.deletedCount > 0) {
+            res.status(200).json({ message: 'Storyteller deleted successfully' });
+        } else {
+            res.status(404).json({ message: 'Storyteller not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.post('/storytellers/upsert', async (req, res) => {
+    try {
+        const storyteller = await upsertStoryteller(req.body);
+        // Upsert typically returns 200 if updated, 201 if created.
+        // However, the controller's findOneAndUpdate with upsert:true doesn't easily distinguish.
+        // A common practice is to return 200 and the document.
+        res.status(200).json(storyteller);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+
+// Conditional server start
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+}
+
+export { app };

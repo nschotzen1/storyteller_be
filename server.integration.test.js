@@ -1,6 +1,15 @@
+// Mock promptsUtils at the VERY top, before any imports
+jest.mock('./ai/openai/promptsUtils.js', () => ({
+  directExternalApiCall: jest.fn(),
+  generateFragmentsBeginnings: jest.fn(),
+  // Add any other functions from promptsUtils that might be called by server.js,
+  // even if not directly by the /api/prefixes route, to avoid "is not a function" errors.
+}));
+
 import request from 'supertest';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
+import { jest, describe, it, expect, beforeAll, afterAll, afterEach } from '@jest/globals';
 
 // Assuming server.js exports the app instance correctly
 // and handles its Mongoose connection in a way that can be overridden or managed by tests.
@@ -8,25 +17,13 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 // or starts the server unconditionally.
 import { app } from './server.js'; 
 import { GeneratedContent } from './storyteller/utils.js'; // Adjust path as necessary
-import { directExternalApiCall } from './ai/openai/promptsUtils.js'; // For mocking
-
-// Mock the promptsUtils module
-jest.mock('./ai/openai/promptsUtils.js', () => {
-  const originalModule = jest.requireActual('./ai/openai/promptsUtils.js');
-  return {
-    ...originalModule,
-    directExternalApiCall: jest.fn(),
-    // Mock generateFragmentsBeginnings as it's called by the route and would otherwise run
-    generateFragmentsBeginnings: jest.fn((contextText, count) => {
-        // Return a structure that directExternalApiCall mock can then use
-        // This mock can be simple, as directExternalApiCall is the one we control for output
-        return [{ role: "system", content: `Mocked AI prompt for: ${contextText} (requesting ${count} prefixes)` }];
-    }),
-  };
-});
 
 let mongoServer;
 let originalPrefixMockMode;
+
+// Spies for the promptsUtils functions - no longer needed with jest.mock
+// let directExternalApiCallSpy;
+// let generateFragmentsBeginningsSpy;
 
 beforeAll(async () => {
   mongoServer = await MongoMemoryServer.create();
@@ -55,13 +52,18 @@ afterAll(async () => {
 
 afterEach(async () => {
   await GeneratedContent.deleteMany({});
-  directExternalApiCall.mockClear();
+  // No need to mockClear directExternalApiCall if it's auto-mocked by jest.mock
   if (originalPrefixMockMode === undefined) {
     delete process.env.PREFIX_MOCK_MODE;
   } else {
     process.env.PREFIX_MOCK_MODE = originalPrefixMockMode;
   }
-  jest.clearAllMocks(); // Clears all mocks, including generateFragmentsBeginnings
+  // jest.restoreAllMocks(); // Not needed if not using jest.spyOn
+  // jest.clearAllMocks(); // Clears all auto-mocks from jest.mock
+  // To be safe and ensure mocks are reset for each test if they are modified:
+  const { directExternalApiCall, generateFragmentsBeginnings } = await import('./ai/openai/promptsUtils.js');
+  directExternalApiCall.mockClear();
+  generateFragmentsBeginnings.mockClear();
 });
 
 describe('POST /api/prefixes', () => {
@@ -107,7 +109,22 @@ describe('POST /api/prefixes', () => {
     process.env.PREFIX_MOCK_MODE = 'false'; // Ensure env var is not forcing mock
     
     const fakeAiPrefixes = [{ prefix: "AI generated prefix 1 from test", fontName: "TestFont", fontSize: "16px" }];
+
+    // Get the auto-mocked functions
+    const { directExternalApiCall, generateFragmentsBeginnings } = await import('./ai/openai/promptsUtils.js');
+
+    // Configure the mock for directExternalApiCall for this specific test
+    // Note: generateFragmentsBeginnings in server.js will call this mocked directExternalApiCall
     directExternalApiCall.mockResolvedValueOnce(fakeAiPrefixes);
+
+    // Since generateFragmentsBeginnings is also auto-mocked, if server.js calls it
+    // and then that mock calls directExternalApiCall, we need to ensure the mock chain.
+    // However, the route calls generateFragmentsBeginnings, which THEN calls directExternalApiCall.
+    // So we only need to mock the ultimate directExternalApiCall.
+    // The auto-mocked generateFragmentsBeginnings will use the actual implementation
+    // unless we provide a .mockImplementationOnce() for it too.
+    // For this test, we let the actual generateFragmentsBeginnings run, which will then hit our mocked directExternalApiCall.
+
 
     const response = await request(app)
       .post('/api/prefixes')
@@ -116,8 +133,6 @@ describe('POST /api/prefixes', () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual(fakeAiPrefixes);
     expect(directExternalApiCall).toHaveBeenCalledTimes(1);
-    // You could also check the arguments of generateFragmentsBeginnings if needed
-    // expect(generateFragmentsBeginnings).toHaveBeenCalledWith('tell me a real story', 5);
 
 
     const dbEntry = await GeneratedContent.findOne({ sessionId: 'session-non-mock' });
@@ -146,6 +161,7 @@ describe('POST /api/prefixes', () => {
 
   it('should handle AI error gracefully in non-mock mode', async () => {
     process.env.PREFIX_MOCK_MODE = 'false';
+    const { directExternalApiCall } = await import('./ai/openai/promptsUtils.js');
     directExternalApiCall.mockRejectedValueOnce(new Error("AI API is down"));
 
     const response = await request(app)
@@ -158,7 +174,8 @@ describe('POST /api/prefixes', () => {
 
    it('should handle AI returning non-array data in non-mock mode', async () => {
     process.env.PREFIX_MOCK_MODE = 'false';
-    directExternalApiCall.mockResolvedValueOnce({ message: "This is not an array" }); // Mocking non-array response
+    const { directExternalApiCall } = await import('./ai/openai/promptsUtils.js');
+    directExternalApiCall.mockResolvedValueOnce({ message: "This is not an array" });
 
     const response = await request(app)
       .post('/api/prefixes')

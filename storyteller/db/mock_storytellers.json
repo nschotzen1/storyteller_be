@@ -1,0 +1,59 @@
+[
+  {
+    "name": "Mystic Oracle",
+    "immediate_ghost_appearance": "A swirling mist that coalesces into a humanoid form with glowing eyes.",
+    "typewriter_key": {
+      "key_name": "O",
+      "sound_effect": "gentle_wind_chime.mp3"
+    },
+    "influences": ["Ancient mythology", "Prophetic dreams", "Cosmic horror"],
+    "known_universes": ["The Astral Plane", "The Dreamlands", "The Forgotten Realms"],
+    "level": 7,
+    "voice_creation": {
+      "engine": "elevenlabs",
+      "voice_id": "mystic_oracle_v1",
+      "settings": {
+        "stability": 0.6,
+        "clarity": 0.8
+      }
+    },
+    "vector": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  },
+  {
+    "name": "Cosmic Chronicler",
+    "immediate_ghost_appearance": "A being made of stardust, with constellations swirling within its form.",
+    "typewriter_key": {
+      "key_name": "C",
+      "sound_effect": "deep_space_rumble.wav"
+    },
+    "influences": ["Carl Sagan", "Nebulae formations", "Quantum physics"],
+    "known_universes": ["Andromeda Galaxy", "The Void Between Worlds", "Alternate Earth #349"],
+    "level": 9,
+    "voice_creation": {
+      "engine": "coqui_tts",
+      "model_name": "tts_models/en/ljspeech/tacotron2-DDC",
+      "speaker_id": null
+    },
+    "vector": [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]
+  },
+  {
+    "name": "Techno Shaman",
+    "immediate_ghost_appearance": "A glitching hologram that flickers between a tribal elder and a cyberpunk hacker.",
+    "typewriter_key": {
+      "key_name": "X",
+      "sound_effect": "static_burst_followed_by_modem_dial.ogg"
+    },
+    "influences": ["William Gibson", "Animistic beliefs", "AI sentience theories"],
+    "known_universes": ["The Metaverse", "Neo-Tokyo 2077", "The Spirit Web"],
+    "level": 5,
+    "voice_creation": {
+      "engine": "playht",
+      "voice_id": "techno_shaman_deep",
+      "settings": {
+        "speed": 1.1,
+        "emotion": "synthetic"
+      }
+    },
+    "vector": [2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0]
+  }
+]
