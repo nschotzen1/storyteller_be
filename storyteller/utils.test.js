@@ -1,141 +1,222 @@
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
-import { setFragment, NarrativeFragment } from './utils.js'; // Assuming utils.js is in the same directory
+import {
+    embed_storyteller,
+    search_storytellers_by_fragment,
+    NarrativeEntity
+} from './utils.js';
+import { pipeline as actualPipeline } from '@xenova/transformers'; // Import actual to mock parts of it
+import { qdrantClient } from '../db/qdrant_client.js'; // To mock its methods
 
-let mongoServer;
+// Mock @xenova/transformers
+// We mock the top-level 'pipeline' function that is imported and used in utils.js
+jest.mock('@xenova/transformers', () => ({
+  ...jest.requireActual('@xenova/transformers'), // Retain other exports from the module
+  pipeline: jest.fn(), // Mock the pipeline factory function
+  env: jest.requireActual('@xenova/transformers').env, // Use actual env to allow allowLocalModels = false
+}));
 
-beforeAll(async () => {
-  mongoServer = await MongoMemoryServer.create();
-  const mongoUri = mongoServer.getUri();
-  await mongoose.connect(mongoUri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  });
-});
+const mockPipelineFn = pipeline; // Alias for the mocked pipeline factory
 
-afterAll(async () => {
-  await mongoose.disconnect();
-  await mongoServer.stop();
-});
+describe('Storyteller Embedding and Search Utilities', () => {
+  let originalMockMode;
 
-afterEach(async () => {
-  // Clear data from the NarrativeFragment collection after each test
-  await NarrativeFragment.deleteMany({});
-});
-
-describe('setFragment', () => {
-  it('should save a new fragment and return the saved document', async () => {
-    const sessionId = 'test-session-1';
-    const fragmentContent = { text: 'This is a test fragment.' };
-    const turn = 1;
-
-    const result = await setFragment(sessionId, fragmentContent, turn);
-
-    // Assertions on the returned document
-    expect(result).toBeDefined();
-    expect(result.session_id).toBe(sessionId);
-    expect(result.fragment).toEqual(fragmentContent); // Use toEqual for deep equality on objects
-    expect(result.turn).toBe(turn);
-
-    // Verify by querying the database directly
-    const dbDoc = await NarrativeFragment.findOne({ session_id: sessionId, turn: turn }).lean();
-    expect(dbDoc).toBeDefined();
-    expect(dbDoc.fragment).toEqual(fragmentContent);
-    expect(dbDoc.session_id).toBe(sessionId);
-    expect(dbDoc.turn).toBe(turn);
+  beforeAll(() => {
+    originalMockMode = process.env.MOCK_MODE;
   });
 
-  it('should update an existing fragment (upsert behavior)', async () => {
-    const sessionId = 'test-session-upsert';
-    const initialFragmentContent = { text: 'Initial fragment content for upsert test.' };
-    const updatedFragmentContent = { text: 'Updated fragment content for upsert test.' };
-    const turn = 1;
-
-    // First call to setFragment - should create the document
-    const initialResult = await setFragment(sessionId, initialFragmentContent, turn);
-    expect(initialResult.fragment).toEqual(initialFragmentContent);
-
-    // Second call to setFragment with the same sessionId and turn - should update
-    const updatedResult = await setFragment(sessionId, updatedFragmentContent, turn);
-
-    // Assertions on the returned updated document
-    expect(updatedResult).toBeDefined();
-    expect(updatedResult.session_id).toBe(sessionId);
-    expect(updatedResult.fragment).toEqual(updatedFragmentContent);
-    expect(updatedResult.turn).toBe(turn);
-
-    // Verify by querying the database directly
-    const dbDocs = await NarrativeFragment.find({ session_id: sessionId, turn: turn }).lean();
-    expect(dbDocs.length).toBe(1); // Crucial: ensure no new document was created
-    expect(dbDocs[0].fragment).toEqual(updatedFragmentContent);
+  afterAll(() => {
+    process.env.MOCK_MODE = originalMockMode;
+    // Mongoose connection is managed globally in utils.js,
+    // ideally, it should be managed per test suite or application lifecycle.
+    // For now, we don't disconnect here as other tests might still run or utils.js might be imported elsewhere.
   });
 
-  it('should handle different sessionIds and turns independently', async () => {
-    const sessionId1 = 'test-session-multi-1';
-    const fragmentContent1 = { text: 'Fragment for session 1, turn 1.' };
-    const turn1 = 1;
+  beforeEach(() => {
+    delete process.env.MOCK_MODE;
+    jest.clearAllMocks(); // Clear all mocks before each test
+  });
 
-    const sessionId2 = 'test-session-multi-2';
-    const fragmentContent2 = { text: 'Fragment for session 2, turn 1.' };
-    const turn2 = 1; // Same turn, different session
+  // No top-level afterEach for mockNarrativeEntityFind as it's specific to search tests in mock mode
 
-    const fragmentContent3 = { text: 'Fragment for session 1, turn 2.' };
-    const turn3 = 2; // Same session, different turn
+  describe('embed_storyteller', () => {
+    const sampleProfile = { name: 'Test Profile', description: 'A profile for testing.', lore: 'Some ancient lore.' };
+    const target_dim = 384; // Expected dimension for Supabase/gte-small
 
+    test('should return a random 384-dim vector in MOCK_MODE', async () => {
+      process.env.MOCK_MODE = 'true';
+      const embedding = await embed_storyteller(sampleProfile);
+      expect(Array.isArray(embedding)).toBe(true);
+      expect(embedding.length).toBe(target_dim); // Check for 384 dimensions
+      embedding.forEach(val => {
+        expect(val).toBeGreaterThanOrEqual(0);
+        expect(val).toBeLessThanOrEqual(1);
+      });
+      const isAllZeros = embedding.every(v => v === 0);
+      expect(isAllZeros).toBe(false); // Ensure it's not just a zero vector
+    });
 
-    await setFragment(sessionId1, fragmentContent1, turn1);
-    await setFragment(sessionId2, fragmentContent2, turn2);
-    await setFragment(sessionId1, fragmentContent3, turn3);
+    test('should return a fixed 384-dim vector in REAL_MODE (mocked model)', async () => {
+      process.env.MOCK_MODE = 'false';
+      const fixedVector = Array.from({ length: target_dim }, (_, i) => i / 1000);
+      const mockExtractor = jest.fn().mockResolvedValue({ data: new Float32Array(fixedVector) });
+      mockPipelineFn.mockResolvedValue(mockExtractor); // Mock the pipeline factory to return our mockExtractor
 
-    // Verify session 1, turn 1
-    const dbDoc1 = await NarrativeFragment.findOne({ session_id: sessionId1, turn: turn1 }).lean();
-    expect(dbDoc1.fragment).toEqual(fragmentContent1);
+      const embedding = await embed_storyteller(sampleProfile);
 
-    // Verify session 2, turn 1
-    const dbDoc2 = await NarrativeFragment.findOne({ session_id: sessionId2, turn: turn2 }).lean();
-    expect(dbDoc2.fragment).toEqual(fragmentContent2);
+      expect(Array.isArray(embedding)).toBe(true);
+      expect(embedding.length).toBe(target_dim);
+      expect(embedding).toEqual(fixedVector);
+      expect(mockPipelineFn).toHaveBeenCalledWith('feature-extraction', 'Xenova/Supabase-gte-small', expect.anything());
+      expect(mockExtractor).toHaveBeenCalledWith(
+        `${sampleProfile.name} \n\n ${sampleProfile.description} \n\n ${sampleProfile.lore}`,
+        { pooling: 'mean', normalize: true }
+      );
+    });
     
-    // Verify session 1, turn 2
-    const dbDoc3 = await NarrativeFragment.findOne({ session_id: sessionId1, turn: turn3 }).lean();
-    expect(dbDoc3.fragment).toEqual(fragmentContent3);
+    test('should return a 384-dim zero vector if profile has no text content in REAL_MODE (model not called)', async () => {
+        process.env.MOCK_MODE = 'false';
+        const emptyProfile = { name: ' ', description: null, lore: '' };
+        const embedding = await embed_storyteller(emptyProfile);
+        expect(Array.isArray(embedding)).toBe(true);
+        expect(embedding.length).toBe(target_dim);
+        expect(embedding.every(val => val === 0)).toBe(true);
+        expect(mockPipelineFn).not.toHaveBeenCalled(); // Pipeline should not be called
+    });
 
-    // Ensure no cross-contamination
-    const allDocsForSession1 = await NarrativeFragment.find({ session_id: sessionId1 }).lean();
-    expect(allDocsForSession1.length).toBe(2);
+    test('should return a 384-dim zero vector for an empty profile object in REAL_MODE (model not called)', async () => {
+        process.env.MOCK_MODE = 'false';
+        const embedding = await embed_storyteller({});
+        expect(Array.isArray(embedding)).toBe(true);
+        expect(embedding.length).toBe(target_dim);
+        expect(embedding.every(val => val === 0)).toBe(true);
+        expect(mockPipelineFn).not.toHaveBeenCalled();
+    });
+
+    test('should handle error during model loading in REAL_MODE and return zero vector', async () => {
+        process.env.MOCK_MODE = 'false';
+        mockPipelineFn.mockRejectedValue(new Error("Model load failed"));
+
+        const embedding = await embed_storyteller(sampleProfile);
+        expect(Array.isArray(embedding)).toBe(true);
+        expect(embedding.length).toBe(target_dim);
+        expect(embedding.every(val => val === 0)).toBe(true);
+    });
+
+    test('should handle error during embedding extraction in REAL_MODE and return zero vector', async () => {
+        process.env.MOCK_MODE = 'false';
+        const mockExtractor = jest.fn().mockRejectedValue(new Error("Extraction failed"));
+        mockPipelineFn.mockResolvedValue(mockExtractor);
+
+        const embedding = await embed_storyteller(sampleProfile);
+        expect(Array.isArray(embedding)).toBe(true);
+        expect(embedding.length).toBe(target_dim);
+        expect(embedding.every(val => val === 0)).toBe(true);
+    });
+
   });
-});
 
-// Test for NarrativeFragment model itself to ensure schema is applied
-describe('NarrativeFragment Model', () => {
-  it('should correctly save and retrieve a document', async () => {
-    const data = {
-      session_id: 'model-test-session',
-      fragment: { title: 'Test Title', body: 'Test body content' },
-      turn: 100,
-    };
-    const narrativeFragment = new NarrativeFragment(data);
-    const savedDoc = await narrativeFragment.save();
+  describe('search_storytellers_by_fragment', () => {
+    const mockEntitiesData = [
+      { _id: 'id1', name: 'Entity Alpha', universalTraits: ['fantasy', 'brave'] },
+      { _id: 'id2', name: 'Entity Beta', universalTraits: ['sci-fi', 'vast'] },
+      { _id: 'id3', name: 'Entity Gamma', universalTraits: ['fantasy', 'magic'] },
+    ];
+    const leanMock = (data) => JSON.parse(JSON.stringify(data));
+    let mockNarrativeEntityFind; // Specific to mock mode tests for this describe block
+    let mockQdrantSearch;      // Specific to real mode tests for this describe block
 
-    expect(savedDoc._id).toBeDefined();
-    expect(savedDoc.session_id).toBe(data.session_id);
-    expect(savedDoc.fragment).toEqual(data.fragment);
-    expect(savedDoc.turn).toBe(data.turn);
-    expect(savedDoc.createdAt).toBeDefined(); // Default value from schema
+    beforeEach(() => {
+        // Spy for NarrativeEntity.find (used in MOCK_MODE)
+        mockNarrativeEntityFind = jest.spyOn(NarrativeEntity, 'find');
+        // Spy for qdrantClient.search (used in REAL_MODE)
+        mockQdrantSearch = jest.spyOn(qdrantClient, 'search');
+    });
 
-    const foundDoc = await NarrativeFragment.findById(savedDoc._id).lean();
-    expect(foundDoc.fragment).toEqual(data.fragment);
-  });
+    afterEach(() => {
+        if (mockNarrativeEntityFind) mockNarrativeEntityFind.mockRestore();
+        if (mockQdrantSearch) mockQdrantSearch.mockRestore();
+    });
 
-  it('should require session_id and fragment fields', async () => {
-    let error;
-    try {
-      const narrativeFragment = new NarrativeFragment({ turn: 1 }); // Missing required fields
-      await narrativeFragment.save();
-    } catch (e) {
-      error = e;
-    }
-    expect(error).toBeInstanceOf(mongoose.Error.ValidationError);
-    expect(error.errors.session_id).toBeDefined();
-    expect(error.errors.fragment).toBeDefined();
+    // MOCK_MODE tests remain largely the same, just ensure they still pass
+    test('should return top_k random entities in MOCK_MODE with no tags', async () => {
+      process.env.MOCK_MODE = 'true';
+      mockNarrativeEntityFind.mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue(leanMock(mockEntitiesData))
+      });
+      const results = await search_storytellers_by_fragment([0.1], null, 2);
+      expect(results.length).toBe(2);
+      expect(mockNarrativeEntityFind).toHaveBeenCalledWith({});
+    });
+
+    test('should filter entities by tags in MOCK_MODE', async () => {
+      process.env.MOCK_MODE = 'true';
+      mockNarrativeEntityFind.mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue(leanMock(mockEntitiesData))
+      });
+      const results = await search_storytellers_by_fragment([], ['sci-fi'], 1);
+      expect(results.length).toBe(1);
+      expect(results[0].name).toBe('Entity Beta');
+    });
+
+    // REAL_MODE tests
+    test('should call Qdrant search and return mapped results in REAL_MODE', async () => {
+      process.env.MOCK_MODE = 'false';
+      const dummyEmbedding = Array.from({ length: 384 }, () => 0.1);
+      const mockQdrantResults = [
+        { id: 'q-id-1', score: 0.9, payload: { name: 'Qdrant Result 1', type: 'Character' } },
+        { id: 'q-id-2', score: 0.85, payload: { name: 'Qdrant Result 2', type: 'Location' } },
+      ];
+      mockQdrantSearch.mockResolvedValue(mockQdrantResults);
+
+      const results = await search_storytellers_by_fragment(dummyEmbedding, ['tag1'], 2);
+
+      expect(mockQdrantSearch).toHaveBeenCalledWith(
+        'storyteller_entities', // QDRANT_COLLECTION_NAME
+        expect.objectContaining({
+          vector: dummyEmbedding,
+          limit: 2,
+          with_payload: true,
+          filter: {
+            must: [{ key: 'universalTraits', match: { any: ['tag1'] } }]
+          }
+        })
+      );
+      expect(results).toEqual([
+        { id: 'q-id-1', score: 0.9, name: 'Qdrant Result 1', type: 'Character' },
+        { id: 'q-id-2', score: 0.85, name: 'Qdrant Result 2', type: 'Location' },
+      ]);
+      expect(mockNarrativeEntityFind).not.toHaveBeenCalled(); // Ensure MongoDB find is not called in real mode
+    });
+
+    test('should call Qdrant search without filter if no tags provided in REAL_MODE', async () => {
+        process.env.MOCK_MODE = 'false';
+        const dummyEmbedding = Array.from({ length: 384 }, () => 0.1);
+        mockQdrantSearch.mockResolvedValue([]); // Return empty for simplicity
+
+        await search_storytellers_by_fragment(dummyEmbedding, [], 3); // Empty tags array
+
+        expect(mockQdrantSearch).toHaveBeenCalledWith(
+          'storyteller_entities',
+          expect.objectContaining({
+            vector: dummyEmbedding,
+            limit: 3,
+            with_payload: true
+            // No 'filter' property should be present or it should be undefined/empty
+          })
+        );
+        // Check that filter is not set or is empty
+        const callArgs = mockQdrantSearch.mock.calls[0][1];
+        expect(callArgs.filter === undefined || callArgs.filter.must.length === 0).toBe(true);
+      });
+
+    test('should handle Qdrant search error gracefully in REAL_MODE', async () => {
+      process.env.MOCK_MODE = 'false';
+      mockQdrantSearch.mockRejectedValue(new Error('Qdrant unavailable'));
+      const dummyEmbedding = Array.from({ length: 384 }, () => 0.1);
+      const results = await search_storytellers_by_fragment(dummyEmbedding, [], 5);
+      expect(results).toEqual([]);
+    });
   });
 });

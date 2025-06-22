@@ -14,5 +14,22 @@ services:
       # Option B: (Uncomment the next line and comment out Option A if you prefer a bind mount)
       # - ./data:/data/db
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333" # REST API
+      - "6334:6334" # gRPC API
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      # QDRANT__SERVICE__API_KEY: # You can set an API key here if needed
+      # For mock mode, we can use an environment variable to conditionally start Qdrant.
+      # However, docker-compose profiles are a better way to manage this.
+      # For now, we'll add the service and assume it will be started.
+      # The application logic will handle mock mode.
+      MOCK_MODE: ${MOCK_MODE:-false} # Defaults to false if not set
+
 volumes:
   mongodb_data:
+  qdrant_storage: # Add this line
