@@ -4,13 +4,14 @@ import cors from 'cors';
 import { promises as fs } from 'fs';
 import path from 'path';
 import {generateInitialChatPrompt, generateInitialScenePrompt} from './ai/openai/prompts.js';
-import { ChatMessage, NarrativeFragment } from './models/models.js'; // Consolidated and corrected ChatMessage import
+import { ChatMessage, NarrativeFragment, SessionVector } from './models/models.js'; // Consolidated and corrected ChatMessage import; Added SessionVector
 import { 
     directExternalApiCall, 
     generateContinuationPrompt,
     generateMasterCartographerChat, // Moved from below
     generateFragmentsBeginnings, // Moved from below
-    generateTypewriterPrompt // Moved from below and verified for /api/send_typewriter_text
+    generateTypewriterPrompt, // Moved from below and verified for /api/send_typewriter_text
+    getWorldbuildingVector // Added for worldbuilding vector generation
 } from './ai/openai/promptsUtils.js';
 import { getMockResponse } from './mocks.js';
 import { fileURLToPath } from 'url';
@@ -427,6 +428,26 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     } else {
       let aiResponse;
       try {
+        // ***** NEW CODE START *****
+        try {
+          console.log(`Attempting to generate worldbuilding vector for session: ${sessionId}`);
+          const worldbuildingVector = await getWorldbuildingVector(message, TYPEWRITER_MOCK_MODE);
+          if (worldbuildingVector) {
+            const newSessionVector = new SessionVector({
+              session_id: sessionId,
+              ...worldbuildingVector // Spread the vector fields
+            });
+            await newSessionVector.save();
+            console.log(`Worldbuilding vector saved for session: ${sessionId}`);
+          } else {
+            console.log(`Worldbuilding vector was null or undefined for session: ${sessionId}. Skipping save.`);
+          }
+        } catch (vectorError) {
+          console.error(`Error generating or saving worldbuilding vector for session ${sessionId}:`, vectorError);
+          // Decide if this error should affect the main response. For now, it won't.
+        }
+        // ***** NEW CODE END *****
+
         const prompt = generateTypewriterPrompt(message);
         aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true);
         
