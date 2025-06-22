@@ -167,7 +167,113 @@ const narrativeTextureSchema = new mongoose.Schema({
   
 export const NarrativeTexture = mongoose.model('NarrativeTexture', narrativeTextureSchema);
 
+/**
+ * @typedef {object} TypewriterKey
+ * @property {string} symbol - The symbol on the typewriter key.
+ * @property {string} description - A description of the typewriter key.
+ */
 
+/**
+ * @typedef {object} VoiceCreation
+ * @property {string} voice - The voice type (e.g., 'female', 'male', 'androgynous').
+ * @property {string} age - The apparent age or age range of the voice (e.g., 'late 20s', 'ancient').
+ * @property {string} style - Descriptive style of the voice (e.g., 'calm, luminous', 'gruff, mechanical').
+ */
+
+/**
+ * Represents a Storyteller profile.
+ * This is the structure expected to be stored in MongoDB and returned by the API.
+ * @typedef {object} StorytellerProfile
+ * @property {string} name - The unique name of the storyteller.
+ * @property {string} immediate_ghost_appearance - A description of the storyteller's initial manifestation.
+ * @property {TypewriterKey} typewriter_key - Details about the storyteller's unique typewriter key.
+ * @property {string[]} influences - An array of influential works, authors, or concepts.
+ * @property {string[]} known_universes - An array of universe names or tags this storyteller is associated with.
+ * @property {number} level - A numerical level or power indicator for the storyteller.
+ * @property {VoiceCreation} voice_creation - Details about the storyteller's voice characteristics.
+ */
+// Storyteller Schema
+const StorytellerSchema = new mongoose.Schema({
+  name: { type: String, required: true, unique: true },
+  immediate_ghost_appearance: { type: String },
+  typewriter_key: {
+    symbol: { type: String },
+    description: { type: String }
+  },
+  influences: { type: [String] },
+  known_universes: { type: [String] },
+  level: { type: Number },
+  voice_creation: {
+    voice: { type: String },
+    age: { type: String },
+    style: { type: String }
+  }
+});
+export const Storyteller = mongoose.model('Storyteller', StorytellerSchema);
+
+export async function generate_storyteller(fragment, universe_tags, influences, excluded_names = []) {
+  const mockStorytellerPath = path.join(__dirname, 'db', 'mock_storytellers.json');
+  let storytellerProfile;
+
+  const readMockStorytellersAndSelectOne = async () => {
+    try {
+      const data = await fsPromises.readFile(mockStorytellerPath, 'utf8');
+      let profiles = JSON.parse(data);
+      if (Array.isArray(excluded_names) && excluded_names.length > 0) {
+        profiles = profiles.filter(profile => !excluded_names.includes(profile.name));
+      }
+      if (profiles.length === 0) {
+        console.error("No storyteller profiles available after filtering.");
+        return null;
+      }
+      return profiles[Math.floor(Math.random() * profiles.length)];
+    } catch (error) {
+      console.error("Error reading or parsing mock_storytellers.json:", error);
+      throw error;
+    }
+  };
+
+  if (process.env.MOCK_STORYTELLER_MODE === 'true' || process.env.ENABLE_LLM_STORYTELLER !== 'true') {
+    console.log("Using mock storyteller generation logic.");
+    storytellerProfile = await readMockStorytellersAndSelectOne();
+  } else {
+    // LLM API Call Logic (currently stubbed to use mock data)
+    const prompt = `--- LLM PROMPT ---
+Generate a unique storyteller profile.
+Fragment context: ${fragment}
+Universe Tags: ${Array.isArray(universe_tags) ? universe_tags.join(', ') : universe_tags}
+Influences: ${Array.isArray(influences) ? influences.join(', ') : influences}
+Excluded Names: ${Array.isArray(excluded_names) ? excluded_names.join(', ') : excluded_names}
+Expected JSON Structure: { name, immediate_ghost_appearance, typewriter_key: {symbol, description}, influences, known_universes, level, voice_creation: {voice, age, style} }
+--- END LLM PROMPT ---`;
+    console.log(prompt);
+
+    console.log("LLM Storyteller generation is stubbed. Using mock data for now.");
+    storytellerProfile = await readMockStorytellersAndSelectOne();
+  }
+
+  if (storytellerProfile) {
+    try {
+      const savedStoryteller = await Storyteller.findOneAndUpdate(
+        { name: storytellerProfile.name },
+        storytellerProfile,
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      console.log('Storyteller profile upserted to MongoDB:', savedStoryteller.name);
+    } catch (error) {
+      console.error('Error upserting storyteller profile to MongoDB:', error);
+      // Depending on requirements, you might want to throw error or handle it differently
+      // For now, we log the error and proceed to return the originally fetched/generated profile
+    }
+  }
+
+  // TODO: Future Vector DB Integration
+  // If a vector database is in use, the storyteller profile (or relevant parts)
+  // would also be processed and upserted/indexed here.
+  // For example: await upsertToVectorDB(storytellerProfile);
+
+  return storytellerProfile;
+}
 
 // New Schemas and Models
 
