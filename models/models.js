@@ -65,3 +65,23 @@ mongoose.connect('mongodb://localhost:27017/storytelling', {
 export const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
 export const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFragmentSchema);
 export const SessionVector = mongoose.model('SessionVector', SessionVectorSchema);
+
+const StorytellerSchema = new mongoose.Schema({
+  name: { type: String, required: true, unique: true },
+  immediate_ghost_appearance: { type: String },
+  typewriter_key: {
+    symbol: { type: String },
+    description: { type: String },
+  },
+  influences: { type: [String] },
+  known_universes: { type: [String] },
+  level: { type: Number },
+  voice_creation: {
+    voice: { type: String },
+    age: { type: String },
+    style: { type: String },
+  },
+  vector: { type: [Number] },
+}, { timestamps: true });
+
+export const Storyteller = mongoose.model('Storyteller', StorytellerSchema);
