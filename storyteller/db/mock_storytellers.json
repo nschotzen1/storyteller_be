@@ -1,0 +1,75 @@
+[
+  {
+    "name": "Ada the Lantern-Bearer",
+    "immediate_ghost_appearance": "A pale woman in oilskin, flickering at the edge of the page; a gust of salt wind and the hiss of a lantern.",
+    "typewriter_key": {
+      "symbol": "lantern",
+      "description": "An old brass lantern engraved on the keycap, emitting a gentle golden glow."
+    },
+    "influences": [
+      "Emily Dickinson",
+      "Gene Wolfe",
+      "Night Witches RPG",
+      "The Expanse (TV)",
+      "Dreamland cycles"
+    ],
+    "known_universes": [
+      "The Drowned Library",
+      "Echoes of Mars",
+      "Portents in Fog"
+    ],
+    "level": 14,
+    "voice_creation": {
+      "voice": "female",
+      "age": "late 20s",
+      "style": "calm, luminous, clipped consonants, faint echo"
+    }
+  },
+  {
+    "name": "The Greasehand",
+    "immediate_ghost_appearance": "A hulking silhouette spattered in machine oil; gears click in the dark as fingers hover over blank keys.",
+    "typewriter_key": {
+      "symbol": "wrench",
+      "description": "A miniature wrench hammered into the side of an otherwise normal typewriter key."
+    },
+    "influences": [
+      "China Miéville",
+      "Industrial Revolution pamphlets",
+      "Degenesis RPG"
+    ],
+    "known_universes": [
+      "Brass and Bone",
+      "The Nettle Yard"
+    ],
+    "level": 7,
+    "voice_creation": {
+      "voice": "male",
+      "age": "40s",
+      "style": "gruff, mechanical undertones, slow pace"
+    }
+  },
+  {
+    "name": "Tess of the Silent Quarter",
+    "immediate_ghost_appearance": "A barely-seen girl in a velvet cloak, reading the room’s shadows; her words emerge in a hush, barely brushing the page.",
+    "typewriter_key": {
+      "symbol": "crescent moon",
+      "description": "A sliver of mother-of-pearl forms a crescent inlaid on the key; faint luminescence in low light."
+    },
+    "influences": [
+      "Franz Kafka",
+      "Angela Carter",
+      "Unknown Armies",
+      "Tales from the Loop"
+    ],
+    "known_universes": [
+      "Nocturne Alley",
+      "Hushed City"
+    ],
+    "level": 5,
+    "voice_creation": {
+      "voice": "female",
+      "age": "17",
+      "style": "whispery, uncertain, with a trace of awe"
+    }
+  }
+]

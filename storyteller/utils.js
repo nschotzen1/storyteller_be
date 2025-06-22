@@ -1,7 +1,7 @@
 import fs from 'fs';
 import mongoose from 'mongoose';
 import * as fsPromises from 'fs/promises';
-import { NarrativeFragment, ChatMessage } from '../models/models.js';
+import { NarrativeFragment, ChatMessage, Storyteller } from '../models/models.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -1092,7 +1092,72 @@ export async function storytellerDetectiveFirstParagraphCreation(sessionId, user
 
 // module.exports removed, functions are exported individually.
 
+// Storyteller CRUD functions
+export async function createStoryteller(storytellerData) {
+  try {
+    const storyteller = new Storyteller(storytellerData);
+    await storyteller.save();
+    return storyteller;
+  } catch (error) {
+    console.error("Error creating storyteller:", error);
+    throw error;
+  }
+}
 
+export async function findStoryteller(query) {
+  try {
+    const storytellers = await Storyteller.find(query);
+    return storytellers;
+  } catch (error) {
+    console.error("Error finding storytellers:", error);
+    throw error;
+  }
+}
+
+export async function findStorytellerByName(name) {
+  try {
+    const storyteller = await Storyteller.findOne({ name: name });
+    return storyteller;
+  } catch (error) {
+    console.error("Error finding storyteller by name:", error);
+    throw error;
+  }
+}
+
+export async function updateStoryteller(name, updates) {
+  try {
+    // Ensure `updatedAt` is set, Mongoose does this by default with {timestamps: true}
+    const storyteller = await Storyteller.findOneAndUpdate({ name: name }, updates, { new: true });
+    return storyteller;
+  } catch (error) {
+    console.error("Error updating storyteller:", error);
+    throw error;
+  }
+}
+
+export async function deleteStoryteller(name) {
+  try {
+    const result = await Storyteller.findOneAndDelete({ name: name });
+    return result || { message: "Storyteller not found or already deleted." };
+  } catch (error) {
+    console.error("Error deleting storyteller:", error);
+    throw error;
+  }
+}
+
+export async function upsertStoryteller(storytellerData) {
+  try {
+    const storyteller = await Storyteller.findOneAndUpdate(
+      { name: storytellerData.name },
+      storytellerData,
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    return storyteller;
+  } catch (error) {
+    console.error("Error upserting storyteller:", error);
+    throw error;
+  }
+}
 
 // "step_number": 4,
 // "step_title": "Location Element",
