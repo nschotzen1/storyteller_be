@@ -262,12 +262,13 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     }
 
     console.log(`✍️ Typewriter API — Session: ${sessionId} — Message: ${message}`);
-    let should_mock = false
+    let should_mock = true
+
     if (should_mock) {
       const wordCount = message.trim().split(/\s+/).length;
       let mockAIResponse; // Renamed for clarity to avoid conflict with mockResponse variable if it's in a broader scope
 
-      if (wordCount <= 5) {
+      if (wordCount <= 6) {
         // Short addition
         const shortMetadata = {
             font: "'Uncial Antiqua', serif",
@@ -305,6 +306,13 @@ app.post('/api/send_typewriter_text', async (req, res) => {
             ],
             metadata: shortMetadata
         };
+      // else if (wordCount <= 9){
+      //   mockAiResponse = {"writing_sequence":
+      //     [{"action":"type","thoughtProcess":"Begin by clarifying the intent behind the phrase: someone long ago uttered a condemnation. Make this character both distant and present—a shadow of authority.","existing_fragment":"\\n\\n\\nwho ever it was that said it was wrong","continuation":" had never seen the way dawn burned gold on her face.","delay":0,"style":{"fontName":"Merriweather","fontSize":17,"fontColor":"#252525"}},
+      //       {"action":"pause","delay":200},
+      //       {"action":"type","thoughtProcess":"Sharpen the emotional edge: contrast judgement with what is precious or true for the viewpoint character. Add a second clause to emphasize disregard for external decrees.","existing_fragment":"\\n\\n\\nwho ever it was that said it was wrong had never seen the way dawn burned gold on her face.","continuation":" He had listened, once. No longer.","delay":0,"style":{"fontName":"Merriweather","fontSize":17,"fontColor":"#252525"}}]
+      //       ,"fade_sequence":[{"action":"fade","phase":1,"thoughtProcess":"Tweak the tone—make the quoted condemnation irrelevant through irony. Offer a brief, defiant sentence.","existing_fragment":"\\n\\n\\nwho ever it was that said it was wrong","continuation":" clearly didn’t know her at all.","delay":0,"style":{"fontName":"Playfair Display","fontSize":16,"fontColor":"#312F2F"}},{"action":"fade","phase":2,"thoughtProcess":"Make the speaker question and unravel the value of those decrees; employ direct, letter-writer style.","existing_fragment":"\\n\\n\\nwho ever it was that said it was wrong","continuation":" never cared enough to ask why I did it.","delay":0,"style":{"fontName":"Amiri","fontSize":15,"fontColor":"#505040"}},{"action":"fade","phase":3,"thoughtProcess":"Elevate to a classical, almost mythic register—make the judge anonymous, cold, distant from the warmth of human motive.","existing_fragment":"\\n\\n\\nwho ever it was that said it was wrong","continuation":" had long since vanished into history’s dust.","delay":0,"style":{"fontName":"Roboto Slab","fontSize":15,"fontColor":"#292929"}},{"action":"fade","phase":4,"thoughtProcess":"Think: interior reflection. Show the narrator’s resignation—a sigh, world-weary and self-contained.","existing_fragment":"\\n\\n\\nwho ever it was that said it was wrong","continuation":"—well, it didn’t matter anymore.","delay":0,"style":{"fontName":"JetBrains Mono","fontSize":13,"fontColor":"#3A3E44"}}],"metadata":{"font":"'Merriweather', serif","font_size":17,"font_color":"#252525"}}}
+      // }
       } else if (wordCount <= 12) {
         // Medium addition
         const mediumMetadata = {
