@@ -12,12 +12,12 @@ import {
   directExternalApiCall, 
   generateMasterStorytellerChat, 
   generateMasterStorytellerConclusionChat, 
-  askForBooksGeneration,
   generateStorytellerSummaryPropt, 
   generateStorytellerDetectiveFirstParagraphSession, 
   generateStorytellerDetectiveFirstParagraphLetter, 
   generate_entities_by_fragment 
 } from "../ai/openai/promptsUtils.js";
+import { askForBooksGeneration } from "../ai/openai/bookPrompts.js";
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
 
 // Import 'text' from express, aliasing if necessary (though its usage here is unusual)

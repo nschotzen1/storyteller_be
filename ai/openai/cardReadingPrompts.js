@@ -1,5 +1,5 @@
 
-import { directExternalApiCall, generate_texture_by_fragment_and_conversation } from './promptsUtils.js';
+import { directExternalApiCall } from './apiService.js';
 import fs from 'fs'; // fs is imported but not used in the provided code snippet.
 
 
