@@ -6,7 +6,8 @@ import pathNode from 'path'; // Renaming to avoid conflict with the existing 'pa
 
 // Assuming these are named exports from the respective files
 import { directExternalApiCall, generateMasterCartographerChat, generatePrefixesPrompt2, generateFragmentsBeginnings, 
-  generateContinuationPrompt, generateMasterStorytellerChat, generateMasterStorytellerConclusionChat, askForBooksGeneration } from "./ai/openai/promptsUtils.js";
+  generateContinuationPrompt, generateMasterStorytellerChat, generateMasterStorytellerConclusionChat } from "./ai/openai/promptsUtils.js";
+import { askForBooksGeneration } from "./ai/openai/bookPrompts.js";
 import { generateTextureImgFromPrompt, generateTextureOptionsByText, developEntity } from "./ai/textToImage/api.js";
 import { chatWithStoryteller, saveFragment, updateTurn, getTurn, storytellerDetectiveFirstParagraphCreation, generateEntitiesFromFragment } from './storyteller/utils.js';
 
