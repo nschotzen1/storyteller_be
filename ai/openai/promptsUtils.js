@@ -1,3 +1,4 @@
+import { directExternalApiCall } from "./promptUtilsMore.js";
 /**
  * Generates a prompt for an LLM to analyze a narrative fragment and return its worldbuilding "vector"
  * as a JSON object.
