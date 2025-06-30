@@ -1,4 +1,5 @@
-import { directExternalApiCall, characterCreationInitialOptionsPrompt } from "../ai/openai/promptsUtils.js";
+import { directExternalApiCall } from "../ai/openai/apiService.js";
+import { characterCreationInitialOptionsPrompt } from "../ai/openai/characterPrompts.js";
 import { textToImageOpenAi, characterCreationOptionPrompt } from "../ai/textToImage/api.js";
 import { 
     getChosenTexture, 

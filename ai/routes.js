@@ -1,4 +1,6 @@
-import { directExternalApiCall } from "./ai/openai/promptsUtils.js";
+import { directExternalApiCall } from "./openai/apiService.js";
+import { getFragment, getEntitiesForSession, setEntitiesForSession } from "../storyteller/utils.js";
+import { generateInitialChatPrompt } from "./openai/personaChatPrompts.js";
 
 async function developEntity({sessionId, entityId, developmentPoints}){
 
@@ -21,9 +23,9 @@ async function developEntity({sessionId, entityId, developmentPoints}){
     
     // Await entity development function
     const entity = entities[entityIndex]
-    const prompt = initialChatPrompt();
+    const promptMessages = generateInitialChatPrompt(); // Corrected function call, result is an array
     // Call external API
-    const externalApiResponse = await directExternalApiCall([prompt], 2500, undefined, undefined, true, undefined);
+    const externalApiResponse = await directExternalApiCall(promptMessages, 2500, undefined, undefined, true, undefined);
     await setEntitiesForSession(sessionId, entities);
 
 

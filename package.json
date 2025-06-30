@@ -18,12 +18,12 @@
     "openai": "^4.20.0",
     "package.json": "^2.0.1",
     "stability-client": "^1.9.0",
-    "stable-diffusion-es": "^1.1.0"
+    "stable-diffusion-es": "^1.1.0",
+    "mongoose": "^8.15.0"
   },
   "devDependencies": {
     "jest": "^29.7.0",
     "mongodb-memory-server": "^10.1.4",
-    "mongoose": "^8.15.0",
     "supertest": "^7.1.1"
   }
 }

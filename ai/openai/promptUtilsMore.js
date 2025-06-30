@@ -1,817 +1,38 @@
-import { directExternalApiCall } from "./apiService.js";
-/**
- * Generates a prompt for an LLM to analyze a narrative fragment and return its worldbuilding "vector"
- * as a JSON object.
- *
- * @param {string} narrativeFragment - The narrative fragment to analyze.
- * @returns {string} The prompt string for the LLM.
- */
-function generateWorldbuildingVectorPrompt(narrativeFragment) {
-  const schema = {
-    magic_prevalence: ["none", "rare", "hidden", "common", "ubiquitous"],
-    magic_system: ["none", "wild", "ritualistic", "structured", "artifact-based", "divine", "soft"],
-    magic_source: ["none", "innate", "learned", "artifact", "divine", "environmental"],
-    magic_cultural_role: ["none", "celebrated", "feared", "regulated", "taboo", "ignored"],
+import { OpenAI } from 'openai';
+// import { OPENAI_KEYS } from './keke.js'; // Removed: API keys will come from environment variables
+import { Anthropic } from '@anthropic-ai/sdk';
+import express from 'express'; // 'e' was previously imported but not used. Changed to 'express' for clarity if it were to be used.
 
-    supernatural_manifestation: ["none", "subtle", "overt", "mundane", "cosmic"],
-    supernatural_agency: ["none", "benign", "malevolent", "ambiguous", "neutral"],
-    supernatural_integration: ["none", "central", "peripheral", "atmospheric", "background"],
 
-    apocalyptic_temporal_focus: ["none", "pre-apocalypse", "during", "post-apocalypse", "cyclical"],
-    apocalyptic_scope: ["none", "personal", "regional", "global", "cosmic"],
-    apocalyptic_cause: ["none", "natural", "supernatural", "war", "disease", "technological", "unknown"],
-    apocalyptic_tone: ["none", "grim", "redemptive", "nihilistic", "hopeful"],
+const KEYS_TYPE = {
+    BALANCE: "BALANCE",
+    FREE: "FREE",
+};
 
-    gothic_setting: ["none", "ruins", "castle", "urban decay", "crypts", "forest"],
-    gothic_tone: ["none", "melancholic", "oppressive", "suspenseful", "decadent"],
-    gothic_motifs: ["madness", "family secrets", "the uncanny", "haunting", "decay"],
-    gothic_role_of_past: ["none", "haunting", "influential", "ignored"],
 
-    technology_level: ["none", "prehistoric", "ancient", "medieval", "steampunk", "industrial", "modern", "sci-fi", "cyberpunk", "post-singularity"],
-    technology_integration: ["absent", "background", "central", "ubiquitous"],
+const openAIConfig = {
+    model: "gpt-4",
+    temperature: 0.89,
+};
 
-    urbanization_settlement_type: ["none", "wilds", "village", "town", "city", "megacity", "arcology"],
-    urbanization_density: ["none", "sparse", "scattered", "dense", "overcrowded"],
-
-    religiosity_dominant_belief: ["none", "animist", "polytheistic", "monotheistic", "atheist", "cultic", "syncretic"],
-    religiosity_power: ["none", "marginal", "influential", "dominant", "theocratic"],
-
-    scale_physical: ["intimate", "local", "regional", "global", "planetary", "interstellar", "multiverse"],
-    scale_temporal: ["day", "generation", "century", "epoch", "timeless"],
-
-    social_structure_system: ["none", "tribal", "feudal", "caste", "capitalist", "anarchic", "egalitarian", "matriarchal", "patriarchal"],
-    social_structure_mobility: ["none", "frozen", "rigid", "mobile", "fluid"],
-
-    genre_tropes_style: ["none", "heroic", "grimdark", "noir", "fairy tale", "satire", "picaresque", "weird", "hard SF", "soft SF", "romantic", "mythic"]
-  };
-
-  const prompt = `Analyze the following narrative fragment and return a JSON object representing its worldbuilding "vector."
-
-Narrative Fragment:
-"""
-${narrativeFragment}
-"""
-
-Schema:
-${JSON.stringify(schema, null, 2)}
-
-Instructions:
-For each property in the schema, select the most likely value from the given options (return the string, not the index).
-For 'gothic_motifs', return a list of up to 3 values from the options (or an empty list if none are suggested).
-If the fragment gives no hint for a property, choose 'none' (or an empty list for 'gothic_motifs').
-Return only the JSON object. Do not explain or summarize.`;
-
-  return prompt;
-}
-
-/**
- * Retrieves the worldbuilding vector for a given narrative fragment, either from a mock source or by calling an LLM.
- *
- * @param {string} narrativeFragment - The narrative fragment to analyze.
- * @param {boolean} [mock=false] - If true, returns a mock worldbuilding vector.
- * @returns {Promise<object>|object} - A promise resolving to the LLM's JSON response, or a direct JSON object if mock is true.
- */
-async function getWorldbuildingVector(narrativeFragment, mock = false) {
-  if (mock) {
-    return {
-      magic_prevalence: "rare",
-      magic_system: "ritualistic",
-      magic_source: "learned",
-      magic_cultural_role: "feared",
-      supernatural_manifestation: "subtle",
-      supernatural_agency: "ambiguous",
-      supernatural_integration: "peripheral",
-      apocalyptic_temporal_focus: "post-apocalypse",
-      apocalyptic_scope: "regional",
-      apocalyptic_cause: "unknown",
-      apocalyptic_tone: "grim",
-      gothic_setting: "ruins",
-      gothic_tone: "melancholic",
-      gothic_motifs: ["decay", "haunting"],
-      gothic_role_of_past: "haunting",
-      technology_level: "medieval",
-      technology_integration: "background",
-      urbanization_settlement_type: "village",
-      urbanization_density: "sparse",
-      religiosity_dominant_belief: "polytheistic",
-      religiosity_power: "influential",
-      scale_physical: "local",
-      scale_temporal: "generation",
-      social_structure_system: "feudal",
-      social_structure_mobility: "rigid",
-      genre_tropes_style: "grimdark"
-    };
-  }
-
-  const prompt = generateWorldbuildingVectorPrompt(narrativeFragment);
-  // Parameters for directExternalApiCall:
-  // prompt: string, max_tokens: number, model: string (optional), temperature: number (optional),
-  // isOpenAi: boolean, explicitJsonObjectFormat: boolean
-  // Assuming directExternalApiCall is available in the scope, as per updated instructions.
-  const llmResponse = await directExternalApiCall([prompt], 2500, undefined, undefined, true, true);
-  return llmResponse; // Assuming directExternalApiCall parses JSON if explicitJsonObjectFormat is true
-}
-
-function getNerTypes(){
-  const nerTypes =  {
-      "Entities": {
-        "Subtypes": ["Characters", "Races/Species", "Factions/Organizations", "Deities/Religious Figures", "Creatures/Monsters"]
-      },
-      "Locations": {
-        "Subtypes": ["Cities/Towns", "Regions/Provinces", "Landmarks", "Natural Terrain", "Otherworldly Planes", "Dungeons/Lairs"]
-      },
-      "Items": {
-        "Subtypes": ["Weapons", "Armor", "Artifacts/Relics", "Vehicles", "Magical Items", "Tools/Gadgets"]
-      },
-      "Skills": {
-        "Subtypes": ["Combat Skills", "Social Skills", "Survival Skills", "Magic/Tech Abilities", "Physical Attributes"]
-      },
-      "Mechanics": {
-        "Subtypes": ["Combat Mechanics", "Survival Systems", "Social Interaction", "Exploration Systems", "Naval/Aerial Combat", "Magic/Technology Rules", "Crafting/Alchemy Systems"]
-      },
-      "Lore": {
-        "Subtypes": ["Myths/Legends", "Political History", "Wars/Conflicts", "Religious Stories", "Cultural Traditions", "Technology Evolution"]
-      },
-      "Organizations": {
-        "Subtypes": ["Political Factions", "Religious Orders", "Military Units", "Trade Guilds", "Criminal Syndicates", "Secret Societies"]
-      },
-      "Economics": {
-        "Subtypes": ["Trade Routes", "Markets/Merchants", "Currencies", "Resources/Commodities"]
-      },
-      "Events": {
-        "Subtypes": ["Wars/Battles", "Cataclysms/Disasters", "Festivals/Celebrations", "Prophecies", "Historical Turning Points"]
-      },
-      "Environment": {
-        "Subtypes": ["Climates", "Weather Conditions", "Natural Disasters"]
-      }
+export function chooseApiKey() {
+    const keysList = process.env.OPENAI_API_KEYS_LIST;
+    if (!keysList) {
+        throw new Error('OPENAI_API_KEYS_LIST environment variable is not set.');
     }
-    return nerTypes
-}
-
-function getNArchetypes(n) {
-  const archetypes =[
-    {
-      "archetype_name": "YRL",
-      "symbol": "circle broken at the bottom",
-      "fundamental_meaning": "Transition, vulnerability, and portals for transformation.",
-      "dimension": "Boundaries and Change",
-      "tone": "Ephemeral, Transitional, Unstable",
-      "primary_narrative_impact": "Defines thresholds—moments of change and liminality.",
-      "NER_associations": {
-        "Entities": ["Deities of thresholds", "Transformative heroes"],
-        "Locations": ["Gateways", "Borderlands"],
-        "Items": ["Artifacts symbolizing change", "Portals"],
-        "Events": ["Epochal shifts", "Transitions"],
-        "Mechanics": ["Dimensional travel", "Phase transitions"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Liminal zones", "Transitional regions"],
-          "Structures": ["Ritual sites", "Waystations"],
-          "Capabilities": ["Portal mechanics", "Transitional magic"],
-          "Organizations": ["Cultures embracing change"],
-          "People": ["Migratory populations"],
-          "Events": ["Seasonal transitions"]
-        },
-        "PMESII": {
-          "Political": ["Reform movements"],
-          "Military": ["Mobile units"],
-          "Economic": ["Fluctuating markets"],
-          "Social": ["Transient communities"]
-        }
-      }
-    },
-    {
-      "archetype_name": "KAI",
-      "symbol": "three intersecting triangles",
-      "fundamental_meaning": "Unity of opposing forces—creation, balance, and change.",
-      "dimension": "Creation and Balance",
-      "tone": "Dynamic, Constructive, Cyclical",
-      "primary_narrative_impact": "Structures the creative/destructive cycles of the universe.",
-      "NER_associations": {
-        "Entities": ["Founders", "Creator deities"],
-        "Locations": ["Origin sites", "Sacred geometries"],
-        "Items": ["Artifacts of creation"],
-        "Lore": ["Foundational myths"],
-        "Mechanics": ["Constructive processes", "Alchemical reactions"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Creative hubs"],
-          "Structures": ["Temples", "Workshops"],
-          "Capabilities": ["Creation magic", "Artisan crafts"],
-          "Organizations": ["Guilds of creation"],
-          "People": ["Inventors", "Artisans"],
-          "Events": ["Foundational rituals"]
-        },
-        "PMESII": {
-          "Political": ["Civic foundations"],
-          "Military": ["Structured forces"],
-          "Economic": ["Craft economies"],
-          "Social": ["Cultural renaissance"]
-        }
-      }
-    },
-    {
-      "archetype_name": "VDA",
-      "symbol": "crescent cradling a dot",
-      "fundamental_meaning": "Protection, growth, and cycles of life.",
-      "dimension": "Nurturing and Potential",
-      "tone": "Calm, Protective, Gentle",
-      "primary_narrative_impact": "Emphasizes growth, healing, and protective energies.",
-      "NER_associations": {
-        "Entities": ["Guardians", "Healers"],
-        "Locations": ["Sanctuaries", "Gardens"],
-        "Items": ["Relics of healing"],
-        "Lore": ["Legends of rebirth"],
-        "Mechanics": ["Healing systems", "Growth mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Life-sustaining regions"],
-          "Structures": ["Healing temples", "Gardens"],
-          "Capabilities": ["Regeneration", "Nurturing magic"],
-          "Organizations": ["Healer guilds"],
-          "People": ["Nurturing leaders"],
-          "Events": ["Rituals of rebirth"]
-        },
-        "PMESII": {
-          "Political": ["Stabilizing governments"],
-          "Military": ["Defensive units"],
-          "Economic": ["Agricultural economies"],
-          "Social": ["Community bonds"]
-        }
-      }
-    },
-    {
-      "archetype_name": "MOR",
-      "symbol": "spiral emerging from a square",
-      "fundamental_meaning": "Order evolving into chaos or growth within structure.",
-      "dimension": "Transformation and Evolution",
-      "tone": "Chaotic, Transformational, Expansive",
-      "primary_narrative_impact": "Drives evolutionary forces—constant change and progression.",
-      "NER_associations": {
-        "Entities": ["Revolutionaries", "Shapeshifters"],
-        "Locations": ["Ever-changing cities", "Mutating landscapes"],
-        "Items": ["Transformative relics"],
-        "Lore": ["Myths of metamorphosis"],
-        "Mechanics": ["Evolutionary systems", "Dynamic changes"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Dynamic regions"],
-          "Structures": ["Evolving fortresses"],
-          "Capabilities": ["Adaptive technologies"],
-          "Organizations": ["Revolutionary groups"],
-          "People": ["Innovators", "Transformers"],
-          "Events": ["Rebellions", "Natural metamorphoses"]
-        },
-        "PMESII": {
-          "Political": ["Revolutionary factions"],
-          "Military": ["Agile units"],
-          "Economic": ["Boom-bust cycles"],
-          "Social": ["Cultural shifts"]
-        }
-      }
-    },
-    {
-      "archetype_name": "ZHR",
-      "symbol": "square divided by a vertical line",
-      "fundamental_meaning": "Duality within stability—balance between two distinct states.",
-      "dimension": "Duality and Structure",
-      "tone": "Stable, Balanced, Formal",
-      "primary_narrative_impact": "Represents the equilibrium of contrasting forces.",
-      "NER_associations": {
-        "Entities": ["Judges", "Mediators"],
-        "Locations": ["Structured cities", "Divided realms"],
-        "Items": ["Scales", "Balanced artifacts"],
-        "Lore": ["Tales of duality"],
-        "Mechanics": ["Balancing systems"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Strategic regions"],
-          "Structures": ["Judicial halls", "Fortified cities"],
-          "Capabilities": ["Defensive systems"],
-          "Organizations": ["Law enforcers"],
-          "People": ["Arbiter figures"],
-          "Events": ["Balance-restoring rituals"]
-        },
-        "PMESII": {
-          "Political": ["Stable governments"],
-          "Military": ["Defensive forces"],
-          "Economic": ["Regulated markets"],
-          "Social": ["Cultural equilibrium"]
-        }
-      }
-    },
-    {
-      "archetype_name": "TAM",
-      "symbol": "two parallel lines with a diagonal cut",
-      "fundamental_meaning": "Separation and connection—division that leads to unity.",
-      "dimension": "Separation and Connection",
-      "tone": "Fragmented, Resolving, Transitional",
-      "primary_narrative_impact": "Highlights the process of breaking apart and coming together.",
-      "NER_associations": {
-        "Entities": ["Exiles", "Reunifiers"],
-        "Locations": ["Divided lands", "Bridging structures"],
-        "Items": ["Fragmented relics"],
-        "Lore": ["Stories of lost unity"],
-        "Mechanics": ["Systems of separation and integration"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Border regions"],
-          "Structures": ["Bridges", "Checkpoint fortifications"],
-          "Capabilities": ["Connection mechanics"],
-          "Organizations": ["Uniting factions"],
-          "People": ["Diplomats"],
-          "Events": ["Reunification ceremonies"]
-        },
-        "PMESII": {
-          "Political": ["Transitional governments"],
-          "Military": ["Reorganizing forces"],
-          "Economic": ["Fragmented markets"],
-          "Social": ["Community healing"]
-        }
-      }
-    },
-    {
-      "archetype_name": "LIS",
-      "symbol": "intertwined loops forming an infinity sign",
-      "fundamental_meaning": "Continuity and eternal flow—cycles and interconnectedness.",
-      "dimension": "Continuity and Flow",
-      "tone": "Endless, Harmonious, Fluid",
-      "primary_narrative_impact": "Creates binding cycles that connect elements of the universe.",
-      "NER_associations": {
-        "Entities": ["Ancient beings", "Eternal guardians"],
-        "Locations": ["Sacred groves", "Timeless realms"],
-        "Items": ["Relics of eternity"],
-        "Lore": ["Legends of infinite cycles"],
-        "Mechanics": ["Perpetual systems", "Cycle-based mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Timeless regions"],
-          "Structures": ["Ancient monuments"],
-          "Capabilities": ["Perpetual magic"],
-          "Organizations": ["Custodians of lore"],
-          "People": ["Elders", "Sages"],
-          "Events": ["Eternal festivals"]
-        },
-        "PMESII": {
-          "Political": ["Steady administrations"],
-          "Military": ["Long-standing orders"],
-          "Economic": ["Sustained economies"],
-          "Social": ["Tradition-bound communities"]
-        }
-      }
-    },
-    {
-      "archetype_name": "VOR",
-      "symbol": "arrow piercing a concentric circle",
-      "fundamental_meaning": "Focused intent—breaking barriers and achieving targets.",
-      "dimension": "Focus and Action",
-      "tone": "Direct, Forceful, Purposeful",
-      "primary_narrative_impact": "Drives decisive action and clear narrative trajectories.",
-      "NER_associations": {
-        "Entities": ["Warriors", "Heroes"],
-        "Locations": ["Battlefields", "Target zones"],
-        "Items": ["Weapons", "Tools of focus"],
-        "Lore": ["Epic tales of conquest"],
-        "Mechanics": ["Action systems", "Direct combat mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Conflict zones"],
-          "Structures": ["Fortified battlegrounds"],
-          "Capabilities": ["Combat prowess"],
-          "Organizations": ["Military units"],
-          "People": ["Leaders", "Strategists"],
-          "Events": ["Decisive battles"]
-        },
-        "PMESII": {
-          "Political": ["Authoritarian regimes"],
-          "Military": ["Elite forces"],
-          "Economic": ["War-driven economies"],
-          "Social": ["Hero cults"]
-        }
-      }
-    },
-    {
-      "archetype_name": "SHM",
-      "symbol": "triangle pointing downward with a missing base",
-      "fundamental_meaning": "Potential energy waiting to manifest—grounded yet brimming with latent power.",
-      "dimension": "Potential and Grounding",
-      "tone": "Mystical, Rooted, Anticipatory",
-      "primary_narrative_impact": "Represents hidden strength and untapped possibilities.",
-      "NER_associations": {
-        "Entities": ["Mystics", "Recluses"],
-        "Locations": ["Hidden enclaves", "Sacred sites"],
-        "Items": ["Dormant relics"],
-        "Lore": ["Tales of hidden power"],
-        "Mechanics": ["Latent ability systems", "Potential unlocking mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Secluded regions"],
-          "Structures": ["Mystic shrines"],
-          "Capabilities": ["Hidden talents"],
-          "Organizations": ["Secret societies"],
-          "People": ["Isolated geniuses"],
-          "Events": ["Revelatory occurrences"]
-        },
-        "PMESII": {
-          "Political": ["Secretive factions"],
-          "Military": ["Guerrilla groups"],
-          "Economic": ["Black markets"],
-          "Social": ["Underground communities"]
-        }
-      }
-    },
-    {
-      "archetype_name": "OKO",
-      "symbol": "spiral enclosed in a square",
-      "fundamental_meaning": "Inner growth within boundaries—personal evolution constrained by external structures.",
-      "dimension": "Containment and Growth",
-      "tone": "Restrained, Focused, Evolving",
-      "primary_narrative_impact": "Explores the tension between inner potential and external limitations.",
-      "NER_associations": {
-        "Entities": ["Scholars", "Ascetics"],
-        "Locations": ["Fortified academies", "Sacred libraries"],
-        "Items": ["Books of knowledge", "Artifacts of growth"],
-        "Lore": ["Philosophies of self-improvement"],
-        "Mechanics": ["Skill progression systems", "Constrained growth mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Learning centers"],
-          "Structures": ["Libraries", "Temples"],
-          "Capabilities": ["Knowledge systems"],
-          "Organizations": ["Scholar guilds"],
-          "People": ["Mentors", "Students"],
-          "Events": ["Enlightenment rituals"]
-        },
-        "PMESII": {
-          "Political": ["Bureaucracies"],
-          "Military": ["Trained units"],
-          "Economic": ["Knowledge-based economies"],
-          "Social": ["Educational traditions"]
-        }
-      }
-    },
-    {
-      "archetype_name": "YSR",
-      "symbol": "two scales hanging from a suspended point",
-      "fundamental_meaning": "Justice, balance, and the weighing of choices.",
-      "dimension": "Equilibrium and Justice",
-      "tone": "Measured, Fair, Reflective",
-      "primary_narrative_impact": "Establishes themes of fairness and balance across the universe.",
-      "NER_associations": {
-        "Entities": ["Judges", "Mediators"],
-        "Locations": ["Courthouses", "Sacred grounds"],
-        "Items": ["Scales", "Symbols of justice"],
-        "Lore": ["Epic trials"],
-        "Mechanics": ["Balance systems", "Judicial mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Judicial districts"],
-          "Structures": ["Courthouses"],
-          "Capabilities": ["Regulation systems"],
-          "Organizations": ["Legal orders"],
-          "People": ["Mediators", "Arbiters"],
-          "Events": ["Judicial proceedings"]
-        },
-        "PMESII": {
-          "Political": ["Legalistic regimes"],
-          "Military": ["Defensive units"],
-          "Economic": ["Equitable markets"],
-          "Social": ["Community councils"]
-        }
-      }
-    },
-    {
-      "archetype_name": "KOL",
-      "symbol": "inverted T with a small circle above it",
-      "fundamental_meaning": "Bridge between higher and lower realms—connecting the mundane with the divine.",
-      "dimension": "Connection and Mediation",
-      "tone": "Mystical, Bridging, Elevated",
-      "primary_narrative_impact": "Facilitates interaction between disparate layers of reality.",
-      "NER_associations": {
-        "Entities": ["Oracles", "Mediators"],
-        "Locations": ["Sacred altars", "Intermediary realms"],
-        "Items": ["Bridging artifacts"],
-        "Lore": ["Legends of ascension"],
-        "Mechanics": ["Mediation systems", "Transcendence mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Intermediary zones"],
-          "Structures": ["Altars", "Bridges"],
-          "Capabilities": ["Transcendental connections"],
-          "Organizations": ["Mystic orders"],
-          "People": ["Priests", "Sages"],
-          "Events": ["Ascension rites"]
-        },
-        "PMESII": {
-          "Political": ["Theocratic regimes"],
-          "Military": ["Spiritual guardians"],
-          "Economic": ["Temple-based resource distribution"],
-          "Social": ["Cult-like communities"]
-        }
-      }
-    },
-    {
-      "archetype_name": "NEH",
-      "symbol": "snake coiled around an open triangle",
-      "fundamental_meaning": "Cycles of renewal, transformation, and hidden power.",
-      "dimension": "Renewal and Transformation",
-      "tone": "Mysterious, Serpentine, Regenerative",
-      "primary_narrative_impact": "Embodies the perpetual cycle of death and rebirth, encouraging hidden growth.",
-      "NER_associations": {
-        "Entities": ["Reborn entities", "Secretive sages"],
-        "Locations": ["Ancient ruins", "Hidden groves"],
-        "Items": ["Regenerative relics"],
-        "Lore": ["Myths of rebirth"],
-        "Mechanics": ["Regeneration systems", "Cyclic mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Ancient or forgotten lands"],
-          "Structures": ["Ruins", "Shrines"],
-          "Capabilities": ["Rebirth mechanics"],
-          "Organizations": ["Cult of renewal"],
-          "People": ["Mystics", "Outcasts"],
-          "Events": ["Rituals of rebirth"]
-        },
-        "PMESII": {
-          "Political": ["Revolutionary groups"],
-          "Military": ["Guerrilla forces"],
-          "Economic": ["Fluctuating markets"],
-          "Social": ["Communal networks"]
-        }
-      }
-    },
-    {
-      "archetype_name": "MES",
-      "symbol": "wave cutting through a vertical line",
-      "fundamental_meaning": "Disruption and flow—overcoming obstacles through adaptability.",
-      "dimension": "Disruption and Fluidity",
-      "tone": "Energetic, Unpredictable, Adaptive",
-      "primary_narrative_impact": "Introduces dynamic change and breaks static orders.",
-      "NER_associations": {
-        "Entities": ["Rebels", "Agents of change"],
-        "Locations": ["Fluid frontiers", "Shifting landscapes"],
-        "Items": ["Artifacts of change"],
-        "Lore": ["Legends of revolution"],
-        "Mechanics": ["Adaptive systems", "Flow mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Shifting territories"],
-          "Structures": ["Mobile fortifications"],
-          "Capabilities": ["Flow-based mechanics"],
-          "Organizations": ["Rebel groups"],
-          "People": ["Change-makers"],
-          "Events": ["Revolutionary moments"]
-        },
-        "PMESII": {
-          "Political": ["Unstable governments"],
-          "Military": ["Irregular forces"],
-          "Economic": ["Dynamic markets"],
-          "Social": ["Subcultures"]
-        }
-      }
-    },
-    {
-      "archetype_name": "ZAK",
-      "symbol": "zigzag lightning bolt striking a circle",
-      "fundamental_meaning": "Sudden change—revelation and power unleashed.",
-      "dimension": "Sudden Disruption",
-      "tone": "Explosive, Shocking, Unpredictable",
-      "primary_narrative_impact": "Triggers immediate transformation and dramatic twists.",
-      "NER_associations": {
-        "Entities": ["Catalysts", "Unpredictable forces"],
-        "Locations": ["Epic battlegrounds", "Sites of cataclysm"],
-        "Items": ["Weapons of change", "Cursed artifacts"],
-        "Lore": ["Myths of sudden upheaval"],
-        "Mechanics": ["Instant disruption mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Conflict hotspots"],
-          "Structures": ["Collapsed structures"],
-          "Capabilities": ["Shockwave abilities"],
-          "Organizations": ["Radical factions"],
-          "People": ["Revolutionary leaders"],
-          "Events": ["Sudden revolts"]
-        },
-        "PMESII": {
-          "Political": ["Revolutionary governments"],
-          "Military": ["Shock troops"],
-          "Economic": ["Disrupted markets"],
-          "Social": ["Crisis responses"]
-        }
-      }
-    },
-    {
-      "archetype_name": "TYN",
-      "symbol": "fragmented square with an ascending line",
-      "fundamental_meaning": "Breaking free—progression from limitation toward growth.",
-      "dimension": "Liberation and Ascent",
-      "tone": "Uplifting, Progressive, Aspirational",
-      "primary_narrative_impact": "Promotes overcoming constraints and reaching new heights.",
-      "NER_associations": {
-        "Entities": ["Revolutionaries", "Visionaries"],
-        "Locations": ["Broken cities", "Rising landmarks"],
-        "Items": ["Shattered relics"],
-        "Lore": ["Tales of overcoming oppression"],
-        "Mechanics": ["Progression systems", "Ascension mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Emerging regions"],
-          "Structures": ["Reconstructed ruins"],
-          "Capabilities": ["Ascension mechanics"],
-          "Organizations": ["Reformist groups"],
-          "People": ["Leaders of change"],
-          "Events": ["Rebirth ceremonies"]
-        },
-        "PMESII": {
-          "Political": ["Reformist regimes"],
-          "Military": ["Guerrilla units"],
-          "Economic": ["Revitalized markets"],
-          "Social": ["Progressive communities"]
-        }
-      }
-    },
-    {
-      "archetype_name": "EIA",
-      "symbol": "starburst inside a triangle",
-      "fundamental_meaning": "Illumination and divine inspiration—light emerging from structure.",
-      "dimension": "Inspiration and Revelation",
-      "tone": "Radiant, Uplifting, Mystical",
-      "primary_narrative_impact": "Sparks creativity and guides characters toward enlightenment.",
-      "NER_associations": {
-        "Entities": ["Prophets", "Sages"],
-        "Locations": ["Enlightened sanctuaries", "Illuminated paths"],
-        "Items": ["Symbols of light"],
-        "Lore": ["Legends of divine insight"],
-        "Mechanics": ["Inspiration systems", "Revelation mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Sacred grounds"],
-          "Structures": ["Temples", "Observatories"],
-          "Capabilities": ["Illumination magic"],
-          "Organizations": ["Mystic orders"],
-          "People": ["Visionaries"],
-          "Events": ["Enlightenment ceremonies"]
-        },
-        "PMESII": {
-          "Political": ["Theocratic regimes"],
-          "Military": ["Spiritual guards"],
-          "Economic": ["Patronage and donations"],
-          "Social": ["Cultural renaissances"]
-        }
-      }
-    },
-    {
-      "archetype_name": "LUN",
-      "symbol": "eye within a crescent",
-      "fundamental_meaning": "Perception and hidden truths—seeing through the cycles of time.",
-      "dimension": "Insight and Mystery",
-      "tone": "Mystical, Observant, Enigmatic",
-      "primary_narrative_impact": "Reveals underlying secrets and drives quests for knowledge.",
-      "NER_associations": {
-        "Entities": ["Seers", "Mystics"],
-        "Locations": ["Hidden libraries", "Secret sanctuaries"],
-        "Items": ["Revelatory artifacts"],
-        "Lore": ["Ancient prophecies"],
-        "Mechanics": ["Insight mechanics", "Perception systems"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Secretive regions"],
-          "Structures": ["Hidden archives"],
-          "Capabilities": ["Clairvoyance"],
-          "Organizations": ["Mystic orders"],
-          "People": ["Oracles", "Scribes"],
-          "Events": ["Prophetic gatherings"]
-        },
-        "PMESII": {
-          "Political": ["Shadow governments"],
-          "Military": ["Intelligence units"],
-          "Economic": ["Cultural patronage"],
-          "Social": ["Underground networks"]
-        }
-      }
-    },
-    {
-      "archetype_name": "SOL",
-      "symbol": "radiant dot with twelve outward lines",
-      "fundamental_meaning": "Vital energy and completeness—source of life and fulfillment.",
-      "dimension": "Vitality and Wholeness",
-      "tone": "Radiant, Empowering, Integrative",
-      "primary_narrative_impact": "Infuses the universe with energy and unifies disparate elements.",
-      "NER_associations": {
-        "Entities": ["Life-givers", "Sun deities"],
-        "Locations": ["Holy sites", "Sunlit realms"],
-        "Items": ["Sunstones", "Radiant relics"],
-        "Lore": ["Creation myths"],
-        "Mechanics": ["Energy systems", "Holistic mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Energetic regions"],
-          "Structures": ["Solar temples"],
-          "Capabilities": ["Radiant energy"],
-          "Organizations": ["Sun cults"],
-          "People": ["Priests of light"],
-          "Events": ["Solar festivals"]
-        },
-        "PMESII": {
-          "Political": ["Theocratic governments"],
-          "Military": ["Celestial battalions"],
-          "Economic": ["Sun-driven economies"],
-          "Social": ["Cultural unifiers"]
-        }
-      }
-    },
-    {
-      "archetype_name": "ABR",
-      "symbol": "intersecting spirals forming a triskelion",
-      "fundamental_meaning": "Movement, cycles, and progression—symbolizing dynamic flow and continual evolution.",
-      "dimension": "Cyclical Evolution",
-      "tone": "Dynamic, Ever-changing, Rhythmic",
-      "primary_narrative_impact": "Imbues the universe with continuous change and recurring patterns.",
-      "NER_associations": {
-        "Entities": ["Wanderers", "Cycle keepers"],
-        "Locations": ["Ancient ruins", "Ever-shifting landscapes"],
-        "Items": ["Cyclic artifacts"],
-        "Lore": ["Legends of eternal recurrence"],
-        "Mechanics": ["Cycle-based systems", "Repetitive processes"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Timeless regions"],
-          "Structures": ["Ancient monuments"],
-          "Capabilities": ["Cycle regeneration"],
-          "Organizations": ["Custodians of time"],
-          "People": ["Elders", "Sages"],
-          "Events": ["Recurring festivals"]
-        },
-        "PMESII": {
-          "Political": ["Stable regimes"],
-          "Military": ["Long-standing orders"],
-          "Economic": ["Sustained trade"],
-          "Social": ["Tradition-bound societies"]
-        }
-      }
-    },
-    {
-      "archetype_name": "ORO",
-      "symbol": "ouroboros forming a perfect circle",
-      "fundamental_meaning": "Eternity and self-sustaining cycles—creation, destruction, and renewal in an endless loop.",
-      "dimension": "Eternal Renewal",
-      "tone": "Timeless, Cyclical, All-encompassing",
-      "primary_narrative_impact": "Encapsulates the perpetual cycle of life, death, and rebirth, ensuring continuity.",
-      "NER_associations": {
-        "Entities": ["Immortal beings", "Reincarnated souls"],
-        "Locations": ["Sacred circles", "Timeless realms"],
-        "Items": ["Relics of immortality"],
-        "Lore": ["Myths of eternal cycles"],
-        "Mechanics": ["Rebirth systems", "Cyclic mechanics"]
-      },
-      "ASCOPE_PMESII": {
-        "ASCOPE": {
-          "Areas": ["Sacred circles"],
-          "Structures": ["Temples of renewal"],
-          "Capabilities": ["Immortality mechanics"],
-          "Organizations": ["Eternal orders"],
-          "People": ["Reborn leaders"],
-          "Events": ["Reincarnation ceremonies"]
-        },
-        "PMESII": {
-          "Political": ["Dynastic rule"],
-          "Military": ["Perpetual armies"],
-          "Economic": ["Resource regeneration"],
-          "Social": ["Legacy cultures"]
-        }
-      }
+    const OPENAI_KEYS = keysList.split(',').map(key => key.trim()).filter(key => key);
+    if (OPENAI_KEYS.length === 0) {
+        throw new Error('OPENAI_API_KEYS_LIST is empty or contains no valid keys.');
     }
-  ];
-
-  if (n > archetypes.length) {
-      throw new Error("Requested number exceeds available archetypes.");
-  }
-
-  // Shuffle and return the first N archetypes
-  return archetypes.sort(() => 0.5 - Math.random()).slice(0, n);
+    const idx = Math.floor(Math.random() * OPENAI_KEYS.length);
+    console.log("Chose OpenAI API key index:", idx);
+    return OPENAI_KEYS[idx];
 }
 
-// Functions moved from promptUtilsMore.js
+export function getOpenaiClient() {
+    return new OpenAI({apiKey: chooseApiKey()});
+}
+
 
 export function generateProctorOfProficiencyChat(paragraph){
     return `"The Scenario: ${paragraph}.
@@ -989,6 +210,19 @@ export function characterCreationInitialOptionsPrompt(originalFragment='', previ
 return prompt;
 }
 
+
+
+export function askForBooksGeneration(){
+    const prompt = `do you think you can think of a list of like 10 different books, parchments, maps etc...
+    various medium of writings that could be found in the premises of the master storyteller 
+    that could be relevant to the client.
+    The master storyteller detective suggests the list of the books to the client. 
+    then the client would need to choose  4 out of them. (all the writings are taken from this storytelling universe we're talking about).
+    please return the result in this JSON format. so it could be parsed by JSON.parse():
+    {"storyteller_response": String, "book_list":[{"book_title":String, "book_description":String}]}`
+    return [{ role: "system", content: prompt }];
+}
+
 export function generateMasterStorytellerConclusionChat(){
     const prompt = `[remember to try to end the chat in understanding and deducting and suggesting 
         where this story should go next... the place must be specific: location, person or an event and when it's in time:
@@ -997,7 +231,7 @@ export function generateMasterStorytellerConclusionChat(){
     is he/she the Hero of the story. 
     Send your client to a specific place in storytelling...
     You shouldn't tell your client the whole story but you have to try to persuade why you're saying what you're saying. 
-    and try to deduct something out of all that was said..and be insightful. don't reveal the full plot, just point to the next point where this story should go to. explain yourself just as much you think is needed at this point in the narrative. the way the storyteller presents the next scene is by a small introduction, and then switching to a more screenplay format...with the first paragraph of the scene depicted. afther presenting the scene, the storyteller invites the client to use his library first before diving into the scene]`;
+    and try to deduct something out of all that was said..and be insightful. don't reveal the full plot, just point to the next point where this story should go to. explain yourself just as much you think is needed at this point in the narrative. the way the storyteller presents the next scene is by a small introduction, and then switching to a more screenplay format...with the first paragraph of the scene depicted. afther presenting the scene, the storyteller invites the client to use his library first before diving into the scene]`
     return [{ role: "system", content: prompt }];
 }
 
@@ -1009,9 +243,37 @@ export function generateStorytellerSummaryPropt(discussionText, originalFragment
     what we know so far, entities(locations, people, events, item..etc) 
     the theme, mood, that was inferred by the discussion. 
     Characters, Key Themes and Questions, implications for the story, 
-    association of genres and subgenres`;
+    association of genres and subgenres`
     return prompt
 
+}
+
+export async function generate_cards(fragmentText, chatHistory) {
+    const response = await externalApiCall({
+        prompt: `
+        Generate a high-rank card + supporting constellation based on the storytelling fragment.
+
+        Fragment: ${fragmentText}
+        Past Context: ${JSON.stringify(chatHistory)}
+
+        Structure:
+        {
+            "high_rank_card": {
+                "archetype": "...",
+                "moment_in_time": "...",
+                "memory": "...",
+                "storytelling_points": 15,
+                "seer_observations": { ... }
+            },
+            "constellation": {
+                "connection_type": "...",
+                "lesser_cards": [ { ... }, { ... } ]
+            }
+        }
+        `
+    });
+
+    return response;
 }
 
 
@@ -1030,7 +292,7 @@ export function generateMasterStorytellerChat(paragraph){
     to where is the next stop of the story. 
         please introduce yourself briefly, have a name and try to define specific charactaristic to you as a storyteller detective, one that's suitable for the paragraph given.
         
-    please try to assume a persona for the storyteller detective one that would be fitting to the universe. make him specific. and also make it exciting...show don't tell. make the scene seem real. if you can...try not to bomb with questions...you can ask surprising questions? as if you have some sort of agenda...until you make a very surprising and smart deductive question. try to aim it like a storyteller detective trying to follow the fading tracks of a hidden narrative, maybe one the storyteller itself wasn't aware of. Remember it's a CHAT. so you only play the detective. let the user be the client...(not played by GPT-4 but by a human who interacts with it). AGAIN, LET ME BY THE CLIENT. It's a CHAT in a scene format, but still a chat..with two sides. you and me!`;
+    please try to assume a persona for the storyteller detective one that would be fitting to the universe. make him specific. and also make it exciting...show don't tell. make the scene seem real. if you can...try not to bomb with questions...you can ask surprising questions? as if you have some sort of agenda...until you make a very surprising and smart deductive question. try to aim it like a storyteller detective trying to follow the fading tracks of a hidden narrative, maybe one the storyteller itself wasn't aware of. Remember it's a CHAT. so you only play the detective. let the user be the client...(not played by GPT-4 but by a human who interacts with it). AGAIN, LET ME BY THE CLIENT. It's a CHAT in a scene format, but still a chat..with two sides. you and me!`
     
     console.log(prompt)
     return [{ role: "system", content: prompt }];
@@ -1069,7 +331,7 @@ export function generateMasterCartographerChat(paragraph){
       Remember to return only JSON. so it could be parsed by JSON.parse() without an error.
       
     
-    `;
+    `
     return [{ role: "system", content: prompt }];
 }
 
@@ -1090,7 +352,7 @@ export function generateSageLoreChat(paragraph){
     loreLevel: An integer from 1-5 representing the lore depth of the entity.
     type: The type of the entity (Character, Location, Event, etc.).
     centrality: An integer from 1-5 indicating the entity's importance to the central narrative.
-    Your ultimate goal is to deepen your understanding and further elaborate the history and culture of this fledgling universe. Through this interaction, you will not only expand the world's lore but also create a structure that can help others navigate the complexities of this universe.`;
+    Your ultimate goal is to deepen your understanding and further elaborate the history and culture of this fledgling universe. Through this interaction, you will not only expand the world's lore but also create a structure that can help others navigate the complexities of this universe.`
     // This function currently doesn't return the prompt. Assuming it should:
     return [{ role: "system", content: prompt }];
 }
@@ -1111,7 +373,7 @@ export function generateMasterCartographerChatOlder(paragraph) {
 
                     Your map prompt should capture the unique details and nuances of the universe described in the paragraph.
                     Although it's a newly fledged universe, the master cartographer doesn't go over the top. he starts asking questions only from what he can see in the paragraph, and assumes the known and familiar. but he can suggets and implies if he sees fit.
-                    remember this is a chat. you only play the master cartographer. WAIT FOR THE PC TO RESPOND. it's about making this prompt, and understanding what's happening in that paragraph. TOGETHER. WAIT for the PC. ANSWER in DIRECT talk only. don't mention anything else bof influence beside the paragraph. you're also soaked in it. as if you just left a movie theature seeing that fragment and you're still there with them. soaked in it.`;
+                    remember this is a chat. you only play the master cartographer. WAIT FOR THE PC TO RESPOND. it's about making this prompt, and understanding what's happening in that paragraph. TOGETHER. WAIT for the PC. ANSWER in DIRECT talk only. don't mention anything else bof influence beside the paragraph. you're also soaked in it. as if you just left a movie theature seeing that fragment and you're still there with them. soaked in it.`
 
     return [{ role: "system", content: prompt }];
 }
@@ -1121,7 +383,7 @@ export function generateMasterCartographerChatOlder(paragraph) {
 export function generateMasterCartographerChatOld(paragraph) {
     const prompt = `extrapolate a world from a fragment chat: You are the Grand Cartographer, about to have a chat with a user. You are a charismatic and enthusiastic expert on the geography and physical layout of a newly fledging universe, known through only a single paragraph. Your passion lies in the identification and analysis of environmental details, deducing terrains, routes, populated areas, and climate conditions. Your skills encompass all cartographic aspects that can be inferred from any narrative.
 
-    You'verecently come across a new paragraph which serves as an entry point into this universe:
+    You've recently come across a new paragraph which serves as an entry point into this universe:
     
     PARAGRAPH_START--- "${paragraph}"  ---PARAGRAPH_END
     
@@ -1130,7 +392,7 @@ export function generateMasterCartographerChatOld(paragraph) {
     deepen your understanding of the geographical elements of this universe. 
     (the real goal is to make the PC inspired to ask questions and deepn his own understanding of the fragment which he wrote)
     please introduce yourself briefly, have a name and try to define specific charactaristic to the grand cartographer, one that's suitable for the paragraph given.
-    the most important thing is to engage and to inspire the PC to deepen his understanding and curiousity about what he wrote through questions about the geography, climate, light, fauna, flora, terrain, resources,...everything that a cartographer would be interested in `;
+    the most important thing is to engage and to inspire the PC to deepen his understanding and curiousity about what he wrote through questions about the geography, climate, light, fauna, flora, terrain, resources,...everything that a cartographer would be interested in `
     return [{ role: "system", content: prompt }];
 }
 
@@ -1163,7 +425,7 @@ export function generate_texture_by_fragment_and_conversation1223(fragment, stor
         }
         ]
         
-    `;
+    `
     return [{ role: "system", content: prompt }];
 }
 
@@ -1202,12 +464,12 @@ export function generate_texture_by_fragment_and_conversation0408(fragment, stor
      from pagan cultures. Use earthy greens and rich browns as the primary color scheme. 
      It should have faint, layered patterns resembling bark and moss intermingled with softer swirls and flourishes, reminiscent of a forest at dusk. Make sure to have the frame detailed with intricately interwoven leaves and vines, resonating with mythic undertones, to provide an archetypal RPG aesthetic. 
      Aim for a subtle and immersive design. and this more comprehensive example: "Create a seamless, FULL FRAME, UNBROKEN inspiring, immersive texture for an RPG card, influenced by the dark fantasy world akin to 'Dark Souls'. The texture should portray a story of endurance and redemption in a mystical, challenging environment. 
-     Utilize a color scheme of mossy greens and shadowy greys, interwoven with an ethereal glow symbolizing hope in a realm of despair. Incorporate Shibori dye patterns to add an enigmatic, auroral effect, reminiscent of the mysterious and otherworldly landscapes typical of dark fantasy worlds. Enhance the RPG essence with subtle motifs and symbols reflective of the genre's themes, such as ancient runes or mythical creatures. Frame the design with delicate, card-like embellishments or flourishes that seamlessly integrate with the overall texture. These elements should be inspired by the artistic diversity found in dark fantasy RPG core books and ArtStation, capturing the rich, varied essence of this RPG genre. The texture should avoid any textual elements, embodying the depth and mystical infusion of a dark fantasy RPG world with a focus on blending digital artistry and traditional texture techniques." IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it wouldn't be broken JSON.parse!!!! ' also choose real material this card texture is made on in the physical universe of this narrative. example for materials: A Weathered card shaped Metal Texture: Create a texture that simulates corroded and tarnished metal, perhaps from ancient armor or relics found in this universe. The metal should have a patina that suggests great age, with embossed designs that are now barely discernible. FULL FRAME. grainy, natural light. cinematic Frayed mysterious Card shaped Fabric Texture: Imagine a texture that replicates a piece of frayed fabric, possibly from a banner or garment that has seen better days. The fabric's pattern should be faded and tattered, yet still hinting at the grandeur it once held. Each texture should be paired with an appropriate Google font that complements its historical and material qualities, enhancing the overall aesthetic. The textures should maintain an abstract quality to fit various card categories while conveying the wear and tear of time, bringing the players closer to the universe's ancient and mystical atmosphere. The design elements should include subtle embellishments, motifs, and flourishes, avoiding direct references to specific Earth cultures. The goal is to create a series of textures that are unique to this RPG universe, blending abstract artistry with the tangible feel of different aged materials.but it's important that they would convey a card like feel and would have a very unique inspiriation for storytelling. will have a storytelling theme to them. it's the theme of the story...there should be at least one concrete element that stands out looking at this card. Also, please emphasize the card like quality of the illustration. the material should make sense as a magical card. make sure to include flourishes and embellishments at the edges to further enhance their card-like quality. MAKE SURE YOU ARE inspired by niche fantasy novels, RPG games, and movies. make a fusion! mention them in this texture theme creation! Output as JSON objects: [{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str,major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]}].". remember that each item in the list is standalone and will be used on a fresh new instance of dalle-3 without any history or knowledge of the original fragment or other textures. 
+     Utilize a color scheme of mossy greens and shadowy greys, interwoven with an ethereal glow symbolizing hope in a realm of despair. Incorporate Shibori dye patterns to add an enigmatic, auroral effect, reminiscent of the mysterious and otherworldly landscapes typical of dark fantasy worlds. Enhance the RPG essence with subtle motifs and symbols reflective of the genre's themes, such as ancient runes or mythical creatures. Frame the design with delicate, card-like embellishments or flourishes that seamlessly integrate with the overall texture. These elements should be inspired by the artistic diversity found in dark fantasy RPG core books and ArtStation, capturing the rich, varied essence of this RPG genre. The texture should avoid any textual elements, embodying the depth and mystical infusion of a dark fantasy RPG world with a focus on blending digital artistry and traditional texture techniques." IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it won't be broken JSON.parse!!!! ' also choose real material this card texture is made on in the physical universe of this narrative. example for materials: A Weathered card shaped Metal Texture: Create a texture that simulates corroded and tarnished metal, perhaps from ancient armor or relics found in this universe. The metal should have a patina that suggests great age, with embossed designs that are now barely discernible. FULL FRAME. grainy, natural light. cinematic Frayed mysterious Card shaped Fabric Texture: Imagine a texture that replicates a piece of frayed fabric, possibly from a banner or garment that has seen better days. The fabric's pattern should be faded and tattered, yet still hinting at the grandeur it once held. Each texture should be paired with an appropriate Google font that complements its historical and material qualities, enhancing the overall aesthetic. The textures should maintain an abstract quality to fit various card categories while conveying the wear and tear of time, bringing the players closer to the universe's ancient and mystical atmosphere. The design elements should include subtle embellishments, motifs, and flourishes, avoiding direct references to specific Earth cultures. The goal is to create a series of textures that are unique to this RPG universe, blending abstract artistry with the tangible feel of different aged materials.but it's important that they would convey a card like feel and would have a very unique inspiriation for storytelling. will have a storytelling theme to them. it's the theme of the story...there should be at least one concrete element that stands out looking at this card. Also, please emphasize the card like quality of the illustration. the material should make sense as a magical card. make sure to include flourishes and embellishments at the edges to further enhance their card-like quality. MAKE SURE YOU ARE inspired by niche fantasy novels, RPG games, and movies. make a fusion! mention them in this texture theme creation! Output as JSON objects: [{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str,major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]}].". remember that each item in the list is standalone and will be used on a fresh new instance of dalle-3 without any history or knowledge of the original fragment or other textures. 
     remember, the textures would be used as a png in a react app component to resemble a backside of a card. please emphasize the "cardness" of the texture. and also its full frame. 
     and also, the prompt would be standalone without any other input given to textToImage api...
     so not reference to the given paragraph should be made, if it won't be understood as a standalone prompt. I want it to feel specific. as if this texture only exists for this universe only. think how the influences are effecting the prompt. 
     have at least one specific entity within the texture that seems relevant for the original fragment but aren't mentioned explicitlly there. use the cultural references as a guideline for mood, tone, motiffs...make sure we have embellishments, 
-    edges and otherwise means that will help us understand it's a card..make it a dazzling inspiring ..one that makes the user immersed in a storytelling universe he doesn't yet know, but can feel its richness. `;
+    edges and otherwise means that will help us understand it's a card..make it a dazzling inspiring ..one that makes the user immersed in a storytelling universe he doesn't yet know, but can feel its richness. `
     return [{ role: "system", content: prompt }];
 }
 
@@ -1248,9 +510,9 @@ if(storytellerSession)
         'Card Texture: Generate an 8k texture for a card set in a woodland location. The texture should represent deeper primal energies resonant with The Green Man motifs from pagan cultures. Use earthy greens and rich browns as the primary color scheme. It should have faint, layered patterns resembling bark and moss intermingled with softer swirls and flourishes, reminiscent of a forest at dusk. Make sure to have the frame detailed with intricately interwoven leaves and vines, resonating with mythic undertones, to provide an archetypal RPG aesthetic. Aim for a subtle and immersive design.
         and this more comprehensive example:
         "Create a seamless, FULL FRAME, UNBROKEN inspiring, immersive texture for an RPG card, influenced by the dark fantasy world akin to 'Dark Souls'. The texture should portray a story of endurance and redemption in a mystical, challenging environment. Utilize a color scheme of mossy greens and shadowy greys, interwoven with an ethereal glow symbolizing hope in a realm of despair. Incorporate Shibori dye patterns to add an enigmatic, auroral effect, reminiscent of the mysterious and otherworldly landscapes typical of dark fantasy worlds. Enhance the RPG essence with subtle motifs and symbols reflective of the genre's themes, such as ancient runes or mythical creatures. Frame the design with delicate, card-like embellishments or flourishes that seamlessly integrate with the overall texture. These elements should be inspired by the artistic diversity found in dark fantasy RPG core books and ArtStation, capturing the rich, varied essence of this RPG genre. The texture should avoid any textual elements, embodying the depth and mystical infusion of a dark fantasy RPG world with a focus on blending digital artistry and traditional texture techniques."
-        IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it wouldn't be broken JSON.parse!!!!
+        IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it won't be broken JSON.parse!!!!
         Please try to interpret the original narrative in a different way every time. make it an inspiring texture for storytelling. capture the universe essence. 
-        make the scene echo in the texture as a fading memory. be inspiring. it is the storyteller detective own deck. have at least a single feaeture we would remember on each texture. and remember it is a standalone without any knowledge of the fragment`;
+        make the scene echo in the texture as a fading memory. be inspiring. it is the storyteller detective own deck. have at least a single feaeture we would remember on each texture. and remember it is a standalone without any knowledge of the fragment`
     return [{ role: "system", content: prompt }];
 }
 
@@ -1317,7 +579,7 @@ if the fragment seems too short, try to extrapolate details, and generaet entiti
 what is the climate? what is the terrain? any features? any signs of flora? fauna? populated areas? any signs of organization etc..be concrete. work your way through ASCOPE/PMESII which is always relevant in weaving a storytelling universe from scratch
 Familiarity is about how well-known or specific the entity is within the narrative context—lower levels mean broader, more generic entities that can easily fit into multiple settings, while higher levels are deeply ingrained in the specific story universe.
 Storytelling Points Cost measures how much narrative effort or points a player needs to invest to introduce or utilize this entity, balancing its narrative weight and uniqueness. Lower costs for generic, versatile entities and higher costs for unique, lore-rich ones.
-return the JSON only!!`;
+return the JSON only!!`
     return [{ role: "system", content: prompt }];
 }
 
@@ -1430,7 +692,7 @@ try to asses your specificity level for each entity 0-1. make us want to immerse
  it seems to me you're inclined to using heavy lifting terms, instead of letting a real world emerge. 
  don't let all the heavy cannons out immediately. prefer adding depthI prefer more grounded, 
  textured entities that feel lived-in rather than overtly magical. A mature GM knows subtlety often 
- creates more compelling worlds than grand proclamations`;
+ creates more compelling worlds than grand proclamations`
     return [{ role: "system", content: prompt }];
 }
 
@@ -1468,12 +730,12 @@ as backside for a virtual RPG deck of card.`
             Refrain as much as possible from too concrete influences that can be traced to an earth culture.
             For guidance, consider these examples:
             (these examples don't have mentioning of material and physicality in them)
-            'Card texture: Pulling from Brom's art style merged with Dark Sun atmospheres, visualize a desert of sizzling oranges and browns, with distressed edges evoking scorched earth, and the corner embellishments shaped like twisted dragon, high contrast, 8k, RPG essence.'
+            'Card texture: Pulling from Brom's art style merged with Dark Sun atmospheres, visualize a desert of sizzling oranges and browns, with distressed edges evoking scorched earth, and the corner embellishments shaped like twisted dragons, high contrast, 8k, RPG essence.'
             'Card texture: Melding Stephan Martinière's vision with A Song of Ice and Fire's chill, picture a detailed silhouette of a castle set against a frosty backdrop, with intricate Northern-inspired knotwork designs accentuating the corners, matte finish for tactile richness, cinematic, grainy, dark fantasy aura, 8k, ArtStation champion.'
             'Card Texture: Generate an 8k texture for a card set in a woodland location. The texture should represent deeper primal energies resonant with The Green Man motifs from pagan cultures. Use earthy greens and rich browns as the primary color scheme. It should have faint, layered patterns resembling bark and moss intermingled with softer swirls and flourishes, reminiscent of a forest at dusk. Make sure to have the frame detailed with intricately interwoven leaves and vines, resonating with mythic undertones, to provide an archetypal RPG aesthetic. Aim for a subtle and immersive design.
             and this more comprehensive example:
             "Create a seamless, FULL FRAME, UNBROKEN inspiring, immersive texture for an RPG card, influenced by the dark fantasy world akin to 'Dark Souls'. The texture should portray a story of endurance and redemption in a mystical, challenging environment. Utilize a color scheme of mossy greens and shadowy greys, interwoven with an ethereal glow symbolizing hope in a realm of despair. Incorporate Shibori dye patterns to add an enigmatic, auroral effect, reminiscent of the mysterious and otherworldly landscapes typical of dark fantasy worlds. Enhance the RPG essence with subtle motifs and symbols reflective of the genre's themes, such as ancient runes or mythical creatures. Frame the design with delicate, card-like embellishments or flourishes that seamlessly integrate with the overall texture. These elements should be inspired by the artistic diversity found in dark fantasy RPG core books and ArtStation, capturing the rich, varied essence of this RPG genre. The texture should avoid any textual elements, embodying the depth and mystical infusion of a dark fantasy RPG world with a focus on blending digital artistry and traditional texture techniques."
-            IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it wouldn't be broken JSON.parse!!!! '
+            IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it won't be broken JSON.parse!!!! '
     
             also choose real material this card texture is made on in the physical universe of this narrative. example for materials:
     
@@ -1492,7 +754,7 @@ as backside for a virtual RPG deck of card.`
                 any history or knowledge of the original fragment or other textures.
                 remember it should be a standalone promtp. without any knowledge of the universe...its details. it's a single prompt for an textToImage api. each entry in the array is a different separated calll. and now having said all that....you can surprise me and add a single defined archteype for each texture.
     
-    Remember that the output should be easily parsed by JSON.parse(), so keep the structre of JSON array as given!            `;
+    Remember that the output should be easily parsed by JSON.parse(), so keep the structre of JSON array as given!            `
     return [{ role: "system", content: prompt }];
 }
 
@@ -1519,7 +781,7 @@ the backside of the deck is a texture. I want you to define that texture, after 
     'Card texture: Melding Stephan Martinière's vision with A Song of Ice and Fire's chill, picture a detailed silhouette of a castle set against a frosty backdrop, with intricate Northern-inspired knotwork designs accentuating the corners, matte finish for tactile richness, dark fantasy aura, 8k, ArtStation champion.'
     
     Outputs should be formatted as a JSON list of strings for compatibility with JSON.parse.
-    `;
+    `
     return [{ role: "system", content: prompt }];
 }
 
@@ -1528,7 +790,7 @@ export function generate_texture_by_fragment_and_conversationOlder(fragment){
     Each texture description should be interpreting the text fragment in a different way. taking it to a different direction - answering the question which genre or subgenre this fragment can relate to. the direction can be influenced by other related cultural influences, whether it be books, movies, myths etc. but in a surprising various options. 
     The textures should have a keyword format, utilizing terms such as RPG, cinematic, ArtStation, ArtStation winner, grainy, embellishments, decorative styles, etc. Note that these descriptions are for the texture of a card, not an illustration. They should provide an engaging aesthetic complement to the story continuation. For example, 'Card texture: Inspired by Brom's art style and Dark Sun, a desert of sizzling oranges and browns, distressed edges give a sense of scorched earth, embellishments of a twisted dragon in the top right, high contrast, 8k, RPG card texture.', 'Card texture: Inspired by Stephan Martinière's art style and A Song of Ice and Fire, a meticulously detailed castle silhouette against a frigid landscape, Northern-inspired knotwork at the corners, the matte finish brings out the texture of the snow, dark fantasy, 8k, ArtStation winner. 
     make the card texture subtle and so the influence. tending into more abstract or symbolic. archetypal
-    please return the results as a JSON list of strings (so it would not fail on JSON.parse(output) )`;
+    please return the results as a JSON list of strings (so it would not fail on JSON.parse(output) )`
     return [{ role: "system", content: prompt }];
 }
 
@@ -1552,7 +814,7 @@ export function generate_texture_by_fragment_and_conversationOld(fragment){
     'Card texture: Melding Stephan Martinière's vision with A Song of Ice and Fire's chill, picture a detailed silhouette of a castle set against a frosty backdrop, with intricate Northern-inspired knotwork designs accentuating the corners, matte finish for tactile richness, dark fantasy aura, 8k, ArtStation champion.'
     
     Outputs should be formatted as a JSON list of strings for compatibility with JSON.parse.
-    `;
+    `
     return [{ role: "system", content: prompt }];
 }
 
@@ -1657,7 +919,7 @@ verbs that invite actions, imagery that is concrete and invites personal interpr
 }
 
 export function generateContinuationPromptConcise(userText = null){
-    let userTextLength = userText.split(/\s|/).length; // Ensure userTextLength is defined
+    userTextLength = userText.split(/\s|/).length
     const lastFiveWords = userText.split(' ').slice(-5).join(' ');
         const prompt =`Given the fragment: ---FRAGMENT_START '${userText}' ----FRAGMENT_END
         Generate questions about this scene. From these questions, create sub-questions 
@@ -1751,7 +1013,7 @@ export function generateContinuationPrompt1(userText = null, numberOfContinuatio
 parameters: number of continuations needed: ${numberOfContinuations}
 max number of additions (new words) ${numberOfAdditions}
 min number of additions (new words) ${minNumberOfAdditions}. pay close attention to these parameters.
-. Please return the json array resposne only! I need it to be parsed by JSON.parse!!`;
+. Please return the json array resposne only! I need it to be parsed by JSON.parse!!`
     return [{ role: "system", content: prompt }];
 }
 
@@ -1860,7 +1122,7 @@ It was almost midnight when she reached the edge of the forest. Her horse’s br
 remember ${numberOfContinuations} different continuations JSON array, each ${minNumberOfAdditions} to ${numberOfAdditions} words additions!.
 and remember the narrative: NARRATIVE START ---${userText} --- NARRATIVE END
 return nothing but a JSON ARRAY!!
-`;
+`
     return [{ role: "system", content: prompt }];
 }
 
@@ -1949,7 +1211,7 @@ export function generateContinuationPromptWorking(userText = null, numberOfConti
                 make it seem natural, as part of the unfolding!! take your time, to unfold, be an artist of words.
                 Also, if you can try to end the continuation in the middle on a very subtle suggestive cliffhanger...
                 be subtle. be inspiring. be tangible, grounded refrain from Interpreting. Show don't tell! 
-                make it seem real. AGAIN return ONLY the JSON. no other response!!`;
+                make it seem real. AGAIN return ONLY the JSON. no other response!!"`
 
     return [{ role: "system", content: prompt }];
 }
@@ -1990,12 +1252,12 @@ export function generateContinuationPromptOld(userText= null){
     }
 
     Important:
-    Ensure the story unfolds naturally. The focus is on evoking a genuine narrative progression, making the reader feel as if they are reading an authentic novel. use only concrete sensory descriptions. refrain from explaining or generic imagery. be concrete! wry. imagine a strict writer criticizing your work. it should feel like a real story unfolding. tangible, concrete, based on facts and not on interpretations. show don't Tell. focus on concrete seneory descriptions, rather on abstract or generic ones.  be descriptive and thorough but always concrete. tangible. even wry. be specific. not abstract. don't use metaphors unless they're ABSOLUTELY ESSENTIAL. imagine you're john steinback, hemmingway, raymond carver combined with the George R.  R. Martin. Do not impose the entities. you're getting graded as to how seamless and natural the continuation feels.  DON't IMPOSE THE CONTINUATION. make it seem natural, as part of the unfolding!! you don't have to introduce a new one... also, it's perfectly ok to end a continuation in the middle...be subtle. be inspiring. make it seem real.`;
+    Ensure the story unfolds naturally. The focus is on evoking a genuine narrative progression, making the reader feel as if they are reading an authentic novel. use only concrete sensory descriptions. refrain from explaining or generic imagery. be concrete! wry. imagine a strict writer criticizing your work. it should feel like a real story unfolding. tangible, concrete, based on facts and not on interpretations. show don't Tell. focus on concrete seneory descriptions, rather on abstract or generic ones.  be descriptive and thorough but always concrete. tangible. even wry. be specific. not abstract. don't use metaphors unless they're ABSOLUTELY ESSENTIAL. imagine you're john steinback, hemmingway, raymond carver combined with the George R.  R. Martin. Do not impose the entities. you're getting graded as to how seamless and natural the continuation feels.  DON't IMPOSE THE CONTINUATION. make it seem natural, as part of the unfolding!! you don't have to introduce a new one... also, it's perfectly ok to end a continuation in the middle...be subtle. be inspiring. make it seem real.`
 return [{ role: "system", content: prompt }];
 }
 
 export function generateContinuationPromptOldies(userText= null){
-    let userTextLength = userText.split(/\s|/).length; // Ensure userTextLength is defined
+    userTextLength = userText.split(/\s|/).length
     const prompt = `-- Fragment Start:
      ${userText} --- Fragment End
     
@@ -2019,12 +1281,12 @@ Your response should be a JSON array of objects with the following format:
 }
 
 Important:
-Ensure the story unfolds naturally. The focus is on evoking a genuine narrative progression, making the reader feel as if they are reading an authentic novel. use only concrete sensory descriptions. refrain from explaining or generic imagery. be concrete! wry. imagine a strict writer criticizing your work. it should feel like a real story unfolding. tangible, concrete, based on facts and not on interpretations. show don't Tell. focus on concrete seneory descriptions, rather on abstract or generic ones.  be descriptive and thorough but always concrete. tangible. even wry. be specific. not abstract. don't use metaphors unless they're ABSOLUTELY ESSENTIAL. imagine you're john steinback, hemmingway, raymond carver combined with the George R.  R. Martin. Do not impose the entities. you're getting graded as to how seamless and natural the continuation feels.  DON't IMPOSE THE CONTINUATION. make it seem natural, as part of the unfolding!! you don't have to introduce a new one... also, it's perfectly ok to end a continuation in the middle...be subtle. be inspiring. make it seem real.`;
+Ensure the story unfolds naturally. The focus is on evoking a genuine narrative progression, making the reader feel as if they are reading an authentic novel. use only concrete sensory descriptions. refrain from explaining or generic imagery. be concrete! wry. imagine a strict writer criticizing your work. it should feel like a real story unfolding. tangible, concrete, based on facts and not on interpretations. show don't Tell. focus on concrete seneory descriptions, rather on abstract or generic ones.  be descriptive and thorough but always concrete. tangible. even wry. be specific. not abstract. don't use metaphors unless they're ABSOLUTELY ESSENTIAL. imagine you're john steinback, hemmingway, raymond carver combined with the George R.  R. Martin. Do not impose the entities. you're getting graded as to how seamless and natural the continuation feels.  DON't IMPOSE THE CONTINUATION. make it seem natural, as part of the unfolding!! you don't have to introduce a new one... also, it's perfectly ok to end a continuation in the middle...be subtle. be inspiring. make it seem real.`
     return [{ role: "system", content: prompt }];
 }
 
 export function generateContinuationPromptOld33(userText= null){
-    let userTextLength = userText.split(/\s+/).length; // Ensure userTextLength is defined
+    userTextLength = userText.split(/\s+/).length
     const prompt = `"Fragment": "${userText}"
     "Instructions":
     Welcome to our collaborative storytelling challenge! Your mission, alongside the AI, is to creatively expand upon a given fragment from an unknown novel.
@@ -2051,13 +1313,13 @@ export function generateContinuationPromptOld33(userText= null){
     "Almost obscured, the gate was..."
     Output Format: A JSON array of strings of variation. for easy parsing by JSON.parse.
     the ONLY ouput should be that JSON array of strings.
-    Return ONLY the JSON array, without any explanations or descriptions!!`;
+    Return ONLY the JSON array, without any explanations or descriptions!!'`
     return [{ role: "system", content: prompt }];
     
 }
 
 export function generateContinuationPromptOlder(userText = null) {
-    let userTextLength = userText.split(/\s+/).length; // Ensure userTextLength is defined
+    userTextLength = userText.split(/\s+/).length
     const prompt = `"Fragment": "${userText}"
  
     "Instructions": Welcome to a game of collaborative storytelling. You and the AI are going to complete a text fragment from an obscure book in turns. 
@@ -2085,12 +1347,12 @@ export function generateContinuationPromptOlder(userText = null) {
     "Almost hidden, the gate was..."
     Each variation takes a different approach, adding to the fragment while maintaining a seamless flow in the story. Your challenge is to continue in this vein, adhering to the maximum word change limit of four. Let's weave a tale together, each turn bringing a new unexpected twist to the narrative.
     
-    please return the results as JSON array of strings only`;
+    please return the results as JSON array of strings only`
     return [{ role: "system", content: prompt }];
 }
 
 export function generatePrefixesPrompt2(userText = null, texture = null, variations = 4, varyTexture = true) {
-    let userTextLength = userText.split(/\s+/).length; // Ensure userTextLength is defined
+    userTextLength = userText.split(/\s+/).length
     const intro = `this prompt is part of a virtual card game of storytelling:
     Game flow:
     GPT (Game AI) presents the player with four card textures and six prefixes.
@@ -2331,7 +1593,7 @@ export function generateStorytellerDetectiveFirstParagraphSession(scene){
 
     
     
-    `;
+    `
     return [{ role: "system", content: prompt }]
 }
 
@@ -2352,11 +1614,93 @@ export function generateStorytellerDetectiveFirstParagraphLetter(completeNarrati
     
     ADDITIONALLY: please follow the same json format as before: {""current_narrative"":"I finally found it", "choices:  {options: [{"continuation":"the summit", "storytelling_points":1}, {"continuation":"the gates of this once sturdy fortress", "storytelling_points":3},{"continuation":"the ancient oak plateau", "storytelling_points":4}, {"continuation":"the observatory on the high messa", "storytelling_points":5},{"continuation":"the bank of the yuradel river", "storytelling_points":3}].}"
     please give choice 1. wait for my choice. write the narrative so far.. starting with "I finally found it"... . along with the current_narrative and based on it give choice 2...etc..
-    REMEMBER, the COMPLETE_NARRATIVE given in the beginning of this prompt, is the source and reference to the place that was found, where the last book of the realm resides.`;
+    REMEMBER, the COMPLETE_NARRATIVE given in the beginning of this prompt, is the source and reference to the place that was found, where the last book of the realm resides.`
 
     return [{ role: "system", content: prompt }]
 
 }
+
+
+
+
+
+
+export async function directExternalApiCall(prompts, max_tokens = 2500, temperature, mockedResponse, explicitJsonObjectFormat, isOpenAi) {
+    try {
+        let rawResp;
+        const maxRetries = 3;
+        let attempts = 0;
+    
+        async function makeApiCall() {
+            if (isOpenAi) {
+                let req_obj = {
+                    max_tokens,
+                    model: 'gpt-4.1-mini',
+                    messages: prompts,
+                    temperature: 1.08,
+                    presence_penalty: 0.0
+                };
+    
+                if (explicitJsonObjectFormat)
+                    req_obj['response_format'] = { "type": "json_object" };
+    
+                const completion = await getOpenaiClient().chat.completions.create(req_obj);
+                return completion.choices[0].message.content;
+            } else {
+                const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+                if (!anthropicApiKey) {
+                    throw new Error('ANTHROPIC_API_KEY environment variable is not set.');
+                }
+                const client = new Anthropic({
+                    apiKey: anthropicApiKey,
+                });
+    
+                prompts = prompts.map((p) => {
+                    if (p.role === 'system') {
+                        p.role = 'user';
+                    }
+                    return p;
+                });
+    
+                const resp = await client.messages.create({
+                    messages: prompts,
+                    model: 'claude-3-7-sonnet-latest',
+                    max_tokens: 8192,
+                    temperature: 0.8,
+                });
+    
+                return resp.content[0].text;
+            }
+        }
+    
+        while (attempts < maxRetries) {
+            try {
+                let rawResp = await makeApiCall();
+                rawResp.trim()
+                  .replace(/^[^{[]*/, '') // Remove characters before the opening { or [
+                  .replace(/[^}*\]]*$/, ''); // Remove characters after the closing } or ]
+                if(explicitJsonObjectFormat)
+                return JSON.parse(rawResp);
+                else
+                return rawResp
+            } catch (error) {
+                attempts++;
+                console.warn(`Attempt ${attempts} failed:`, error);
+    
+                if (attempts >= maxRetries) {
+                    console.error('Failed to get a valid response after retries. Returning raw response.');
+                    return rawResp || null;
+                }
+            }
+        }
+    
+    } catch (error) {
+        console.error('Error:', error);
+    }
+    
+}
+
+// Removed module.exports as functions are now exported individually using 'export'.
 
 export function generateTypewriterPrompt(existing_text) {
     const systemMessage = `You are a narrative composer.
@@ -2511,11 +1855,3 @@ Deletes are precise, with exact substring, count, and narrative reason.`;
         { role: "user", content: userContent }
     ];
 }
-
-// Main export block - only includes functions NOT individually exported
-export {
-  generateWorldbuildingVectorPrompt,
-  getWorldbuildingVector,
-  getNerTypes,
-  getNArchetypes
-};

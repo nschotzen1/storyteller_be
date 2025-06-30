@@ -1,17 +1,16 @@
-
 import express from 'express';
 import cors from 'cors';
 import { promises as fs } from 'fs';
 import path from 'path';
-import {generateInitialChatPrompt, generateInitialScenePrompt} from './ai/openai/prompts.js';
+import {generateInitialChatPrompt, generateInitialScenePrompt} from './ai/openai/personaChatPrompts.js';
 import { ChatMessage, NarrativeFragment, SessionVector } from './models/models.js'; // Consolidated and corrected ChatMessage import; Added SessionVector
+import { directExternalApiCall } from './ai/openai/apiService.js'; // Corrected import
 import { 
-    directExternalApiCall, 
     generateContinuationPrompt,
-    generateMasterCartographerChat, // Moved from below
-    generateFragmentsBeginnings, // Moved from below
-    generateTypewriterPrompt, // Moved from below and verified for /api/send_typewriter_text
-    getWorldbuildingVector // Added for worldbuilding vector generation
+    generateMasterCartographerChat, 
+    generateFragmentsBeginnings, 
+    generateTypewriterPrompt, 
+    getWorldbuildingVector 
 } from './ai/openai/promptsUtils.js';
 import { getMockResponse } from './mocks.js';
 import { fileURLToPath } from 'url';

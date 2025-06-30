@@ -6,7 +6,8 @@ import pathNode from 'path'; // Renaming to avoid conflict with the existing 'pa
 
 // Assuming these are named exports from the respective files
 import { directExternalApiCall, generateMasterCartographerChat, generatePrefixesPrompt2, generateFragmentsBeginnings, 
-  generateContinuationPrompt, generateMasterStorytellerChat, generateMasterStorytellerConclusionChat, askForBooksGeneration } from "./ai/openai/promptsUtils.js";
+  generateContinuationPrompt, generateMasterStorytellerChat, generateMasterStorytellerConclusionChat } from "./ai/openai/promptsUtils.js";
+import { askForBooksGeneration } from "./ai/openai/bookPrompts.js";
 import { generateTextureImgFromPrompt, generateTextureOptionsByText, developEntity } from "./ai/textToImage/api.js";
 import { chatWithStoryteller, saveFragment, updateTurn, getTurn, storytellerDetectiveFirstParagraphCreation, generateEntitiesFromFragment } from './storyteller/utils.js';
 
@@ -49,7 +50,7 @@ const writeContentToFile = async (subfolderName, fileName, content)=> {
 
 // Prompt Template:
 
-// ```
+// ``
 // {
 //   "model": "text-davinci-004",
 //   "prompt": "[User's Prefix] $START_{story_continuation_1}$END ${texture_1} $START_{story_continuation_2}$END ${texture_2} $START_{story_continuation_3}$END ${texture_3} $START_{story_continuation_4}$END ${texture_4}",
@@ -59,7 +60,7 @@ const writeContentToFile = async (subfolderName, fileName, content)=> {
 //   "frequency_penalty": 0,
 //   "presence_penalty": 0
 // }
-// ```
+// ``
 // The `${story_continuation_n}` are placeholders for the continuation of the story, where `n` is the number of the continuation. `${texture_n}` are placeholders for the texture prompts. These will be replaced by the generated story and texture.
 
 // To ensure the quality and continuity of the story, we'll be using the `$START` and `$END` special tokens. They tell the model where to start and stop the story or the texture. The model will generate text between these tokens.
