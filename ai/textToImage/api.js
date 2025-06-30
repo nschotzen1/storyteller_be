@@ -290,18 +290,6 @@ export function getRandomCategory() {
 
 
 
-// Helper to safely create directories - This function will be removed
-// export function createDirectorySafely(directoryPath) {
-//   try {
-//     if (!fs.existsSync(directoryPath)) {
-//       fs.mkdirSync(directoryPath, { recursive: true });
-//     }
-//   } catch (error) {
-//     console.error(`Error creating directory: ${directoryPath}`, error);
-//     throw error;
-//   }
-// }
-
 function sanitizeName(name) {
   if (!name || typeof name !== 'string') {
     throw new Error('Invalid name provided. It must be a non-empty string.');
@@ -556,12 +544,6 @@ export async function generateStorytellerSeerReaction({ sessionId, turn, action 
 
   return textualResponse;
 }
-
-
-// This function `generateIllustrationsForEntities` was defined above already.
-// If it was meant to be a different function or an export, it needs clarification.
-// Assuming it's the same internal helper function. If it needs to be exported, add 'export'.
-// async function generateIllustrationsForEntities(entities, textures, sessionId, shouldMockImage) { ... }
 
 
 export async function generateTextureOptionsByText1(sessionId, shouldMockImage=false, openAiMock=''){

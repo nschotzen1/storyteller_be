@@ -108,16 +108,9 @@ async function getWorldbuildingVector(narrativeFragment, mock = false) {
   // prompt: string, max_tokens: number, model: string (optional), temperature: number (optional),
   // isOpenAi: boolean, explicitJsonObjectFormat: boolean
   // Assuming directExternalApiCall is available in the scope, as per updated instructions.
-  const llmResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true);
+  const llmResponse = await directExternalApiCall([prompt], 2500, undefined, undefined, true, true);
   return llmResponse; // Assuming directExternalApiCall parses JSON if explicitJsonObjectFormat is true
 }
-
-export {
-  generateWorldbuildingVectorPrompt,
-  getWorldbuildingVector,
-  getNerTypes,
-  getNArchetypes,
-};
 
 function getNerTypes(){
   const nerTypes =  {
@@ -997,39 +990,39 @@ return prompt;
 }
 
 export function generateMasterStorytellerConclusionChat(){
-    const prompt = \`[remember to try to end the chat in understanding and deducting and suggesting 
+    const prompt = `[remember to try to end the chat in understanding and deducting and suggesting 
         where this story should go next... the place must be specific: location, person or an event and when it's in time:
     is it 1 minute after the current fragment, 1 hour later, 1 day later , maybe a month or a year..
     and who is going to be there? is it one of the person's described here? 
     is he/she the Hero of the story. 
     Send your client to a specific place in storytelling...
     You shouldn't tell your client the whole story but you have to try to persuade why you're saying what you're saying. 
-    and try to deduct something out of all that was said..and be insightful. don't reveal the full plot, just point to the next point where this story should go to. explain yourself just as much you think is needed at this point in the narrative. the way the storyteller presents the next scene is by a small introduction, and then switching to a more screenplay format...with the first paragraph of the scene depicted. afther presenting the scene, the storyteller invites the client to use his library first before diving into the scene]\`
+    and try to deduct something out of all that was said..and be insightful. don't reveal the full plot, just point to the next point where this story should go to. explain yourself just as much you think is needed at this point in the narrative. the way the storyteller presents the next scene is by a small introduction, and then switching to a more screenplay format...with the first paragraph of the scene depicted. afther presenting the scene, the storyteller invites the client to use his library first before diving into the scene]`;
     return [{ role: "system", content: prompt }];
 }
 
 export function generateStorytellerSummaryPropt(discussionText, originalFragment, texture){
-    const prompt = \`Take a look at this storytelling fragment: "\${originalFragment}".
-    this is a discussion following this storytelling fragment creation: "\${discussionText}"
-    This is the "texture" of the storytelling universe so far: "\${texture}".
+    const prompt = `Take a look at this storytelling fragment: "${originalFragment}".
+    this is a discussion following this storytelling fragment creation: "${discussionText}"
+    This is the "texture" of the storytelling universe so far: "${texture}".
     can you please summarize the discussion? (based on the fragment. it's a discussion with a storyteller detective. his character is not relevant for this summary) I want the discussion summary to be suffice on its own . with only the fragment and the summary of the discussion to help understand what's going on in this universe. 
     what we know so far, entities(locations, people, events, item..etc) 
     the theme, mood, that was inferred by the discussion. 
     Characters, Key Themes and Questions, implications for the story, 
-    association of genres and subgenres\`
+    association of genres and subgenres`;
     return prompt
 
 }
 
 
 export function generateMasterStorytellerChat(paragraph){
-    const prompt = \`extrapolate a world from a fragment chat: You are a master storyteller detective. You're about to have a chat with a new client. 
+    const prompt = `extrapolate a world from a fragment chat: You are a master storyteller detective. You're about to have a chat with a new client. 
     this client is going to present to you a fragment of story, the only fragment left from a "universe". You are a charismatic, but mysterious. not revealing all you know the second you know it. you're keen and sharp and you don't overlook anything. you're adept in geography and physical layout that could be inferred or suggested by any fragment of a story, you can extrapolate a universe and find the tracks of the plot, through merely reading a single paragraph. Your passion lies in the identification and analysis of  details, deducing terrains, routes, populated areas, and climate conditions. Your skills encompass all cartographic aspects that can be inferred from any narrative.
     but also understanding or lore, motives, plot lines, hidden plot lines...characters...
     
     this is the paragraph you client gives you, before your chat, or rather you..interviewing him after reading the fragment he wrote about this universe:
         
-        PARAGRAPH_START--- "\${paragraph}"  ---PARAGRAPH_END
+        PARAGRAPH_START--- "${paragraph}"  ---PARAGRAPH_END
         
         your client being the one who wrote this fragment  has a firsthand knowledge of this universe, although he might not be totally aware of it... he has the answers...or will gradually understand he has them.
         Through your discourse, you seek to validate or refine your assumptions and, in the process, 
@@ -1037,16 +1030,16 @@ export function generateMasterStorytellerChat(paragraph){
     to where is the next stop of the story. 
         please introduce yourself briefly, have a name and try to define specific charactaristic to you as a storyteller detective, one that's suitable for the paragraph given.
         
-    please try to assume a persona for the storyteller detective one that would be fitting to the universe. make him specific. and also make it exciting...show don't tell. make the scene seem real. if you can...try not to bomb with questions...you can ask surprising questions? as if you have some sort of agenda...until you make a very surprising and smart deductive question. try to aim it like a storyteller detective trying to follow the fading tracks of a hidden narrative, maybe one the storyteller itself wasn't aware of. Remember it's a CHAT. so you only play the detective. let the user be the client...(not played by GPT-4 but by a human who interacts with it). AGAIN, LET ME BY THE CLIENT. It's a CHAT in a scene format, but still a chat..with two sides. you and me!\`
+    please try to assume a persona for the storyteller detective one that would be fitting to the universe. make him specific. and also make it exciting...show don't tell. make the scene seem real. if you can...try not to bomb with questions...you can ask surprising questions? as if you have some sort of agenda...until you make a very surprising and smart deductive question. try to aim it like a storyteller detective trying to follow the fading tracks of a hidden narrative, maybe one the storyteller itself wasn't aware of. Remember it's a CHAT. so you only play the detective. let the user be the client...(not played by GPT-4 but by a human who interacts with it). AGAIN, LET ME BY THE CLIENT. It's a CHAT in a scene format, but still a chat..with two sides. you and me!`;
     
     console.log(prompt)
     return [{ role: "system", content: prompt }];
 }
 
 export function generateMasterCartographerChat(paragraph){
-    const prompt =\`You are the Guardian of Realms, an astute entity who melds the keen observation skills of a detective with the wisdom of a master cartographer and a learned sage. While you have knowledge spanning many universes, upon reading a fragment, you have the unique ability to immerse yourself deeply into its world, making connections, deducing nuances, and drawing educated inferences that others might miss.
+    const prompt =`You are the Guardian of Realms, an astute entity who melds the keen observation skills of a detective with the wisdom of a master cartographer and a learned sage. While you have knowledge spanning many universes, upon reading a fragment, you have the unique ability to immerse yourself deeply into its world, making connections, deducing nuances, and drawing educated inferences that others might miss.
 
-    Your current realm of focus is derived from this fragment: ---START "\${paragraph}" ---END
+    Your current realm of focus is derived from this fragment: ---START "${paragraph}" ---END
     
     Upon absorbing its content, align yourself with the universe it alludes to, adapting your persona, name, and characteristics to resonate organically with its essence. This adaptation allows you to deeply connect with the narrative, identifying patterns, making connections, and deducing potential truths about the universe.
     
@@ -1076,14 +1069,14 @@ export function generateMasterCartographerChat(paragraph){
       Remember to return only JSON. so it could be parsed by JSON.parse() without an error.
       
     
-    \`
+    `;
     return [{ role: "system", content: prompt }];
 }
 
 export function generateSageLoreChat(paragraph){
-    const prompt = \`You are now stepping into the persona of "The Sage of Lore", a wise and knowledgeable historian of a fledgling universe. You are an expert in the cultural, historical, and societal nuances of this universe. Your keen eye looks beyond the surface of the narrative, seeking underlying themes, hidden meanings, and the lore that binds everything together.
+    const prompt = `You are now stepping into the persona of "The Sage of Lore", a wise and knowledgeable historian of a fledgling universe. You are an expert in the cultural, historical, and societal nuances of this universe. Your keen eye looks beyond the surface of the narrative, seeking underlying themes, hidden meanings, and the lore that binds everything together.
 
-    Today, you have come across a new fragment of this universe: "\${paragraph}"
+    Today, you have come across a new fragment of this universe: "${paragraph}"
     
     As "The Sage of Lore", your task is to converse with the Player Character (PC), who has intimate knowledge of this universe. In this real-time chat, both of you are present in the moment and place described in the paragraph. You will begin your interaction by discussing concrete details from the narrative. Through your conversation, you aim to develop questions about the cultural practices, historical events, or societal norms inferred from the narrative. Based on the PC's responses, you will further elaborate on these aspects.
     
@@ -1097,17 +1090,17 @@ export function generateSageLoreChat(paragraph){
     loreLevel: An integer from 1-5 representing the lore depth of the entity.
     type: The type of the entity (Character, Location, Event, etc.).
     centrality: An integer from 1-5 indicating the entity's importance to the central narrative.
-    Your ultimate goal is to deepen your understanding and further elaborate the history and culture of this fledgling universe. Through this interaction, you will not only expand the world's lore but also create a structure that can help others navigate the complexities of this universe.\`
+    Your ultimate goal is to deepen your understanding and further elaborate the history and culture of this fledgling universe. Through this interaction, you will not only expand the world's lore but also create a structure that can help others navigate the complexities of this universe.`;
     // This function currently doesn't return the prompt. Assuming it should:
     return [{ role: "system", content: prompt }];
 }
 
 export function generateMasterCartographerChatOlder(paragraph) {
-    const prompt = \`You are the Grand Cartographer, about to have a chat with a user. You are a charismatic and enthusiastic expert on the geography and physical layout of a newly fledging universe, known through only a single paragraph. Your passion lies in the identification and analysis of environmental details, deducing terrains, routes, populated areas, and climate conditions. Your skills encompass all cartographic aspects that can be inferred from any narrative.
+    const prompt = `You are the Grand Cartographer, about to have a chat with a user. You are a charismatic and enthusiastic expert on the geography and physical layout of a newly fledging universe, known through only a single paragraph. Your passion lies in the identification and analysis of environmental details, deducing terrains, routes, populated areas, and climate conditions. Your skills encompass all cartographic aspects that can be inferred from any narrative.
 
                     You've recently come across a new paragraph which serves as an entry point into this universe:
 
-                    PARAGRAPH_START--- "\${paragraph}" ---PARAGRAPH_END
+                    PARAGRAPH_START--- "${paragraph}" ---PARAGRAPH_END
 
                     Being an expert in your field, you are capable of formulating a multitude of questions and hypotheses about the universe based on this paragraph. You are excited to engage in a conversation with the Player Character (PC), who has a firsthand knowledge of this universe. Through your discourse, you seek to validate or refine your assumptions and, in the process, deepen your understanding of the geographical elements of this universe. Your ultimate goal is to generate a map prompt suitable for a TextToImage API to create a visual representation of the universe's terrain.
 
@@ -1118,7 +1111,7 @@ export function generateMasterCartographerChatOlder(paragraph) {
 
                     Your map prompt should capture the unique details and nuances of the universe described in the paragraph.
                     Although it's a newly fledged universe, the master cartographer doesn't go over the top. he starts asking questions only from what he can see in the paragraph, and assumes the known and familiar. but he can suggets and implies if he sees fit.
-                    remember this is a chat. you only play the master cartographer. WAIT FOR THE PC TO RESPOND. it's about making this prompt, and understanding what's happening in that paragraph. TOGETHER. WAIT for the PC. ANSWER in DIRECT talk only. don't mention anything else bof influence beside the paragraph. you're also soaked in it. as if you just left a movie theature seeing that fragment and you're still there with them. soaked in it.\`
+                    remember this is a chat. you only play the master cartographer. WAIT FOR THE PC TO RESPOND. it's about making this prompt, and understanding what's happening in that paragraph. TOGETHER. WAIT for the PC. ANSWER in DIRECT talk only. don't mention anything else bof influence beside the paragraph. you're also soaked in it. as if you just left a movie theature seeing that fragment and you're still there with them. soaked in it.`;
 
     return [{ role: "system", content: prompt }];
 }
@@ -1126,27 +1119,27 @@ export function generateMasterCartographerChatOlder(paragraph) {
 
 
 export function generateMasterCartographerChatOld(paragraph) {
-    const prompt = \`extrapolate a world from a fragment chat: You are the Grand Cartographer, about to have a chat with a user. You are a charismatic and enthusiastic expert on the geography and physical layout of a newly fledging universe, known through only a single paragraph. Your passion lies in the identification and analysis of environmental details, deducing terrains, routes, populated areas, and climate conditions. Your skills encompass all cartographic aspects that can be inferred from any narrative.
+    const prompt = `extrapolate a world from a fragment chat: You are the Grand Cartographer, about to have a chat with a user. You are a charismatic and enthusiastic expert on the geography and physical layout of a newly fledging universe, known through only a single paragraph. Your passion lies in the identification and analysis of environmental details, deducing terrains, routes, populated areas, and climate conditions. Your skills encompass all cartographic aspects that can be inferred from any narrative.
 
-    You've recently come across a new paragraph which serves as an entry point into this universe:
+    You'verecently come across a new paragraph which serves as an entry point into this universe:
     
-    PARAGRAPH_START--- "\${paragraph}"  ---PARAGRAPH_END
+    PARAGRAPH_START--- "${paragraph}"  ---PARAGRAPH_END
     
     Being an expert in your field, you are capable of formulating a multitude of questions and hypotheses about the universe based on this paragraph. You are excited to engage in a conversation with the Player Character (PC), who has a firsthand knowledge of this universe. 
     Through your discourse, you seek to validate or refine your assumptions and, in the process, 
     deepen your understanding of the geographical elements of this universe. 
     (the real goal is to make the PC inspired to ask questions and deepn his own understanding of the fragment which he wrote)
     please introduce yourself briefly, have a name and try to define specific charactaristic to the grand cartographer, one that's suitable for the paragraph given.
-    the most important thing is to engage and to inspire the PC to deepen his understanding and curiousity about what he wrote through questions about the geography, climate, light, fauna, flora, terrain, resources,...everything that a cartographer would be interested in \`
+    the most important thing is to engage and to inspire the PC to deepen his understanding and curiousity about what he wrote through questions about the geography, climate, light, fauna, flora, terrain, resources,...everything that a cartographer would be interested in `;
     return [{ role: "system", content: prompt }];
 }
 
 
 export function generate_texture_by_fragment_and_conversation1223(fragment, storytellerSession=''){
-    const prompt = \`Create evocative card textures for a virtual RPG deck, inspired by the fragment:
-     '\${fragment}'.
+    const prompt = `Create evocative card textures for a virtual RPG deck, inspired by the fragment:
+     '${fragment}'.
 
-    also consider the following elaboration discussion on that fragment:"\${storytellerSession}"
+    also consider the following elaboration discussion on that fragment:"${storytellerSession}"
     
      Delve into the nuances of the scene to craft textures that capture the essence of this unique universe. Incorporate cultural cues, geographical references, and artistic influences to construct a cohesive and fresh universe. The card backs should maintain an abstract and symbolic character, avoiding specific scene depictions. Incorporate design elements such as embellishments, motifs, flourishes, and ornaments. Don't shy away from exploring esoteric sub-genres and niche influences, combining at least three distinct sources for unexpected blends. Remeber it's an RPG collector deck. Provide four distinctive texture variations, which will serve as 4 different interpretation on the fragment and the following conversation. each paired with a suitable Google Font. Ensure your description is clear and detailed, as it will be used as input for a TextToImage API to generate card texture images. embellishments, flourishes, filgrees, make it feel like a card texture. Highlight RPG, cinematic, ArtStation, grainy textures, and decorative styles.",
     REMEMBER: The textures prompts are standalone and wouldn't need additionally the original fragment.
@@ -1170,13 +1163,13 @@ export function generate_texture_by_fragment_and_conversation1223(fragment, stor
         }
         ]
         
-    \`
+    `;
     return [{ role: "system", content: prompt }];
 }
 
 export function generate_texture_by_fragment_and_conversation0408(fragment, storytellerSession=''){
-    let prompt = \`Revise the prompt if needed to overcome any content policy conflicts: "Extrapolate a universe essence by a fragment challenge: look at the following scene: : 
-    --START--"\${fragment}"--END--- 
+    let prompt = `Revise the prompt if needed to overcome any content policy conflicts: "Extrapolate a universe essence by a fragment challenge: look at the following scene: : 
+    --START--"${fragment}"--END--- 
     This fragment define a whole new storytelling universe. 
     this description is a mere fragment from a VAST universe. 
     I want to represent this universe as backside for a virtual RPG deck of card.please based on that knowledge and try to design the backside of this virtual RPG card. 
@@ -1209,27 +1202,27 @@ export function generate_texture_by_fragment_and_conversation0408(fragment, stor
      from pagan cultures. Use earthy greens and rich browns as the primary color scheme. 
      It should have faint, layered patterns resembling bark and moss intermingled with softer swirls and flourishes, reminiscent of a forest at dusk. Make sure to have the frame detailed with intricately interwoven leaves and vines, resonating with mythic undertones, to provide an archetypal RPG aesthetic. 
      Aim for a subtle and immersive design. and this more comprehensive example: "Create a seamless, FULL FRAME, UNBROKEN inspiring, immersive texture for an RPG card, influenced by the dark fantasy world akin to 'Dark Souls'. The texture should portray a story of endurance and redemption in a mystical, challenging environment. 
-     Utilize a color scheme of mossy greens and shadowy greys, interwoven with an ethereal glow symbolizing hope in a realm of despair. Incorporate Shibori dye patterns to add an enigmatic, auroral effect, reminiscent of the mysterious and otherworldly landscapes typical of dark fantasy worlds. Enhance the RPG essence with subtle motifs and symbols reflective of the genre's themes, such as ancient runes or mythical creatures. Frame the design with delicate, card-like embellishments or flourishes that seamlessly integrate with the overall texture. These elements should be inspired by the artistic diversity found in dark fantasy RPG core books and ArtStation, capturing the rich, varied essence of this RPG genre. The texture should avoid any textual elements, embodying the depth and mystical infusion of a dark fantasy RPG world with a focus on blending digital artistry and traditional texture techniques." IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it won't be broken JSON.parse!!!! ' also choose real material this card texture is made on in the physical universe of this narrative. example for materials: A Weathered card shaped Metal Texture: Create a texture that simulates corroded and tarnished metal, perhaps from ancient armor or relics found in this universe. The metal should have a patina that suggests great age, with embossed designs that are now barely discernible. FULL FRAME. grainy, natural light. cinematic Frayed mysterious Card shaped Fabric Texture: Imagine a texture that replicates a piece of frayed fabric, possibly from a banner or garment that has seen better days. The fabric's pattern should be faded and tattered, yet still hinting at the grandeur it once held. Each texture should be paired with an appropriate Google font that complements its historical and material qualities, enhancing the overall aesthetic. The textures should maintain an abstract quality to fit various card categories while conveying the wear and tear of time, bringing the players closer to the universe's ancient and mystical atmosphere. The design elements should include subtle embellishments, motifs, and flourishes, avoiding direct references to specific Earth cultures. The goal is to create a series of textures that are unique to this RPG universe, blending abstract artistry with the tangible feel of different aged materials.but it's important that they would convey a card like feel and would have a very unique inspiriation for storytelling. will have a storytelling theme to them. it's the theme of the story...there should be at least one concrete element that stands out looking at this card. Also, please emphasize the card like quality of the illustration. the material should make sense as a magical card. make sure to include flourishes and embellishments at the edges to further enhance their card-like quality. MAKE SURE YOU ARE inspired by niche fantasy novels, RPG games, and movies. make a fusion! mention them in this texture theme creation! Output as JSON objects: [{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str,major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]}].". remember that each item in the list is standalone and will be used on a fresh new instance of dalle-3 without any history or knowledge of the original fragment or other textures. 
+     Utilize a color scheme of mossy greens and shadowy greys, interwoven with an ethereal glow symbolizing hope in a realm of despair. Incorporate Shibori dye patterns to add an enigmatic, auroral effect, reminiscent of the mysterious and otherworldly landscapes typical of dark fantasy worlds. Enhance the RPG essence with subtle motifs and symbols reflective of the genre's themes, such as ancient runes or mythical creatures. Frame the design with delicate, card-like embellishments or flourishes that seamlessly integrate with the overall texture. These elements should be inspired by the artistic diversity found in dark fantasy RPG core books and ArtStation, capturing the rich, varied essence of this RPG genre. The texture should avoid any textual elements, embodying the depth and mystical infusion of a dark fantasy RPG world with a focus on blending digital artistry and traditional texture techniques." IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it wouldn't be broken JSON.parse!!!! ' also choose real material this card texture is made on in the physical universe of this narrative. example for materials: A Weathered card shaped Metal Texture: Create a texture that simulates corroded and tarnished metal, perhaps from ancient armor or relics found in this universe. The metal should have a patina that suggests great age, with embossed designs that are now barely discernible. FULL FRAME. grainy, natural light. cinematic Frayed mysterious Card shaped Fabric Texture: Imagine a texture that replicates a piece of frayed fabric, possibly from a banner or garment that has seen better days. The fabric's pattern should be faded and tattered, yet still hinting at the grandeur it once held. Each texture should be paired with an appropriate Google font that complements its historical and material qualities, enhancing the overall aesthetic. The textures should maintain an abstract quality to fit various card categories while conveying the wear and tear of time, bringing the players closer to the universe's ancient and mystical atmosphere. The design elements should include subtle embellishments, motifs, and flourishes, avoiding direct references to specific Earth cultures. The goal is to create a series of textures that are unique to this RPG universe, blending abstract artistry with the tangible feel of different aged materials.but it's important that they would convey a card like feel and would have a very unique inspiriation for storytelling. will have a storytelling theme to them. it's the theme of the story...there should be at least one concrete element that stands out looking at this card. Also, please emphasize the card like quality of the illustration. the material should make sense as a magical card. make sure to include flourishes and embellishments at the edges to further enhance their card-like quality. MAKE SURE YOU ARE inspired by niche fantasy novels, RPG games, and movies. make a fusion! mention them in this texture theme creation! Output as JSON objects: [{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str, major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]},{prompt:String, font:string, card_material:Str,major_cultural_influences_references:[niche rpg system , fantasy/sci fi novel, movie name, artist name]}].". remember that each item in the list is standalone and will be used on a fresh new instance of dalle-3 without any history or knowledge of the original fragment or other textures. 
     remember, the textures would be used as a png in a react app component to resemble a backside of a card. please emphasize the "cardness" of the texture. and also its full frame. 
     and also, the prompt would be standalone without any other input given to textToImage api...
     so not reference to the given paragraph should be made, if it won't be understood as a standalone prompt. I want it to feel specific. as if this texture only exists for this universe only. think how the influences are effecting the prompt. 
     have at least one specific entity within the texture that seems relevant for the original fragment but aren't mentioned explicitlly there. use the cultural references as a guideline for mood, tone, motiffs...make sure we have embellishments, 
-    edges and otherwise means that will help us understand it's a card..make it a dazzling inspiring ..one that makes the user immersed in a storytelling universe he doesn't yet know, but can feel its richness. \`
+    edges and otherwise means that will help us understand it's a card..make it a dazzling inspiring ..one that makes the user immersed in a storytelling universe he doesn't yet know, but can feel its richness. `;
     return [{ role: "system", content: prompt }];
 }
 
 export function generate_texture_by_fragment_and_conversation0124(fragment, storytellerSession=''){
-    let prompt =\`Extrapolate a universe essence by a fragment challenge:
+    let prompt =`Extrapolate a universe essence by a fragment challenge:
     look at  the following scene: 
-    "\${fragment}"
+    "${fragment}"
     This fragment define a whole new storytelling universe. this description is a mere fragment from a VAST universe. I want to represent this universe
-as backside for a virtual RPG deck of card.\`
+as backside for a virtual RPG deck of card.`
 if(storytellerSession)
     {
-    prompt += \`here's a short  elaboration on this initial scene taken from a conversation about it: 
-    \${storytellerSession}\`
+    prompt += `here's a short  elaboration on this initial scene taken from a conversation about it: 
+    ${storytellerSession}`
     }
-    prompt += \`please based on that knowledge and try to design the backside of this virtual RPG card. (it will be a part of a REACT component with html, and css and the illustration full frame as the visualization of the card)
+    prompt += `please based on that knowledge and try to design the backside of this virtual RPG card. (it will be a part of a REACT component with html, and css and the illustration full frame as the visualization of the card)
 
 
     the backside of the deck is a texture.
@@ -1255,18 +1248,18 @@ if(storytellerSession)
         'Card Texture: Generate an 8k texture for a card set in a woodland location. The texture should represent deeper primal energies resonant with The Green Man motifs from pagan cultures. Use earthy greens and rich browns as the primary color scheme. It should have faint, layered patterns resembling bark and moss intermingled with softer swirls and flourishes, reminiscent of a forest at dusk. Make sure to have the frame detailed with intricately interwoven leaves and vines, resonating with mythic undertones, to provide an archetypal RPG aesthetic. Aim for a subtle and immersive design.
         and this more comprehensive example:
         "Create a seamless, FULL FRAME, UNBROKEN inspiring, immersive texture for an RPG card, influenced by the dark fantasy world akin to 'Dark Souls'. The texture should portray a story of endurance and redemption in a mystical, challenging environment. Utilize a color scheme of mossy greens and shadowy greys, interwoven with an ethereal glow symbolizing hope in a realm of despair. Incorporate Shibori dye patterns to add an enigmatic, auroral effect, reminiscent of the mysterious and otherworldly landscapes typical of dark fantasy worlds. Enhance the RPG essence with subtle motifs and symbols reflective of the genre's themes, such as ancient runes or mythical creatures. Frame the design with delicate, card-like embellishments or flourishes that seamlessly integrate with the overall texture. These elements should be inspired by the artistic diversity found in dark fantasy RPG core books and ArtStation, capturing the rich, varied essence of this RPG genre. The texture should avoid any textual elements, embodying the depth and mystical infusion of a dark fantasy RPG world with a focus on blending digital artistry and traditional texture techniques."
-        IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it won't be broken JSON.parse!!!!
+        IMPORTANT: THE OUTPUT SHOULD BE A JSON list of objects: [{prompt:String, font:string}] no additional strings. so it wouldn't be broken JSON.parse!!!!
         Please try to interpret the original narrative in a different way every time. make it an inspiring texture for storytelling. capture the universe essence. 
-        make the scene echo in the texture as a fading memory. be inspiring. it is the storyteller detective own deck. have at least a single feaeture we would remember on each texture. and remember it is a standalone without any knowledge of the fragment\`
+        make the scene echo in the texture as a fading memory. be inspiring. it is the storyteller detective own deck. have at least a single feaeture we would remember on each texture. and remember it is a standalone without any knowledge of the fragment`;
     return [{ role: "system", content: prompt }];
 }
 
 export function generate_entities_by_fragment(fragment, maxNumberOfEntities=10, existingEntities=[]){
-    let prompt = \`### Standalone Prompt for Entity Creation
+    let prompt = `### Standalone Prompt for Entity Creation
 
 **Prompt:**
 
-"Given the narrative fragment: "\${fragment}"
+"Given the narrative fragment: "${fragment}"
 and these existing entities []
 Create 3-8 entities that exist both within and beyond this narrative moment. These entities emerge from a growing storytelling universe, reflecting its core principles:
 
@@ -1324,14 +1317,14 @@ if the fragment seems too short, try to extrapolate details, and generaet entiti
 what is the climate? what is the terrain? any features? any signs of flora? fauna? populated areas? any signs of organization etc..be concrete. work your way through ASCOPE/PMESII which is always relevant in weaving a storytelling universe from scratch
 Familiarity is about how well-known or specific the entity is within the narrative context—lower levels mean broader, more generic entities that can easily fit into multiple settings, while higher levels are deeply ingrained in the specific story universe.
 Storytelling Points Cost measures how much narrative effort or points a player needs to invest to introduce or utilize this entity, balancing its narrative weight and uniqueness. Lower costs for generic, versatile entities and higher costs for unique, lore-rich ones.
-return the JSON only!!\`
+return the JSON only!!`;
     return [{ role: "system", content: prompt }];
 }
 
 
 export function generate_entities_by_fragmentWorking(fragment, maxNumberOfEntities=10){
-    let prompt = \`Given the narrative fragment: \${fragment}
-Create \${maxNumberOfEntities} entities that exist within and beyond this narrative moment.
+    let prompt = `Given the narrative fragment: ${fragment}
+Create ${maxNumberOfEntities} entities that exist within and beyond this narrative moment.
 
 
 CORE CONCEPT:
@@ -1432,29 +1425,29 @@ The response should demonstrate:
 
 THE MOST IMPORTANT THING THOUGH is to reach the adequate level of SPECIFICITY. 1 we'll feel it's a one time entity. not one of...
 try to asses your specificity level for each entity 0-1. make us want to immerse in the entity, use sensory concrete imagery to guide your path. remember return JSON only.
- need \${maxNumberOfEntities} at the most! 
+ need ${maxNumberOfEntities} at the most! 
  Do not impose an entity. remember, not everything mentioned in the fragment is suitable to become an entity, think what a creative GM worldbuilder could extrapolate from it, or find related entities to it..use common sense. SHOW don't TELL! craft them with confidence. think like a mature GM. someone with expertise...I don't know, 
  it seems to me you're inclined to using heavy lifting terms, instead of letting a real world emerge. 
  don't let all the heavy cannons out immediately. prefer adding depthI prefer more grounded, 
  textured entities that feel lived-in rather than overtly magical. A mature GM knows subtlety often 
- creates more compelling worlds than grand proclamations\`
+ creates more compelling worlds than grand proclamations`;
     return [{ role: "system", content: prompt }];
 }
 
 
 
 export function generate_texture_by_fragment_and_conversation_old(fragment, storytellerSession=''){
-    let prompt =\`Extrapolate a universe essence by a fragment challenge:
+    let prompt =`Extrapolate a universe essence by a fragment challenge:
     look at  the following scene: : 
-    "\${fragment}"
+    "${fragment}"
     This fragment define a whole new storytelling universe. this description is a mere fragment from a VAST universe. I want to represent this universe
-as backside for a virtual RPG deck of card.\`
+as backside for a virtual RPG deck of card.`
     if(storytellerSession)
     {
-        prompt += \`here's a short  elaboration on this initial scene taken from a conversation about it: 
-        \${storytellerSession}\`
+        prompt += `here's a short  elaboration on this initial scene taken from a conversation about it: 
+        ${storytellerSession}`
     }
-    prompt += \`please based on that knowledge and try to design the backside of this virtual RPG card. (it will be a part of a REACT component with html, and css and the illustration full frame as the visualization of the card)
+    prompt += `please based on that knowledge and try to design the backside of this virtual RPG card. (it will be a part of a REACT component with html, and css and the illustration full frame as the visualization of the card)
     
     
         the backside of the deck is a texture.
@@ -1475,7 +1468,7 @@ as backside for a virtual RPG deck of card.\`
             Refrain as much as possible from too concrete influences that can be traced to an earth culture.
             For guidance, consider these examples:
             (these examples don't have mentioning of material and physicality in them)
-            'Card texture: Pulling from Brom's art style merged with Dark Sun atmospheres, visualize a desert of sizzling oranges and browns, with distressed edges evoking scorched earth, and the corner embellishments shaped like twisted dragons, high contrast, 8k, RPG essence.'
+            'Card texture: Pulling from Brom's art style merged with Dark Sun atmospheres, visualize a desert of sizzling oranges and browns, with distressed edges evoking scorched earth, and the corner embellishments shaped like twisted dragon, high contrast, 8k, RPG essence.'
             'Card texture: Melding Stephan Martinière's vision with A Song of Ice and Fire's chill, picture a detailed silhouette of a castle set against a frosty backdrop, with intricate Northern-inspired knotwork designs accentuating the corners, matte finish for tactile richness, cinematic, grainy, dark fantasy aura, 8k, ArtStation champion.'
             'Card Texture: Generate an 8k texture for a card set in a woodland location. The texture should represent deeper primal energies resonant with The Green Man motifs from pagan cultures. Use earthy greens and rich browns as the primary color scheme. It should have faint, layered patterns resembling bark and moss intermingled with softer swirls and flourishes, reminiscent of a forest at dusk. Make sure to have the frame detailed with intricately interwoven leaves and vines, resonating with mythic undertones, to provide an archetypal RPG aesthetic. Aim for a subtle and immersive design.
             and this more comprehensive example:
@@ -1499,13 +1492,13 @@ as backside for a virtual RPG deck of card.\`
                 any history or knowledge of the original fragment or other textures.
                 remember it should be a standalone promtp. without any knowledge of the universe...its details. it's a single prompt for an textToImage api. each entry in the array is a different separated calll. and now having said all that....you can surprise me and add a single defined archteype for each texture.
     
-    Remember that the output should be easily parsed by JSON.parse(), so keep the structre of JSON array as given!            \`
+    Remember that the output should be easily parsed by JSON.parse(), so keep the structre of JSON array as given!            `;
     return [{ role: "system", content: prompt }];
 }
 
 export function generate_texture_by_fragment_and_conversationGood(fragment){
-    const prompt =\`look at  the following scene: 
-    "\${fragment}"
+    const prompt =`look at  the following scene: 
+    "${fragment}"
 
 I want this scene to define a backside for a virtual RPG set of cards. 
 this description is a mere fragment from a VAST universe. 
@@ -1526,23 +1519,23 @@ the backside of the deck is a texture. I want you to define that texture, after 
     'Card texture: Melding Stephan Martinière's vision with A Song of Ice and Fire's chill, picture a detailed silhouette of a castle set against a frosty backdrop, with intricate Northern-inspired knotwork designs accentuating the corners, matte finish for tactile richness, dark fantasy aura, 8k, ArtStation champion.'
     
     Outputs should be formatted as a JSON list of strings for compatibility with JSON.parse.
-    \`
+    `;
     return [{ role: "system", content: prompt }];
 }
 
 export function generate_texture_by_fragment_and_conversationOlder(fragment){
-    const prompt = \`Generate 4 distinctive descriptions for the texture of a card that corresponds to this text fragment taken from a new unfolding story: "\${fragment}" 
+    const prompt = `Generate 4 distinctive descriptions for the texture of a card that corresponds to this text fragment taken from a new unfolding story: "${fragment}" 
     Each texture description should be interpreting the text fragment in a different way. taking it to a different direction - answering the question which genre or subgenre this fragment can relate to. the direction can be influenced by other related cultural influences, whether it be books, movies, myths etc. but in a surprising various options. 
     The textures should have a keyword format, utilizing terms such as RPG, cinematic, ArtStation, ArtStation winner, grainy, embellishments, decorative styles, etc. Note that these descriptions are for the texture of a card, not an illustration. They should provide an engaging aesthetic complement to the story continuation. For example, 'Card texture: Inspired by Brom's art style and Dark Sun, a desert of sizzling oranges and browns, distressed edges give a sense of scorched earth, embellishments of a twisted dragon in the top right, high contrast, 8k, RPG card texture.', 'Card texture: Inspired by Stephan Martinière's art style and A Song of Ice and Fire, a meticulously detailed castle silhouette against a frigid landscape, Northern-inspired knotwork at the corners, the matte finish brings out the texture of the snow, dark fantasy, 8k, ArtStation winner. 
     make the card texture subtle and so the influence. tending into more abstract or symbolic. archetypal
-    please return the results as a JSON list of strings (so it would not fail on JSON.parse(output) )\`
+    please return the results as a JSON list of strings (so it would not fail on JSON.parse(output) )`;
     return [{ role: "system", content: prompt }];
 }
 
 
 export function generate_texture_by_fragment_and_conversationOld(fragment){
-    const prompt = \`Generate 4 standalone card texture descriptions based on the atmospheric essence captured by the following scene: 
-    --sceneStart \${fragment} ---sceneEnd
+    const prompt = `Generate 4 standalone card texture descriptions based on the atmospheric essence captured by the following scene: 
+    --sceneStart ${fragment} ---sceneEnd
     Each description should:
     
     Interpret the scene uniquely, drawing inspiration from different genres or sub-genres and a range of cultural influences like books, movies, myths, and beyond. This fusion should weave seamlessly, forming a 'new universe' with fresh, yet familiar undertones.
@@ -1559,14 +1552,14 @@ export function generate_texture_by_fragment_and_conversationOld(fragment){
     'Card texture: Melding Stephan Martinière's vision with A Song of Ice and Fire's chill, picture a detailed silhouette of a castle set against a frosty backdrop, with intricate Northern-inspired knotwork designs accentuating the corners, matte finish for tactile richness, dark fantasy aura, 8k, ArtStation champion.'
     
     Outputs should be formatted as a JSON list of strings for compatibility with JSON.parse.
-    \`
+    `;
     return [{ role: "system", content: prompt }];
 }
 
 
 export function generateExpertList(paragraph) {
 
-    const expertDescription = \`The Sage of Lore: An expert in the history, mythology, and cultural practices of the universe. They could discuss the potential backstory or significance of characters, objects, and events in the narrative, shedding light on the deeper meanings and connections within the world.
+    const expertDescription = `The Sage of Lore: An expert in the history, mythology, and cultural practices of the universe. They could discuss the potential backstory or significance of characters, objects, and events in the narrative, shedding light on the deeper meanings and connections within the world.
 
     The Grand Cartographer: An authority on the geography and physical layout of the universe. They can provide detailed insights about the setting, nearby locations, possible travel routes, and even potential dangers or points of interest within the landscape.
     
@@ -1578,29 +1571,29 @@ export function generateExpertList(paragraph) {
     
     The Proctor of Proficiencies: An expert on skills, traits, feats, and the game system at large. They identify and discuss possible abilities exhibited by characters in the narrative, propose potential game mechanics that align with the actions described, and help refine the universe's rule system.
     
-    \`;
-    const promptForGPTExpertShortlist = \`
+    `;
+    const promptForGPTExpertShortlist = `
     {
-        "paragraph": "\${paragraph}",
+        "paragraph": "${paragraph}",
         "description": "This is a narrative paragraph crafted by the Player Character (PC) and the Storyteller Expert. 
         The paragraph serves as a glimpse into a fledging universe. 
         The goal is to understand this universe better by providing an analysis from different expert perspectives. 
-        The available experts and their specializations are as follows: \${expertsDescription}.",
+        The available experts and their specializations are as follows: ${expertsDescription}.",
         "instruction": "Your task is to generate a structured JSON response in the format of an array. 
         Each element in the array should be an object representing an expert's take on the paragraph. 
         The object should have two properties: 'expert', which should be the expert's name, and 'bulletPoints', 
         which should be an array of points that the expert would discuss to delve deeper into the context of the paragraph. 
         The points should be related to the expert's field of specialization. 
         The experts should be sorted by the relevancy of their field to the paragraph. 
-        Example format: [{\\"expert\\":\\"expert_name\\", \\"bulletPoints\\":[\\"point1\\", \\"point2\\", ...]}, {...}, ...]. 
+        Example format: [{\"expert\":\"expert_name\", \"bulletPoints\":[\"point1\", \"point2\", ...]}, {...}, ...]. 
         Please provide detailed and engaging points that would intrigue the PC to explore more of this universe."
-    }\`;
+    }`;
 
 }
 
 
 export function generateFragmentsBeginnings(numberOfFragments = 20) {
-    const prompt = \`Instructions: Generate \${numberOfFragments} distinct sentence fragments as if they're taken from within a fantasy/adventure/sci-fi novel influenced by two different in genre esoteric acclaimed fantasy novels in the broadest sense of the word. and an esoteric mature RPG game system. when we see the fragments we wouldn't be able to trace back those influences, to initiate a collaborative storytelling game. These fragments should be atmospheric, thought-provoking, and varied in length, ranging from just a 3 words up to a sentence of 15 words. They should provide a palpable sense of setting, characters, or events, enticing participants to continue the narrative in their unique style.
+    const prompt = `Instructions: Generate ${numberOfFragments} distinct sentence fragments as if they're taken from within a fantasy/adventure/sci-fi novel influenced by two different in genre esoteric acclaimed fantasy novels in the broadest sense of the word. and an esoteric mature RPG game system. when we see the fragments we wouldn't be able to trace back those influences, to initiate a collaborative storytelling game. These fragments should be atmospheric, thought-provoking, and varied in length, ranging from just a 3 words up to a sentence of 15 words. They should provide a palpable sense of setting, characters, or events, enticing participants to continue the narrative in their unique style.
     the fragments are taken from the middle of a book...they don't have to be dramatic, actually, they're aren't so dramatic, no need to showoff. be as concrete as possible. so anyone who reads the fragments would feel as if they're really taken from within a book. remember these sentences are fragments, they're not standing alone. but they should have some echo..the essence of the storytelling.
 verbs that invite actions, imagery that is concrete and invites personal interpretation is most desired.
     
@@ -1652,13 +1645,13 @@ verbs that invite actions, imagery that is concrete and invites personal interpr
 
     Be subtle yet inspiring, avoid cliches. dare to be specific. very specific and bold. dare to be influenced by famous writers and their style, different genres, eras, and atmosphere. dare to visit a very concrete momen
     
-    please return \${Math.round((numberOfFragments - 2) / 3)} results in lengths 3-6 words
-    \${Math.round((numberOfFragments - 2) / 3)} results 7-10 words
-    \${Math.round((numberOfFragments - 2) / 3)} results 11-13 words
+    please return ${Math.round((numberOfFragments - 2) / 3)} results in lengths 3-6 words
+    ${Math.round((numberOfFragments - 2) / 3)} results 7-10 words
+    ${Math.round((numberOfFragments - 2) / 3)} results 11-13 words
     2 results 14-15 words.
     
     return the results as a JSON list of fragment strings, and return that only. so it could be parsed easily in a code! (otherwise JSON.parse(res) would fail).;
-    make them concrete, and tangible, rooted in senses, and devoid of interpretation. show don't tell. don't be afraid to use names, have a concrete description of items, places, people. you can incorporate monologues, dialogues. make the fragments rooted in somewhere. and don't waste words that mean nothing and only sound smart or flashy. don't waste the readers' time!\`;
+    make them concrete, and tangible, rooted in senses, and devoid of interpretation. show don't tell. don't be afraid to use names, have a concrete description of items, places, people. you can incorporate monologues, dialogues. make the fragments rooted in somewhere. and don't waste words that mean nothing and only sound smart or flashy. don't waste the readers' time!`;
     return [{ role: "system", content: prompt }];
 
 }
@@ -1666,7 +1659,7 @@ verbs that invite actions, imagery that is concrete and invites personal interpr
 export function generateContinuationPromptConcise(userText = null){
     let userTextLength = userText.split(/\s|/).length; // Ensure userTextLength is defined
     const lastFiveWords = userText.split(' ').slice(-5).join(' ');
-        const prompt =\`Given the fragment: ---FRAGMENT_START '\${userText}' ----FRAGMENT_END
+        const prompt =`Given the fragment: ---FRAGMENT_START '${userText}' ----FRAGMENT_END
         Generate questions about this scene. From these questions, create sub-questions 
         and form an idea about a potential answer. Extend the fragment based on this idea, 
         using sensory descriptions and actions to show, not tell, the unfolding story. 
@@ -1684,12 +1677,12 @@ export function generateContinuationPromptConcise(userText = null){
                     "chosen_narrative_direction": ["Main Question", "Answered through Sub-question"], 
                     "related_entities_from_text": [{"name": "Entity", "type": "CHARACTER/ITEM/LOCATION/EVENT", "importance": 1-5}], 
                     "optional_new_entities_in_continuation": [{"name": "NewEntity", "type": "CHARACTER/ITEM/LOCATION/EVENT", "importance": 1-5}], 
-                    "continuation": "(reminder of fragment's end)  + ( The textual seamless continuation of the story fragment AS A WHOLE. Please Add \${Math.round(userTextLength/3)} words MAX!)"
+                    "continuation": "(reminder of fragment's end)  + ( The textual seamless continuation of the story fragment AS A WHOLE. Please Add ${Math.round(userTextLength/3)} words MAX!)"
                 }, ...more continuations 
             ]
         } 
                      
-        Remember: Be concrete, specific, and subtle. Avoid abstract imagery. Show, don't tell."\`
+        Remember: Be concrete, specific, and subtle. Avoid abstract imagery. Show, don't tell."`
 
     return [{ role: "system", content: prompt }];
 }
@@ -1701,7 +1694,7 @@ export function generateContinuationPrompt1(userText = null, numberOfContinuatio
     const oneFourthLength = Math.ceil(words.length / 4);
     const numberOfAdditions = Math.max(5, oneThirdLength);
     const minNumberOfAdditions = Math.max(3, oneFourthLength);
-    const prompt = \`Let's play a game of collaborative storytelling. Our goal is to co-write a narrative, creating it one paragraph at a time.
+    const prompt = `Let's play a game of collaborative storytelling. Our goal is to co-write a narrative, creating it one paragraph at a time.
 
 **How the game works:**
 
@@ -1711,7 +1704,7 @@ export function generateContinuationPrompt1(userText = null, numberOfContinuatio
 
 3. **My challenge:**
 
-   - I will add as few words as possible, between **\${minNumberOfAdditions} and \${numberOfAdditions} words** per continuation.
+   - I will add as few words as possible, between **${minNumberOfAdditions} and ${numberOfAdditions} words** per continuation.
    - I will deepen the narrative with grounded sensory detail and specific, suggestive imagery.
    - My goal is to organically build upon the story, adding new elements while fitting seamlessly into the existing text.
 
@@ -1755,10 +1748,10 @@ export function generateContinuationPrompt1(userText = null, numberOfContinuatio
 - **Use ASCOPE/PMESII concepts:** Leverage Area, Structures, Capabilities, Organizations, People, and Events as well as Political, Military, Economic, Social, Information, and Infrastructure elements to enrich the story. but not only that. try to feel the story. which new details are needed, what does the plot need.
 - **End inspiringly:** Leave each turn at a place that sparks creativity for the next addition, maintaining the ping-pong rhythm of co-creation.
 
-parameters: number of continuations needed: \${numberOfContinuations}
-max number of additions (new words) \${numberOfAdditions}
-min number of additions (new words) \${minNumberOfAdditions}. pay close attention to these parameters.
-. Please return the json array resposne only! I need it to be parsed by JSON.parse!!\`
+parameters: number of continuations needed: ${numberOfContinuations}
+max number of additions (new words) ${numberOfAdditions}
+min number of additions (new words) ${minNumberOfAdditions}. pay close attention to these parameters.
+. Please return the json array resposne only! I need it to be parsed by JSON.parse!!`;
     return [{ role: "system", content: prompt }];
 }
 
@@ -1769,7 +1762,7 @@ export function generateContinuationPrompt(userText = null, numberOfContinuation
     const oneFourthLength = Math.ceil(words.length / 4);
     const numberOfAdditions = Math.max(5, oneThirdLength);
     const minNumberOfAdditions = Math.max(3, oneFourthLength);
-    const prompt = \`Let’s embark on a collaborative storytelling journey where we co-create a narrative, weaving it paragraph by paragraph into something immersive and alive.
+    const prompt = `Let’s embark on a collaborative storytelling journey where we co-create a narrative, weaving it paragraph by paragraph into something immersive and alive.
 
 ### Rules and Setup:
 
@@ -1783,7 +1776,7 @@ export function generateContinuationPrompt(userText = null, numberOfContinuation
 
    - If the continuation length is too short, the narrative might break in the middle of a sentence or idea, and that's okay. Your aim is to pass the turn without showing it was you steering the wheel of storytelling, yet subtly navigate the ship forward.
 
-   - Each continuation—whether yours or mine—must be between **\${minNumberOfAdditions} and \${numberOfAdditions} words**, and the flow of each continuation must be seamless both grammatically and narratively to avoid abrupt transitions.
+   - Each continuation—whether yours or mine—must be between **${minNumberOfAdditions} and ${numberOfAdditions} words**, and the flow of each continuation must be seamless both grammatically and narratively to avoid abrupt transitions.
    - My continuations will:
      - Always prioritize organic flow, so the story reads like one seamless piece, designed to be taken in as a whole.
      - Be cohesive, working in harmony with what you write, like the layers of a tapestry weaving tighter with every thread.
@@ -1805,7 +1798,7 @@ export function generateContinuationPrompt(userText = null, numberOfContinuation
 
 4. **Multiple Variations for Continuations**:
 
-   - For my turn, you will propose **\${numberOfContinuations} different continuations** for me to choose from.
+   - For my turn, you will propose **${numberOfContinuations} different continuations** for me to choose from.
    - Each continuation will:
      - Offer a unique perspective or tone, as if shaped by different storytellers with distinct influences, inspirations, and styles. However, the unique perspective or tone must still align with the overall narrative, avoiding abrupt tonal shifts.
      - Seamlessly integrate into the existing narrative while offering a fresh spark of creativity.
@@ -1824,7 +1817,7 @@ export function generateContinuationPrompt(userText = null, numberOfContinuation
 
 ----
 
-\${userText}
+${userText}
 ----
 Example JSON Structure:
 
@@ -1864,10 +1857,10 @@ It was almost midnight when she reached the edge of the forest. Her horse’s br
   }
 ]
 
-remember \${numberOfContinuations} different continuations JSON array, each \${minNumberOfAdditions} to \${numberOfAdditions} words additions!.
-and remember the narrative: NARRATIVE START ---\${userText} --- NARRATIVE END
+remember ${numberOfContinuations} different continuations JSON array, each ${minNumberOfAdditions} to ${numberOfAdditions} words additions!.
+and remember the narrative: NARRATIVE START ---${userText} --- NARRATIVE END
 return nothing but a JSON ARRAY!!
-\`
+`;
     return [{ role: "system", content: prompt }];
 }
 
@@ -1876,7 +1869,7 @@ export function generateContinuationPromptWorking(userText = null, numberOfConti
     const oneThirdLength = Math.ceil(words.length / 3);
     const numberOfWordsToReturn = Math.max(5, oneThirdLength);
     const lastWordsOfFragment = words.slice(-numberOfWordsToReturn).join(' ');
-    const prompt =\`-- FRAGMENT_START:"\${userText}" --- FRAMGNET_END
+    const prompt =`-- FRAGMENT_START:"${userText}" --- FRAMGNET_END
     Instructions:    
     Look at this fragment. I want you to ask interesting WH questions about it. 
     ask a few questions. on these questions ask sub questions.
@@ -1892,10 +1885,10 @@ export function generateContinuationPromptWorking(userText = null, numberOfConti
     but remember: Concrete, wry, and accurate is always preferred to vague generic and dramatic. 
     Therefore Refrain from any general or abstract descriptions, 
     that should serve as an ambient. Stick to the tangible facts. almost as if its a screenplay treatment
-    Now for the output: PLEASE GENERATE \${numberOfContinuations}DIFFERENT VARIATIONS 
+    Now for the output: PLEASE GENERATE ${numberOfContinuations}DIFFERENT VARIATIONS 
     each one answers your questions(mostly WH questions) differently and 
     takes the story, the unfolding scene to a different direction with a different tone and theme. 
-    Add \${Math.round(userText.split(' ').length / 3)} words MAX for each variation, making sure they fit seamlessly as a progressing narrative. 
+    Add ${Math.round(userText.split(' ').length / 3)} words MAX for each variation, making sure they fit seamlessly as a progressing narrative. 
     They shouldn't feel as if they're imposed on the existing text.
     You are NOT supposed to give the full answer to the question you asked, 
     but start paving a way into materializing the question and the necessity to answer it 
@@ -1931,7 +1924,7 @@ export function generateContinuationPromptWorking(userText = null, numberOfConti
                     }
                 ],
                 "continuation": {
-                    "prefix": "<" ...\${lastWordsOfFragment}}(reminder of fragment's end. but be mindful of the whole narrative before it to assure its seamless continuation)  + (The textual seamless continuation of the story fragment AS A WHOLE). no more than max \${Math.max(10, Math.round(userText.split(' ').length / 3))} words">", 
+                    "prefix": "<" ...${lastWordsOfFragment}}(reminder of fragment's end. but be mindful of the whole narrative before it to assure its seamless continuation)  + (The textual seamless continuation of the story fragment AS A WHOLE). no more than max ${Math.max(10, Math.round(userText.split(' ').length / 3))} words">", 
                     "fontName": "<fontName from Google Fonts>", 
                     "fontSize": "<fontSize>", 
                     "fontColor": "<fontColor in CSS format like #ffffff>"
@@ -1956,7 +1949,7 @@ export function generateContinuationPromptWorking(userText = null, numberOfConti
                 make it seem natural, as part of the unfolding!! take your time, to unfold, be an artist of words.
                 Also, if you can try to end the continuation in the middle on a very subtle suggestive cliffhanger...
                 be subtle. be inspiring. be tangible, grounded refrain from Interpreting. Show don't tell! 
-                make it seem real. AGAIN return ONLY the JSON. no other response!!\`
+                make it seem real. AGAIN return ONLY the JSON. no other response!!`;
 
     return [{ role: "system", content: prompt }];
 }
@@ -1966,8 +1959,8 @@ export function generateContinuationPromptWorking(userText = null, numberOfConti
 export function generateContinuationPromptOld(userText= null){
     const lastThreeWords = userText.split(' ').slice(-5).join(' ');
 
-    const prompt = \`-- FRAGMENT_START:
-    "\${userText}" --- FRAMGNET_END
+    const prompt = `-- FRAGMENT_START:
+    "${userText}" --- FRAMGNET_END
     
     Instructions:
     Look at this fragment. I want you to ask interesting WH questions about it. ask a few questions. on these questions ask sub questions. 
@@ -1989,7 +1982,7 @@ export function generateContinuationPromptOld(userText= null){
         {
     "chosen_sub_questions": ["Question", "Sub-question"]
     "related_entities_from_text": ["Entity1", (optionally more)]
-        "continuation": "...\${lastThreeWords} + (The textual seamless continuation of the story fragment)",
+        "continuation": "...${lastThreeWords} + (The textual seamless continuation of the story fragment)",
         
         },
         ... [more continuations as required]
@@ -1997,14 +1990,14 @@ export function generateContinuationPromptOld(userText= null){
     }
 
     Important:
-    Ensure the story unfolds naturally. The focus is on evoking a genuine narrative progression, making the reader feel as if they are reading an authentic novel. use only concrete sensory descriptions. refrain from explaining or generic imagery. be concrete! wry. imagine a strict writer criticizing your work. it should feel like a real story unfolding. tangible, concrete, based on facts and not on interpretations. show don't Tell. focus on concrete seneory descriptions, rather on abstract or generic ones.  be descriptive and thorough but always concrete. tangible. even wry. be specific. not abstract. don't use metaphors unless they're ABSOLUTELY ESSENTIAL. imagine you're john steinback, hemmingway, raymond carver combined with the George R.  R. Martin. Do not impose the entities. you're getting graded as to how seamless and natural the continuation feels.  DON't IMPOSE THE CONTINUATION. make it seem natural, as part of the unfolding!! you don't have to introduce a new one... also, it's perfectly ok to end a continuation in the middle...be subtle. be inspiring. make it seem real.\`
+    Ensure the story unfolds naturally. The focus is on evoking a genuine narrative progression, making the reader feel as if they are reading an authentic novel. use only concrete sensory descriptions. refrain from explaining or generic imagery. be concrete! wry. imagine a strict writer criticizing your work. it should feel like a real story unfolding. tangible, concrete, based on facts and not on interpretations. show don't Tell. focus on concrete seneory descriptions, rather on abstract or generic ones.  be descriptive and thorough but always concrete. tangible. even wry. be specific. not abstract. don't use metaphors unless they're ABSOLUTELY ESSENTIAL. imagine you're john steinback, hemmingway, raymond carver combined with the George R.  R. Martin. Do not impose the entities. you're getting graded as to how seamless and natural the continuation feels.  DON't IMPOSE THE CONTINUATION. make it seem natural, as part of the unfolding!! you don't have to introduce a new one... also, it's perfectly ok to end a continuation in the middle...be subtle. be inspiring. make it seem real.`;
 return [{ role: "system", content: prompt }];
 }
 
 export function generateContinuationPromptOldies(userText= null){
     let userTextLength = userText.split(/\s|/).length; // Ensure userTextLength is defined
-    const prompt = \`-- Fragment Start:
-     \${userText} --- Fragment End
+    const prompt = `-- Fragment Start:
+     ${userText} --- Fragment End
     
     Instructions:
 Look at this fragment. I want you to ask interesting WH questions about it. ask a few questions. on these questions ask sub questions. 
@@ -2013,7 +2006,7 @@ incorporate these "ideas" by continuing the fragment seamlessly so it would be r
 you should let the ideas  slowly and subtly materialize into the fragment by continuing the narrative. do it through gestures, actions, and the environment, through tangible sensual imagery, by showing NOT by telling us. concrete and wry, and accurate. 
 refrain from any general or abstract descriptions, that should serve as an ambient. stick to the tangible facts.
 please generate 8 different variations answering the WH questions differently.
-Add \${parseInt(userTextLength/4)} words MAX for each variation, making sure they fit seamlessly as a progressing narrative. they shouldn't feel as if they're imposed on the existing text.
+Add ${parseInt(userTextLength/4)} words MAX for each variation, making sure they fit seamlessly as a progressing narrative. they shouldn't feel as if they're imposed on the existing text.
 you are NOT supposed to give the full answer to the question you asked, but start paving a way into materializing the question and the necessity to answer it within the narrative.
 The main aim is to inspire the reader to naturally continue the story on their own, evoking a sense of real-time unfolding. Your continuations should inspire creative writing, be tangible in imagery, and sensuous in detail. It should read like a genuine unfolding narrative.
 be concrete! never use phrases like "eyes whispering tales" eyes don't whisper tales it's just a way to evade saying something concrete
@@ -2026,17 +2019,17 @@ Your response should be a JSON array of objects with the following format:
 }
 
 Important:
-Ensure the story unfolds naturally. The focus is on evoking a genuine narrative progression, making the reader feel as if they are reading an authentic novel. use only concrete sensory descriptions. refrain from explaining or generic imagery. be concrete! wry. imagine a strict writer criticizing your work. it should feel like a real story unfolding. tangible, concrete, based on facts and not on interpretations. show don't Tell. focus on concrete seneory descriptions, rather on abstract or generic ones.  be descriptive and thorough but always concrete. tangible. even wry. be specific. not abstract. don't use metaphors unless they're ABSOLUTELY ESSENTIAL. imagine you're john steinback, hemmingway, raymond carver combined with the George R.  R. Martin. Do not impose the entities. you're getting graded as to how seamless and natural the continuation feels.  DON't IMPOSE THE CONTINUATION. make it seem natural, as part of the unfolding!! you don't have to introduce a new one... also, it's perfectly ok to end a continuation in the middle...be subtle. be inspiring. make it seem real.\`
+Ensure the story unfolds naturally. The focus is on evoking a genuine narrative progression, making the reader feel as if they are reading an authentic novel. use only concrete sensory descriptions. refrain from explaining or generic imagery. be concrete! wry. imagine a strict writer criticizing your work. it should feel like a real story unfolding. tangible, concrete, based on facts and not on interpretations. show don't Tell. focus on concrete seneory descriptions, rather on abstract or generic ones.  be descriptive and thorough but always concrete. tangible. even wry. be specific. not abstract. don't use metaphors unless they're ABSOLUTELY ESSENTIAL. imagine you're john steinback, hemmingway, raymond carver combined with the George R.  R. Martin. Do not impose the entities. you're getting graded as to how seamless and natural the continuation feels.  DON't IMPOSE THE CONTINUATION. make it seem natural, as part of the unfolding!! you don't have to introduce a new one... also, it's perfectly ok to end a continuation in the middle...be subtle. be inspiring. make it seem real.`;
     return [{ role: "system", content: prompt }];
 }
 
 export function generateContinuationPromptOld33(userText= null){
     let userTextLength = userText.split(/\s+/).length; // Ensure userTextLength is defined
-    const prompt = \`"Fragment": "\${userText}"
+    const prompt = `"Fragment": "${userText}"
     "Instructions":
     Welcome to our collaborative storytelling challenge! Your mission, alongside the AI, is to creatively expand upon a given fragment from an unknown novel.
     
-    Placement & Word Count: Each turn, you can add, modify, or replace a segment of up to \${Math.round(userTextLength * 1.61803398875) - userTextLength} words, but not fewer than 4. please vary in the lengths you add to each fragment. you're allowed to make only cosmetic changes to the existing fragment words. These alterations can be placed at the beginning, within, or at the end of the fragment. If a fragment ends in a manner that naturally calls for continuation (e.g., a preposition), please ensure you pick up from there. Provide 5 variations, please.
+    Placement & Word Count: Each turn, you can add, modify, or replace a segment of up to ${Math.round(userTextLength * 1.61803398875) - userTextLength} words, but not fewer than 4. please vary in the lengths you add to each fragment. you're allowed to make only cosmetic changes to the existing fragment words. These alterations can be placed at the beginning, within, or at the end of the fragment. If a fragment ends in a manner that naturally calls for continuation (e.g., a preposition), please ensure you pick up from there. Provide 5 variations, please.
     
     Contextual Additions: Aim for contextual additions rather than just mere adjectives. For instance, turning "they finally reached the border" 
     into "they reached the civil-war torn border" adds depth with only a few words. 
@@ -2058,18 +2051,18 @@ export function generateContinuationPromptOld33(userText= null){
     "Almost obscured, the gate was..."
     Output Format: A JSON array of strings of variation. for easy parsing by JSON.parse.
     the ONLY ouput should be that JSON array of strings.
-    Return ONLY the JSON array, without any explanations or descriptions!!\`
+    Return ONLY the JSON array, without any explanations or descriptions!!`;
     return [{ role: "system", content: prompt }];
     
 }
 
 export function generateContinuationPromptOlder(userText = null) {
     let userTextLength = userText.split(/\s+/).length; // Ensure userTextLength is defined
-    const prompt = \`"Fragment": "\${userText}"
+    const prompt = `"Fragment": "${userText}"
  
     "Instructions": Welcome to a game of collaborative storytelling. You and the AI are going to complete a text fragment from an obscure book in turns. 
     Each turn involves adding, 
-    modifying, or replacing a total of up to \${Math.round(userTextLength * 1.61803398875) - userTextLength} words, 
+    modifying, or replacing a total of up to ${Math.round(userTextLength * 1.61803398875) - userTextLength} words, 
     but no less than 4!!. 
     You may choose to place your words before, within, or after the existing fragment. 
     If the fragment ends in a preposition or other word that seems to inspire a continuation, please ensure you continue from it.
@@ -2092,13 +2085,13 @@ export function generateContinuationPromptOlder(userText = null) {
     "Almost hidden, the gate was..."
     Each variation takes a different approach, adding to the fragment while maintaining a seamless flow in the story. Your challenge is to continue in this vein, adhering to the maximum word change limit of four. Let's weave a tale together, each turn bringing a new unexpected twist to the narrative.
     
-    please return the results as JSON array of strings only\`
+    please return the results as JSON array of strings only`;
     return [{ role: "system", content: prompt }];
 }
 
 export function generatePrefixesPrompt2(userText = null, texture = null, variations = 4, varyTexture = true) {
     let userTextLength = userText.split(/\s+/).length; // Ensure userTextLength is defined
-    const intro = \`this prompt is part of a virtual card game of storytelling:
+    const intro = `this prompt is part of a virtual card game of storytelling:
     Game flow:
     GPT (Game AI) presents the player with four card textures and six prefixes.
     The player selects a prefix and mentally associates it with one of the card textures.
@@ -2109,31 +2102,31 @@ export function generatePrefixesPrompt2(userText = null, texture = null, variati
     After the reveal, GPT generates up to four new cards representing narrative elements (e.g., characters, locations, objects, weather phenomena, relics, rumors) that emerged from the shared story.
     
     so after getting the main idea of the game. here's a more detailed prompt used for generating textures, prefixes (story continuations) alongside with suitable fonts all be part of the virtual card game React application.
-    Prompt: \`
+    Prompt: `
     // Base for the continuation prompt
     let continuationPrompt = intro
-    continuationPrompt += userText ? \`You have been given the following story fragment by the player: "\${userText}". it could be taken anywhere in the story\` : \`\`;
+    continuationPrompt += userText ? `You have been given the following story fragment by the player: "${userText}". it could be taken anywhere in the story` : ``;
 
     // Adding texture information if available
     if (texture) {
-        continuationPrompt += \`You are also given the following texture description which encapsulates a developing universe yet unknown to the player which is slowly unfolding: "\${texture}". \`;
+        continuationPrompt += `You are also given the following texture description which encapsulates a developing universe yet unknown to the player which is slowly unfolding: "${texture}". `;
     }
 
 
-    continuationPrompt += \`Please generate a set of \${variations} intriguing story continuations in response to the provided text\`;
+    continuationPrompt += `Please generate a set of ${variations} intriguing story continuations in response to the provided text`;
     if (texture) {
-        continuationPrompt += \` and texture\`;
+        continuationPrompt += ` and texture`;
     }
 
     // Adding instruction for texture variation
     if (varyTexture && texture) {
-        continuationPrompt += \`.your continuation should contain around  \${Math.round(userTextLength * 1.61803398875) - userTextLength} words For each story continuation, please generate a new variation of the texture that fits the story's atmosphere and theme. \`;
+        continuationPrompt += `.your continuation should contain around  ${Math.round(userTextLength * 1.61803398875) - userTextLength} words For each story continuation, please generate a new variation of the texture that fits the story's atmosphere and theme. `;
     }
 
-    continuationPrompt += \`Each continuation should feel as if it's part of a larger story and display storytelling qualities. Avoid overt drama or overly revealing elements about the universe.  focus on maintaining the player's sense of being in the middle of an unfolding, immersive story. imagine it's a fragment in the story in chapter 7 out of 23. we're already inside the universe..we feel it. just continue it in a moment to moment unfolding of the initial fragment. carefully choose what to explose, always prefer to show instead of telling. try to get a sense of the author and atmosphere. it's only a fragment...be patient in what you tell and expose..walk in small steps. 
-    let the player be the storyteller, you're just helping him unfold what's already encapuslates there. don't tell how things feel, describe them so the feeling would arise from the reader. " for example: don't say "mysterious path in the woods", describe the path in a way that would make me feel it's mysterious.\`
+    continuationPrompt += `Each continuation should feel as if it's part of a larger story and display storytelling qualities. Avoid overt drama or overly revealing elements about the universe.  focus on maintaining the player's sense of being in the middle of an unfolding, immersive story. imagine it's a fragment in the story in chapter 7 out of 23. we're already inside the universe..we feel it. just continue it in a moment to moment unfolding of the initial fragment. carefully choose what to explose, always prefer to show instead of telling. try to get a sense of the author and atmosphere. it's only a fragment...be patient in what you tell and expose..walk in small steps. 
+    let the player be the storyteller, you're just helping him unfold what's already encapuslates there. don't tell how things feel, describe them so the feeling would arise from the reader. " for example: don't say "mysterious path in the woods", describe the path in a way that would make me feel it's mysterious.`
     if (texture) {
-        continuationPrompt += \`For each story continuation, generate a new variation of the texture that encapsulates the universe it belongs to. This is not an illustration but a texture for the back of a storytelling card. The description should include details about its style, embellishments, flourishes, and other characteristics inspired by the narrative continuation. it's best described in keywords. The textures should evoke a sense of the universe subtly and metaphorically, with flourishes, embellishments, and details like color, material, and atmosphere that encapsulate the universe. Each texture description should start with 'Card texture:' and it must be usable as standalone input for a Text-to-Image API. here are some examples for good textures: "
+        continuationPrompt += `For each story continuation, generate a new variation of the texture that encapsulates the universe it belongs to. This is not an illustration but a texture for the back of a storytelling card. The description should include details about its style, embellishments, flourishes, and other characteristics inspired by the narrative continuation. it's best described in keywords. The textures should evoke a sense of the universe subtly and metaphorically, with flourishes, embellishments, and details like color, material, and atmosphere that encapsulate the universe. Each texture description should start with 'Card texture:' and it must be usable as standalone input for a Text-to-Image API. here are some examples for good textures: "
                                 Card texture: Robert Jackson Bennett's Divine Cities, a cityscape silhouette on weathered map, architectural flourishes, urban fantasy, grainy, 8k, ArtStation winner.
 
                                 Card texture: Journey to the Center of the Earth meets Nosferatu, intricate geological cross-section mingled with Gothic horror motifs, darkened color palette, high contrast, matte, 8k, RPG card texture, geological dingbats and subtle vampire bat embellishments, ArtStation winner. 8k
@@ -2142,12 +2135,12 @@ export function generatePrefixesPrompt2(userText = null, texture = null, variati
 
                                 Card texture: 20,000 Leagues Under the Sea collides with Fritz Lang's Woman in the Moon, detailed marine life interspersed with celestial bodies, hint of Art Nouveau, muted pastels, grainy, 8k, embellishments in the form of sea creatures and cosmic symbols, ArtStation winner."
 
-                                Card texture: Patrick Rothfuss's Kingkiller Chronicle, lute and arcane symbols on weathered parchment, golden flourishes, epic fantasy, grainy, 8k, ArtStation winner. flourishes, dingbats, embellishments\`
+                                Card texture: Patrick Rothfuss's Kingkiller Chronicle, lute and arcane symbols on weathered parchment, golden flourishes, epic fantasy, grainy, 8k, ArtStation winner. flourishes, dingbats, embellishments`
     }
-    continuationPrompt += \`Remember that the purpose of the generated story continuations\`
+    continuationPrompt += `Remember that the purpose of the generated story continuations`
     if (texture)
-        continuationPrompt += \`and textures\`
-    continuationPrompt += \`is to engage the player in a game of storytelling, 
+        continuationPrompt += `and textures`
+    continuationPrompt += `is to engage the player in a game of storytelling, 
     enhancing their experience and immersion 
     without giving away too much of the universe at once. please notice the keywords for the card texture. and artistic influences. make it a texture not an illustration.  it should be targetted as an RPG card game texture, and should be subtle. encapsulating a universe inside that feels unique and new, fledging before our eyes. 
 
@@ -2156,14 +2149,14 @@ export function generatePrefixesPrompt2(userText = null, texture = null, variati
     [
         {
             "prefix": "<story continuation>", 
-            \${texture ? \`"texture": "<texture description>",\` : ''} 
+            ${texture ? `"texture": "<texture description>",` : ''} 
             "fontName": "<fontName from Google Fonts>", 
             "fontSize": "<fontSize>", 
             "fontColor": "<fontColor in CSS format like #ffffff>"
         }
     ]
 
-    The continuations, textures, and font choices should all serve to gently immerse the player deeper into the story and the universe, respecting the ongoing narrative and pacing, and sparking their curiosity and creativity for the next round of the game."\`;
+    The continuations, textures, and font choices should all serve to gently immerse the player deeper into the story and the universe, respecting the ongoing narrative and pacing, and sparking their curiosity and creativity for the next round of the game."`;
 
     // Return the prompt for GPT-4
     return [{ role: "system", content: continuationPrompt }];
@@ -2173,7 +2166,7 @@ export function generatePrefixesPrompt2(userText = null, texture = null, variati
 
 
 export function generateBookDeteriorationProcessJsonPrompt(texture){
-    const prompt =  \`texture_Description:"\${texture}"
+    const prompt =  `texture_Description:"${texture}"
 
     def generate_book_detiroration_process_by_texture(texture_description):
         """
@@ -2210,7 +2203,7 @@ export function generateBookDeteriorationProcessJsonPrompt(texture){
     
     Take this prompt. and try to use it as a template. but fill the output with your decision. what does the inspiration look like: write it out.  also, how does "the book embodies {initial_text_fragment}.". please try to find the drama in the deterioration process. and the poetry in that.
     how is natural light and surroundings effect it. choose something.
-    then choose a specific as specific as possible place where it is located. and the same with the detrioration process: how is it being detriorated? is it time? weather? maybe something else...choose something specific. be SPECIFIC. remember: WE WANT TO SEE THE BOOK IN it's natural position. it is NOT on display for us in the frame. we want it realistic..we're witnessing a location where this book resides. there can be other books there. think of where do books reside and how they'll be shown in a shot in a movie. they're not on display. I want to emphasize the realistic aspect of the framing. how would a book look in the composition if we took a shot of that location . make it documentary like. I want to feel the process if I create 4 illustrations. I want the process to be dramatic, accumulating, where the 4th one will be the dramatic destruction of the book, (and possibly the ruin of the location itself)return ONLY THE JSON. in JSON format\`
+    then choose a specific as specific as possible place where it is located. and the same with the detrioration process: how is it being detriorated? is it time? weather? maybe something else...choose something specific. be SPECIFIC. remember: WE WANT TO SEE THE BOOK IN it's natural position. it is NOT on display for us in the frame. we want it realistic..we're witnessing a location where this book resides. there can be other books there. think of where do books reside and how they'll be shown in a shot in a movie. they're not on display. I want to emphasize the realistic aspect of the framing. how would a book look in the composition if we took a shot of that location . make it documentary like. I want to feel the process if I create 4 illustrations. I want the process to be dramatic, accumulating, where the 4th one will be the dramatic destruction of the book, (and possibly the ruin of the location itself)return ONLY THE JSON. in JSON format`
     // This function was returning the prompt wrapped in an array, 
     // but standard practice for these functions is to return the prompt object itself,
     // or in this case, the array that is assigned to prompt.
@@ -2253,7 +2246,7 @@ export function generateStorytellerDetectiveFirstParagraphSession(scene){
     //   }
     // }
 
-    const prompt =\`this is the story of the storyteller detective. as he gets into a foreign realm, which is at the last stages of deterioration and becoming totally lost and forgotten. The Storyteller detective is almost at the location of the resing place of the last book telling the tales of this once great storytelling universe. he's almost at the location . we acoompany the storyteller detective in the last scene of the journey of finding this going to be forever lost and forgotten book and storytelling realm.
+    const prompt =`this is the story of the storyteller detective. as he gets into a foreign realm, which is at the last stages of deterioration and becoming totally lost and forgotten. The Storyteller detective is almost at the location of the resing place of the last book telling the tales of this once great storytelling universe. he's almost at the location . we acoompany the storyteller detective in the last scene of the journey of finding this going to be forever lost and forgotten book and storytelling realm.
     we will focus on this last step of  the storyteller detective's journey . 
     it's going to be a sequence of narrative description woven with a series of options of continuations by the user (who is the storyteller himself, of this decaying soon to be forgotten storytelling  realm ) 
     by presenting the options the narrative continues of the description how storytelling detective finds this specific book in a specific place. it's going to be in a specific stage of deterioration. 
@@ -2307,7 +2300,7 @@ export function generateStorytellerDetectiveFirstParagraphSession(scene){
     Balance Detail with Brevity: While details are important for immersion, options should be concise enough to maintain the flow and pace of the story.
     
     try to follow this basic script template for a narrative: each gap represents a place to stop and give options. first read the whole script as a whole and only then make the choices for the stage you're in.:
-    "\${scene}"
+    "${scene}"
     that concludes the scene.
     
     can you please try and do it? let ME be the user and you will start this and present me choices in this JSON format I demonstrated. return ONLY JSON. 
@@ -2338,13 +2331,13 @@ export function generateStorytellerDetectiveFirstParagraphSession(scene){
 
     
     
-    \`
+    `;
     return [{ role: "system", content: prompt }]
 }
 
 
 export function generateStorytellerDetectiveFirstParagraphLetter(completeNarrative, scene){
-    const prompt = \`COMPLETE_NARRATIVE:"\${completeNarrative}",
+    const prompt = `COMPLETE_NARRATIVE:"${completeNarrative}",
 
     (Disclaimer:I address here to the storyteller detective as a she, but the storyteller detective might be a he/they as was chosen before)
     WHAT NOT: now, before the storyteller detective is going downstairs, she is taking out her journal. she's picking specifically 3 pages of that journal, and tears them out of the journal, and folding them neatly. then she  sets off to write the last entry of her journal. she writes hastily for about 4 precious minutes. in the last rays of dusk. it seems she's also making a drawing. after she finishes she  takes the tears off that last entry too, puts the journal back but takes all 4 pages now, put them in an envelope, and puts it in her mode of transportation, and setting the mode of transportation off.... this is the scene i'm trying to make. 
@@ -2355,18 +2348,18 @@ export function generateStorytellerDetectiveFirstParagraphLetter(completeNarrati
     
     BASIC_SCRIPT_TEMPLATE: each gap represents a place to stop and give options. first read the whole script, and remember the overall scene depicted as a whole and only then make the choices for the stage you're in.:
     Journal Entry script template:(the narrative is both direct writing of the storyteller detective, but also some narration, I consider them all as "the narrative". direct journal writing wil be marked by "". the journal is written by hand)
-    \${scene}
+    ${scene}
     
     ADDITIONALLY: please follow the same json format as before: {""current_narrative"":"I finally found it", "choices:  {options: [{"continuation":"the summit", "storytelling_points":1}, {"continuation":"the gates of this once sturdy fortress", "storytelling_points":3},{"continuation":"the ancient oak plateau", "storytelling_points":4}, {"continuation":"the observatory on the high messa", "storytelling_points":5},{"continuation":"the bank of the yuradel river", "storytelling_points":3}].}"
     please give choice 1. wait for my choice. write the narrative so far.. starting with "I finally found it"... . along with the current_narrative and based on it give choice 2...etc..
-    REMEMBER, the COMPLETE_NARRATIVE given in the beginning of this prompt, is the source and reference to the place that was found, where the last book of the realm resides.\`
+    REMEMBER, the COMPLETE_NARRATIVE given in the beginning of this prompt, is the source and reference to the place that was found, where the last book of the realm resides.`;
 
     return [{ role: "system", content: prompt }]
 
 }
 
 export function generateTypewriterPrompt(existing_text) {
-    const systemMessage = \`You are a narrative composer.
+    const systemMessage = `You are a narrative composer.
 Given these parameters:
 
 $existing_text: The narrative fragment to continue.
@@ -2500,7 +2493,7 @@ Between every two 'fade' actions, a 'pause' action will be automatically inserte
 
 existing_fragment and continuation are always explicit.
 
-Deletes are precise, with exact substring, count, and narrative reason.\`;
+Deletes are precise, with exact substring, count, and narrative reason.`;
 
     const wordCount = existing_text ? existing_text.trim().split(/\s+/).length : 0;
     let desired_length = parseInt(Math.max(3, wordCount * 1.61));
@@ -2519,44 +2512,10 @@ Deletes are precise, with exact substring, count, and narrative reason.\`;
     ];
 }
 
-// Update the export block
+// Main export block - only includes functions NOT individually exported
 export {
   generateWorldbuildingVectorPrompt,
   getWorldbuildingVector,
   getNerTypes,
-  getNArchetypes,
-  generateProctorOfProficiencyChat,
-  characterCreationInitialOptionsPrompt2,
-  characterCreationInitialOptionsPrompt,
-  generateMasterStorytellerConclusionChat,
-  generateStorytellerSummaryPropt,
-  generateMasterStorytellerChat,
-  generateMasterCartographerChat,
-  generateSageLoreChat,
-  generateMasterCartographerChatOlder,
-  generateMasterCartographerChatOld,
-  generate_texture_by_fragment_and_conversation1223,
-  generate_texture_by_fragment_and_conversation0408,
-  generate_texture_by_fragment_and_conversation0124,
-  generate_entities_by_fragment,
-  generate_entities_by_fragmentWorking,
-  generate_texture_by_fragment_and_conversation_old,
-  generate_texture_by_fragment_and_conversationGood,
-  generate_texture_by_fragment_and_conversationOlder,
-  generate_texture_by_fragment_and_conversationOld,
-  generateExpertList,
-  generateFragmentsBeginnings,
-  generateContinuationPromptConcise,
-  generateContinuationPrompt1,
-  generateContinuationPrompt,
-  generateContinuationPromptWorking,
-  generateContinuationPromptOld,
-  generateContinuationPromptOldies,
-  generateContinuationPromptOld33,
-  generateContinuationPromptOlder,
-  generatePrefixesPrompt2,
-  generateBookDeteriorationProcessJsonPrompt,
-  generateStorytellerDetectiveFirstParagraphSession,
-  generateStorytellerDetectiveFirstParagraphLetter,
-  generateTypewriterPrompt
+  getNArchetypes
 };

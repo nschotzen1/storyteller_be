@@ -22,9 +22,6 @@ import { generateMasterStorytellerChat, } from '../ai/openai/personaChatPrompts.
 import { askForBooksGeneration } from "../ai/openai/bookPrompts.js";
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
 
-// Import 'text' from express, aliasing if necessary (though its usage here is unusual)
-import { text as expressText } from 'express';
-
 // Setup __dirname and __filename for ES6 modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -230,13 +227,20 @@ mongoose.connect('mongodb://localhost:27017/storytelling', {
   console.error("MongoDB connection error:", err);
 });
 
-export async function getSessionTextures(sessionId){
-  allData = await getStorytellerDb()
-  if (!allData[sessionId]) {
-      allData[sessionId] = initSessionDataStructure()
+export async function getSessionTextures(sessionId) {
+  // Refactored to use MongoDB
+  try {
+    const session = await SessionState.findOne({ sessionId: sessionId });
+    if (session) {
+      return session.textures || []; // Return textures or empty array if not present
+    }
+    // If session doesn't exist, initialize and return empty textures array
+    await SessionState.create({ sessionId: sessionId, textures: [] });
+    return [];
+  } catch (error) {
+    console.error(`Error in getSessionTextures for sessionId ${sessionId}:`, error);
+    throw error;
   }
-  return allData[sessionId].textures
-
 }
 
 
@@ -308,9 +312,20 @@ export async function chooseTextureForSessionId(sessionId, textureId){
   }
 }
 
-export async function getChosenTexture(sessionId){
-  allData = await getStorytellerDb()
-  return allData[sessionId].textures.find((texture) => { return texture.index == allData[sessionId].currentTexture})
+export async function getChosenTexture(sessionId) {
+  // Refactored to use MongoDB
+  try {
+    const session = await SessionState.findOne({ sessionId: sessionId });
+    if (session && session.currentTextureId && session.textures) {
+      // Assuming texture objects have an 'id' or 'index' that matches currentTextureId
+      // Adjust this logic if the matching key is different (e.g., 'index' as in original)
+      return session.textures.find(texture => String(texture.index) === String(session.currentTextureId));
+    }
+    return null; // Return null if no session, no currentTextureId, or no textures
+  } catch (error) {
+    console.error(`Error in getChosenTexture for sessionId ${sessionId}:`, error);
+    throw error;
+  }
 }
 
 
@@ -337,12 +352,15 @@ export async function getFragment(sessionId, turn) {
     // Find a document by session_id and turn, update its fragment,
     // or create a new document if none exists.
     const fragment = await NarrativeFragment.findOne(
-      { session_id: sessionId, turn: turn },      // Query: match session_id and turn
-      
+      { session_id: sessionId, turn: turn }      // Query: match session_id and turn
     );
-    fragment_text = fragment.fragment
-    console.log(`Got Fragment: ${fragment_text}`);
-    return fragment_text;
+    if (fragment && fragment.fragment) {
+      const fragment_text = fragment.fragment;
+      console.log(`Got Fragment: ${fragment_text}`);
+      return fragment_text;
+    }
+    console.log(`No fragment found for session: ${sessionId}, turn: ${turn}`);
+    return null; // Or handle as appropriate, e.g., throw error or return default
   } catch (error) {
     console.error("Error setting fragment:", error);
     throw error;
@@ -504,9 +522,22 @@ export const getStorytellerDb = async (storagePath=storytellerSessions) => {
     }
   }
 
-  export async function getTurn(sessionId){
-    allData = await getStorytellerDb()
-    return allData[sessionId].turn
+  export async function getTurn(sessionId) {
+    // Refactored to use MongoDB
+    try {
+      const session = await SessionState.findOne({ sessionId: sessionId });
+      if (session) {
+        return session.turn;
+      }
+      // If session doesn't exist, initialize and return default turn (0)
+      // This also creates the session if it's the first time 'turn' is queried.
+      const newSession = await SessionState.create({ sessionId: sessionId, turn: 0 });
+      return newSession.turn;
+    } catch (error) {
+      console.error(`Error in getTurn for sessionId ${sessionId}:`, error);
+      // Fallback or re-throw error. Returning 0 as a default in case of error.
+      return 0; 
+    }
   }
 
 
@@ -533,44 +564,58 @@ export const getStorytellerDb = async (storagePath=storytellerSessions) => {
     return subfolderPath
   }
   
-  // There are two definitions of saveFragment. Removing the first one.
-  // async function saveFragment(sessionId, fragment, turn){
-  //   saveFragmentToFileSystem(sessionId, fragment)
-  //   await setFragment(sessionId, fragment)
-  // }
-
   export async function saveFragment(sessionId, fragment, turn){
     await setFragment(sessionId, fragment, turn)
   }
   
-
-  export function initSessionDataStructure(){
-    return  {entities: [], chat: [], fragment:'', textures:[], currentTexture:-1, character: [], detective:[],
-    discussion_summary: '', turn:0};
-  }
-  
-  export async function getSessionChat(sessionId){
-    allData = await getStorytellerDb()
-    if (!allData[sessionId]) {
-        allData[sessionId] = initSessionDataStructure()
+  export async function getSessionChat(sessionId) {
+    // Refactored to use MongoDB
+    try {
+      const session = await SessionState.findOne({ sessionId: sessionId });
+      if (session) {
+        return session.chatHistory || [];
+      }
+      // If session doesn't exist, initialize and return empty chatHistory
+      await SessionState.create({ sessionId: sessionId, chatHistory: [] });
+      return [];
+    } catch (error) {
+      console.error(`Error in getSessionChat for sessionId ${sessionId}:`, error);
+      throw error;
     }
-    return allData[sessionId].chat
-  }
-
-  export async function getSessionDetectiveCreation(sessionId){
-    allData = await getStorytellerDb()
-    if (!allData[sessionId]) {
-        allData[sessionId] = initSessionDataStructure()
-    }
-    return allData[sessionId].detective
   }
 
-  export async function getCharacterCreation(sessionId){
-    allData = await getStorytellerDb()
-    if (!allData[sessionId]) {
-        allData[sessionId] = initSessionDataStructure()
+  export async function getSessionDetectiveCreation(sessionId) {
+    // Refactored to use MongoDB
+    try {
+      const session = await SessionState.findOne({ sessionId: sessionId });
+      if (session) {
+        return session.detectiveHistory || [];
+      }
+      // If session doesn't exist, initialize and return empty detectiveHistory
+      await SessionState.create({ sessionId: sessionId, detectiveHistory: [] });
+      return [];
+    } catch (error) {
+      console.error(`Error in getSessionDetectiveCreation for sessionId ${sessionId}:`, error);
+      throw error;
     }
-    return allData[sessionId].charecter
+  }
+
+  export async function getCharacterCreation(sessionId) {
+    // Refactored to use MongoDB
+    // This function was returning allData[sessionId].charecter (note spelling)
+    // which corresponds to characterCreationData in SessionState model
+    try {
+      const session = await SessionState.findOne({ sessionId: sessionId });
+      if (session) {
+        return session.characterCreationData || [];
+      }
+      // If session doesn't exist, initialize and return empty characterCreationData
+      await SessionState.create({ sessionId: sessionId, characterCreationData: [] });
+      return [];
+    } catch (error) {
+      console.error(`Error in getCharacterCreation for sessionId ${sessionId}:`, error);
+      throw error;
+    }
   }
 
   export const setCharecterCreation = async (sessionId, characterSession) => {
@@ -608,46 +653,67 @@ export const getStorytellerDb = async (storagePath=storytellerSessions) => {
     }
   }
 
-  export async function getCharacterCreationSession(sessionId){
-    allData = await getStorytellerDb()
-    if(! allData[sessionId].character)
-      allData[sessionId].character = []
-   return allData[sessionId].character
- }
-
- export async function getPreviousDiscussionSummary(sessionId){
-    // Read part remains from JSON for now
-    let allData = await getStorytellerDb(); // This still reads from JSON
-    if (!allData[sessionId] || !allData[sessionId].discussion_summary) {
-        const previousDiscussion = await getSessionChat(sessionId); // Reads from JSON
-        const discussionText = previousDiscussion.map((i) => { return i.content }).join("\n");
-        const originalFragment = await getFragment(sessionId); // Reads from DB
-        const texture = await getChosenTexture(sessionId); // Reads from JSON
-
-        const summarize_prompt = generateStorytellerSummaryPropt(discussionText, originalFragment, texture.url.revised_prompt);
-        const summary_resp = await directExternalApiCall([{ role: 'system', content: summarize_prompt }], 2500, 1);
-        
-        // Write part refactored to MongoDB
-        try {
-            await SessionState.findOneAndUpdate(
-                { sessionId: sessionId },
-                { 
-                  $set: { discussionSummary: summary_resp, lastUpdatedAt: new Date() }
-                },
-                { upsert: true, new: true, setDefaultsOnInsert: true }
-            );
-        } catch (error) {
-            console.error(`Error saving discussionSummary to DB for sessionId ${sessionId}:`, error);
-            // Decide if we should throw or perhaps still update the JSON as a fallback / log error
-        }
-        // For consistency with the task (reads from JSON), update the in-memory allData for current call
-        if (!allData[sessionId]) allData[sessionId] = initSessionDataStructure();
-        allData[sessionId].discussion_summary = summary_resp;
-        // await fsPromises.writeFile(storytellerSessions, JSON.stringify(allData)); // Original JSON write, removed as per task for this specific field
-        return summary_resp; // Return the newly generated summary
+  export async function getCharacterCreationSession(sessionId) {
+    // Refactored to use MongoDB
+    // This function was returning allData[sessionId].character
+    // which corresponds to characterCreationData in SessionState model
+    try {
+      const session = await SessionState.findOne({ sessionId: sessionId });
+      if (session) {
+        // Ensure characterCreationData is an array, even if null/undefined initially
+        return session.characterCreationData || [];
+      }
+      // If session doesn't exist, initialize and return empty characterCreationData
+      await SessionState.create({ sessionId: sessionId, characterCreationData: [] });
+      return [];
+    } catch (error) {
+      console.error(`Error in getCharacterCreationSession for sessionId ${sessionId}:`, error);
+      throw error;
     }
-    return allData[sessionId].discussion_summary; // Return summary from JSON if already present
- }
+  }
+
+ export async function getPreviousDiscussionSummary(sessionId) {
+  // Refactored to use MongoDB for fetching and storing discussionSummary
+  try {
+    let session = await SessionState.findOne({ sessionId: sessionId });
+
+    if (session && session.discussionSummary) {
+      return session.discussionSummary;
+    }
+
+    // If no summary, generate it
+    const previousDiscussion = await getSessionChat(sessionId); // Now reads from DB
+    const discussionText = previousDiscussion.map((i) => i.content).join("\n");
+    
+    // Assuming getFragment and getChosenTexture are also refactored or correctly fetch data
+    // For getFragment, ensure it can handle a null/undefined turn if that's a possibility
+    // or pass a specific turn if required.
+    const turnForFragment = session ? session.turn : 0; // Example: use current turn or default
+    const originalFragment = await getFragment(sessionId, turnForFragment); // Pass turn
+    const texture = await getChosenTexture(sessionId); // Now reads from DB
+
+    // Ensure texture and texture.url.revised_prompt are not null
+    const textureRevisedPrompt = texture && texture.url && texture.url.revised_prompt ? texture.url.revised_prompt : "Default texture prompt if null";
+
+
+    const summarize_prompt = generateStorytellerSummaryPropt(discussionText, originalFragment, textureRevisedPrompt);
+    const summary_resp = await directExternalApiCall([{ role: 'system', content: summarize_prompt }], 2500, 1);
+
+    // Save the new summary to MongoDB
+    await SessionState.findOneAndUpdate(
+      { sessionId: sessionId },
+      { $set: { discussionSummary: summary_resp, lastUpdatedAt: new Date() } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    return summary_resp;
+  } catch (error) {
+    console.error(`Error in getPreviousDiscussionSummary for sessionId ${sessionId}:`, error);
+    // Fallback or re-throw error
+    // For example, return a default summary or throw to indicate failure
+    return "Error generating discussion summary."; 
+  }
+}
   
 
 // async function chatWithstoryteller(sessionId, fragmentText, userInput='', mockedStorytellerResponse=null){
@@ -1081,7 +1147,7 @@ export async function storytellerDetectiveFirstParagraphCreation(sessionId, user
   //   }
   // }
   console.log(`prompts ${JSON.stringify(prompts)}`)
-  newNarrativeOptions = await directExternalApiCall(prompts.concat(detectiveHistory), 2500, 1.03);
+  const newNarrativeOptions = await directExternalApiCall(prompts.concat(detectiveHistory), 2500, 1.03);
 
   // Save response with role
   if (newNarrativeOptions) {

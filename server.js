@@ -4,9 +4,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import {generateInitialChatPrompt, generateInitialScenePrompt} from './ai/openai/personaChatPrompts.js';
 import { ChatMessage, NarrativeFragment, SessionVector } from './models/models.js'; // Consolidated and corrected ChatMessage import; Added SessionVector
+import { directExternalApiCall } from './ai/openai/apiService.js'; // Corrected import
 import { 
-    directExternalApiCall, // This is from apiService.js, but promptsUtils.js re-exports it.
-                            // For clarity, it might be better to import directExternalApiCall directly from apiService.js in the future if not all prompt utils are needed.
     generateContinuationPrompt,
     generateMasterCartographerChat, 
     generateFragmentsBeginnings, 
