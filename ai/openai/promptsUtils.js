@@ -108,7 +108,7 @@ async function getWorldbuildingVector(narrativeFragment, mock = false) {
   // prompt: string, max_tokens: number, model: string (optional), temperature: number (optional),
   // isOpenAi: boolean, explicitJsonObjectFormat: boolean
   // Assuming directExternalApiCall is available in the scope, as per updated instructions.
-  const llmResponse = await directExternalApiCall([prompt], 2500, undefined, undefined, true, true);
+  const llmResponse = await directExternalApiCall([{ role: "system", content: prompt }], 2500, undefined, undefined, true, true);
   return llmResponse; // Assuming directExternalApiCall parses JSON if explicitJsonObjectFormat is true
 }
 
