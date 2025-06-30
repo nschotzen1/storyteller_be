@@ -4,9 +4,10 @@ import path from 'path';
 import fetch from 'node-fetch';
 
 
+import {directExternalApiCall, getOpenaiClient} from '../openai/apiService.js'
 
-import { generate_texture_by_fragment_and_conversation, directExternalApiCall, getOpenaiClient } from '../openai/promptsUtils.js';
-import { developEntityprompt } from '../openai/morePrompts.js';
+import { generate_texture_by_fragment_and_conversation} from '../openai/texturePrompts.js';
+import { developEntityprompt } from '../openai/entityPrompts.js';
 import { 
     saveTextures, 
     getFragment, 

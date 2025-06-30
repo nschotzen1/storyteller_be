@@ -7,17 +7,19 @@ import { fileURLToPath } from 'url';
 
 // Local AI utility imports
 import { generateStorytellerGuidance, generate_cards, generate_seer_response } from "../ai/openai/cardReadingPrompts.js";
+import {directExternalApiCall} from '../ai/openai/apiService.js';
+import {  generate_texture_by_fragment_and_conversation, } from "../ai/openai/texturePrompts.js"
 import { 
-  generate_texture_by_fragment_and_conversation, 
-  directExternalApiCall, 
-  generateMasterStorytellerChat, 
+
   generateMasterStorytellerConclusionChat, 
-  askForBooksGeneration,
   generateStorytellerSummaryPropt, 
   generateStorytellerDetectiveFirstParagraphSession, 
   generateStorytellerDetectiveFirstParagraphLetter, 
   generate_entities_by_fragment 
-} from "../ai/openai/promptsUtils.js";
+} from "../ai/openai/promptUtilsMore.js";
+
+import { generateMasterStorytellerChat, } from '../ai/openai/personaChatPrompts.js'
+import { askForBooksGeneration } from "../ai/openai/bookPrompts.js";
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
 
 // Import 'text' from express, aliasing if necessary (though its usage here is unusual)
