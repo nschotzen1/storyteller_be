@@ -3,7 +3,7 @@ import cors from 'cors';
 import { promises as fs } from 'fs';
 import path from 'path';
 import {generateInitialChatPrompt, generateInitialScenePrompt} from './ai/openai/personaChatPrompts.js';
-import { ChatMessage, NarrativeFragment, SessionVector } from './models/models.js'; // Consolidated and corrected ChatMessage import; Added SessionVector
+import { ChatMessage, NarrativeFragment, SessionVector, Storyteller } from './models/models.js'; // Consolidated and corrected ChatMessage import; Added SessionVector
 import { directExternalApiCall } from './ai/openai/apiService.js'; // Corrected import
 import { 
     generateContinuationPrompt,
@@ -38,6 +38,7 @@ import {
     generateTextureOptionsByText // Added for generateTexturesPostHandler
 } from './ai/textToImage/api.js';
 import { mockGenerateTexturesResponse } from './ai/textToImage/mocks.js';
+import { generate } from 'stability-client';
 
 
 // Configuration from environment variables
@@ -445,7 +446,17 @@ app.post('/api/send_typewriter_text', async (req, res) => {
           console.error(`Error generating or saving worldbuilding vector for session ${sessionId}:`, vectorError);
           // Decide if this error should affect the main response. For now, it won't.
         }
-        // ***** NEW CODE END *****
+
+        //here I want to add generateStoryTellerForFragmentPrompt(message)
+        storytellerPrompt = generateStoryTellerForFragmentPrompt(message);
+        aiResponse = await directExternalApiCall(storytellerPrompt, 2500, undefined, undefined, true, false);
+        const newStoryTeller = new Storyteller({
+              session_id: sessionId,
+              ...aiResponse 
+            });
+            await newStoryTeller.save();
+        
+        
 
         const prompt = generateTypewriterPrompt(message);
         aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true);
