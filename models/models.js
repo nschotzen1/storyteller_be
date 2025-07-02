@@ -67,6 +67,7 @@ export const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFr
 export const SessionVector = mongoose.model('SessionVector', SessionVectorSchema);
 
 const StorytellerSchema = new mongoose.Schema({
+  session_id: { type: String, required: true, index: true },
   name: { type: String, required: true, unique: true },
   immediate_ghost_appearance: { type: String },
   typewriter_key: {

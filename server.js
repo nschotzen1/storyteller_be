@@ -447,21 +447,97 @@ app.post('/api/send_typewriter_text', async (req, res) => {
           // Decide if this error should affect the main response. For now, it won't.
         }
 
-        //here I want to add generateStoryTellerForFragmentPrompt(message)
-        storytellerPrompt = generateStoryTellerForFragmentPrompt(message);
-        aiResponse = await directExternalApiCall(storytellerPrompt, 2500, undefined, undefined, true, false);
-        const newStoryTeller = new Storyteller({
-              session_id: sessionId,
-              ...aiResponse 
-            });
-            await newStoryTeller.save();
+        // ***** BEGIN NEW STORYTELLER CREATION LOGIC *****
+        const fragmentText = message; // Assuming 'message' from req.body is the fragment text
+        const storytellerPrompt = generateStoryTellerForFragmentPrompt(fragmentText);
         
-        
+        // Log the prompt being sent to the AI for storyteller generation
+        console.log(`[Storyteller Generation] Session: ${sessionId} - Prompt: "${storytellerPrompt.substring(0, 200)}..."`);
 
-        const prompt = generateTypewriterPrompt(message);
-        aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true);
+        // directExternalApiCall(prompt, maxTokens, temperature, openAiMock, useJson, parseJson)
+        // Expecting a JSON array of storyteller objects
+        const storytellerDataArray = await directExternalApiCall(storytellerPrompt, 2500, undefined, undefined, true, true);
+
+        const savedStorytellers = [];
+        const storytellerKeyImageUrls = [];
+        const TYPEWRITER_MOCK_IMAGE_GEN = process.env.TYPEWRITER_MOCK_IMAGE_GEN === 'true'; // Or some other config
+
+        if (storytellerDataArray && Array.isArray(storytellerDataArray) && storytellerDataArray.length > 0) {
+          console.log(`[Storyteller Generation] Received ${storytellerDataArray.length} storytellers from AI.`);
+          for (const storytellerData of storytellerDataArray) {
+            try {
+              const newStoryteller = new Storyteller({
+                session_id: sessionId,
+                ...storytellerData
+              });
+              await newStoryteller.save();
+              savedStorytellers.push(newStoryteller);
+              console.log(`[Storyteller Generation] Saved storyteller: ${newStoryteller.name}`);
+
+              if (newStoryteller.typewriter_key && newStoryteller.typewriter_key.symbol) {
+                const keyImageResult = await createStoryTellerKey(
+                  newStoryteller.typewriter_key,
+                  sessionId,
+                  newStoryteller.name,
+                  TYPEWRITER_MOCK_IMAGE_GEN
+                );
+                if (keyImageResult && keyImageResult.localPath) {
+                  // Construct a web-accessible URL if assets are served statically
+                  const imageUrl = `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_keys/${path.basename(keyImageResult.localPath)}`;
+                  storytellerKeyImageUrls.push({
+                    storytellerId: newStoryteller._id,
+                    name: newStoryteller.name,
+                    imageUrl: imageUrl, // Use web-accessible URL
+                    localPath: keyImageResult.localPath // Keep for reference if needed
+                  });
+                  console.log(`[Storyteller Generation] Key image generated for ${newStoryteller.name}: ${imageUrl}`);
+                } else {
+                  console.log(`[Storyteller Generation] Key image generation skipped or failed for ${newStoryteller.name}.`);
+                }
+              }
+            } catch (dbError) {
+              console.error(`[Storyteller Generation] Error saving storyteller or generating key image:`, dbError);
+              // Decide if you want to continue with other storytellers or return an error
+            }
+          }
+        } else {
+          console.log(`[Storyteller Generation] No storytellers returned or data is not an array for session: ${sessionId}`);
+          // If no storytellers, we might want to fall back to the original typewriter flow or return an error/empty response.
+          // For now, let's allow it to proceed to the original typewriter logic, which might be undesired.
+          // A better approach might be to return the storytellers if any, or an error if not.
+        }
         
-        // Save fragments
+        // Respond with the created storytellers and their key images
+        // This changes the original response structure of this endpoint.
+        // If storytellers were created, we return them. Otherwise, the original flow might proceed.
+        // For a clean break, if storytellers are the primary goal now, we should return here.
+        if (savedStorytellers.length > 0) {
+          return res.status(200).json({
+            storytellers: savedStorytellers,
+            keyImages: storytellerKeyImageUrls,
+            message: "Storytellers created successfully."
+          });
+        }
+        // If no storytellers were created, and the original flow is still desired as a fallback:
+        // console.log("[Storyteller Generation] No storytellers created, proceeding to original typewriter logic.");
+        // However, the user's request was to *add* this. The initial snippet was placed *before* the original typewriter prompt.
+        // This implies the storyteller creation is the new primary purpose for this part of the code.
+        // If the intention is that *sometimes* it creates storytellers, and *sometimes* it does the old thing,
+        // the control flow needs to be more explicit.
+        // Given the prompt, it's likely the user wants to replace the old `aiResponse` for the storyteller part.
+
+        // ***** END NEW STORYTELLER CREATION LOGIC *****
+
+        // Original typewriter text generation logic (may need to be adjusted or removed based on new flow)
+        // If the new storyteller logic is meant to replace this, then the following lines up to the
+        // client response transformation should be conditional or removed.
+        // For now, I will assume the new logic is primary and returns. If it doesn't return due to no storytellers,
+        // the old logic will run. This might be confusing.
+
+        const prompt = generateTypewriterPrompt(message); // 'message' is fragmentText
+        aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true); // This was the original AI call
+        
+        // Save fragments (original logic)
         const userTurn = await updateTurn(sessionId);
         const userFragment = {
           type: 'user_input',
