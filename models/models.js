@@ -69,6 +69,15 @@ export const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
 export const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFragmentSchema);
 export const SessionVector = mongoose.model('SessionVector', SessionVectorSchema);
 
+const SessionPlayerSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, index: true },
+  playerId: { type: String, required: true, index: true },
+  playerName: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
+export const SessionPlayer = mongoose.model('SessionPlayer', SessionPlayerSchema);
+
 const StorytellerSchema = new mongoose.Schema({
   session_id: { type: String, required: true, index: true },
   sessionId: { type: String, index: true },

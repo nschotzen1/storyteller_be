@@ -4,7 +4,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { BrewRoom } from './models/brewing_models.js';
 import { directExternalApiCall } from './ai/openai/apiService.js';
-import { Storyteller } from './models/models.js';
+import { Storyteller, SessionPlayer } from './models/models.js';
 import {
   generateStoryTellerForFragmentPrompt,
   generateSendStorytellerToEntityPrompt,
@@ -149,6 +149,51 @@ async function findEntityById(sessionId, playerId, entityId) {
 }
 
 // --- Routes ---
+
+// Session Players
+app.get('/api/sessions/:sessionId/players', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const players = await SessionPlayer.find({ sessionId }).sort({ createdAt: 1 }).lean();
+    const responsePlayers = players.map((player) => ({
+      id: player.playerId,
+      playerId: player.playerId,
+      playerName: player.playerName
+    }));
+
+    return res.status(200).json({
+      count: responsePlayers.length,
+      players: responsePlayers
+    });
+  } catch (error) {
+    console.error('Error in /api/sessions/:sessionId/players:', error);
+    return res.status(500).json({ message: 'Server error during session player listing.' });
+  }
+});
+
+app.post('/api/sessions/:sessionId/players', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { playerName } = req.body || {};
+
+    if (!sessionId || !playerName || typeof playerName !== 'string') {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or playerName.' });
+    }
+
+    const playerId = randomUUID();
+    const newPlayer = new SessionPlayer({ sessionId, playerId, playerName });
+    await newPlayer.save();
+
+    return res.status(201).json({ playerId, id: playerId });
+  } catch (error) {
+    console.error('Error in /api/sessions/:sessionId/players (POST):', error);
+    return res.status(500).json({ message: 'Server error during session player registration.' });
+  }
+});
 
 // List Storytellers
 app.get('/api/storytellers', async (req, res) => {

@@ -8,6 +8,7 @@ Request body:
 ```json
 {
   "sessionId": "demo-1",
+  "playerId": "player-1",
   "text": "A wind-scoured pass with a rusted watchtower and a lone courier arriving at dusk.",
   "includeCards": true,
   "includeFront": true,
@@ -82,6 +83,7 @@ Request body:
 ```json
 {
   "sessionId": "demo-1",
+  "playerId": "player-1",
   "text": "A wind-scoured pass with a rusted watchtower and a lone courier arriving at dusk.",
   "count": 3,
   "generateKeyImages": false
@@ -96,6 +98,7 @@ Request body:
 ```json
 {
   "sessionId": "demo-1",
+  "playerId": "player-1",
   "entityId": "abc123",
   "storytellerId": "66c9e9f0b5a5c7d123456789",
   "storytellingPoints": 12,
@@ -107,7 +110,7 @@ Request body:
 
 ## Storyteller Listing API
 
-`GET /api/storytellers?sessionId=...` returns storytellers with status and last mission summary.
+`GET /api/storytellers?sessionId=...&playerId=...` returns storytellers with status and last mission summary.
 
 Response:
 ```json
@@ -132,7 +135,7 @@ Response:
 
 ## Storyteller Detail API
 
-`GET /api/storytellers/:id` returns a single storyteller with mission history.
+`GET /api/storytellers/:id?sessionId=...&playerId=...` returns a single storyteller with mission history.
 
 Response:
 ```json
@@ -148,7 +151,7 @@ Response:
 
 ## Entity Listing API
 
-`GET /api/entities?sessionId=...` returns entities for a session.
+`GET /api/entities?sessionId=...&playerId=...` returns entities for a session.
 
 Optional filters:
 - `mainEntityId=...`
@@ -177,6 +180,7 @@ Request body:
 ```json
 {
   "sessionId": "demo-1",
+  "playerId": "player-1",
   "note": "Focus on hidden dangers or secret factions.",
   "debug": false
 }
@@ -189,6 +193,41 @@ Response:
   "entity": { "name": "Emberline Waystation" },
   "subEntities": [],
   "mocked": false
+}
+```
+
+## Session Players API
+
+`GET /api/sessions/:sessionId/players` returns the players registered for a session.
+
+Response:
+```json
+{
+  "count": 2,
+  "players": [
+    {
+      "id": "player-uuid",
+      "playerId": "player-uuid",
+      "playerName": "Ada"
+    }
+  ]
+}
+```
+
+`POST /api/sessions/:sessionId/players` registers a new player.
+
+Request body:
+```json
+{
+  "playerName": "Ada"
+}
+```
+
+Response:
+```json
+{
+  "playerId": "player-uuid",
+  "id": "player-uuid"
 }
 ```
 

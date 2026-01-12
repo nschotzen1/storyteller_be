@@ -57,6 +57,7 @@ describe('Mocked flow: fragment -> entities -> storyteller -> mission', () => {
     expect(entityRes.body.entities?.length).toBeGreaterThan(0);
     const mainEntityId = entityRes.body.entities[0].id;
     expect(mainEntityId).toBeTruthy();
+    expect(entityRes.body.entities[0].playerId).toBe(playerId);
 
     const storytellerRes = await request(app)
       .post('/api/textToStoryteller')
@@ -67,6 +68,7 @@ describe('Mocked flow: fragment -> entities -> storyteller -> mission', () => {
     const storytellerId = storytellerRes.body.storytellers[0]._id;
     expect(storytellerId).toBeTruthy();
     expect(storytellerRes.body.storytellers[0].illustration).toBeTruthy();
+    expect(storytellerRes.body.storytellers[0].playerId).toBe(playerId);
 
     const missionRes = await request(app)
       .post('/api/sendStorytellerToEntity')
@@ -89,6 +91,7 @@ describe('Mocked flow: fragment -> entities -> storyteller -> mission', () => {
     expect(storedStoryteller).toBeTruthy();
     expect(storedStoryteller.status).toBe('active');
     expect(storedStoryteller.missions.length).toBe(1);
+    expect(storedStoryteller.playerId).toBe(playerId);
 
     const storedSubEntities = await NarrativeEntity.find({
       session_id: sessionId,

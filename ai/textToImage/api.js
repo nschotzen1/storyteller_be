@@ -340,6 +340,7 @@ export async function developEntity({ sessionId, entityId, developmentPoints }) 
 // Main function
 export async function generateTextureOptionsByText({
   sessionId,
+  playerId,
   shouldMockImage,
   openAiMock = '',
   turn,
@@ -353,7 +354,13 @@ export async function generateTextureOptionsByText({
       .map((i, idx) => `${idx}: ${i.content}`)
       .join("\n");
 
-    const entitiesApiResponse = await generateEntitiesFromFragment(sessionId, fragment, turn);
+    const entitiesApiResponse = await generateEntitiesFromFragment(
+      sessionId,
+      fragment,
+      turn,
+      undefined,
+      { playerId }
+    );
     // const { metadata, clusters, entities } = entitiesApiResponse;
     let subset = entitiesApiResponse.map(e => {
       return {
