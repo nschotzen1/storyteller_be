@@ -1298,13 +1298,13 @@ const developEntityPostHandler = async (req, res) => {
 
 const generateEntitiesPostHandler = async (req, res) => {
   try {
-    const { userText, sessionId } = req.body;
+    const { userText, sessionId, playerId } = req.body;
 
-    if (!sessionId || !userText) {
-      return res.status(400).json({ message: 'Missing required parameters: sessionId or userText.' });
+    if (!sessionId || !userText || !playerId) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or userText.' });
     }
 
-    const entities = await generateEntitiesFromFragment(sessionId, userText);
+    const entities = await generateEntitiesFromFragment(sessionId, userText, 1, undefined, { playerId });
     const groupedEntities = processEntitiesToGroups(entities);
     // console.log("Grouped Entities (not returned in response):", groupedEntities);
 
@@ -1381,22 +1381,27 @@ app.post('/api/textToEntity', textToEntityPostHandler);
 
 const generateTexturesPostHandler = async (req, res) => {
   try {
-    const { userText, sessionId } = req.body;
+    const { userText, sessionId, playerId } = req.body;
 
     if (SHOULD_MOCK_GENERATE_TEXTURES) {
       console.log('Serving mock response for /api/generateTextures');
       return res.json(mockGenerateTexturesResponse);
     }
 
-    if (!sessionId || userText === undefined) {
-      return res.status(400).json({ message: 'Missing required parameters: sessionId or userText.' });
+    if (!sessionId || !playerId || userText === undefined) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or userText.' });
     }
     const fragment = userText;
 
     const turn = await updateTurn(sessionId);
     await saveFragment(sessionId, fragment, turn);
 
-    const { entitiesWithIllustrations } = await generateTextureOptionsByText({ sessionId, turn, shouldMockImage: false });
+    const { entitiesWithIllustrations } = await generateTextureOptionsByText({
+      sessionId,
+      playerId,
+      turn,
+      shouldMockImage: false
+    });
 
     res.json({ cards: entitiesWithIllustrations });
 

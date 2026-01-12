@@ -71,6 +71,7 @@ describe('POST /api/textToEntity (End-to-End)', () => {
         expect(response.status).toBe(200);
         expect(response.body.mocked).toBe(true);
         expect(response.body.cards).toHaveLength(3); // Mock returns 3 entities
+        expect(response.body.entities[0].playerId).toBe('player-1');
 
         // START: Check for PNG return requirement
         const card = response.body.cards[0];
@@ -121,6 +122,7 @@ describe('POST /api/textToEntity (End-to-End)', () => {
         expect(response.body.mocked).toBe(false);
         expect(response.body.entities).toHaveLength(1);
         expect(response.body.cards).toHaveLength(1);
+        expect(response.body.entities[0].playerId).toBe('player-1');
 
         const card = response.body.cards[0];
 
