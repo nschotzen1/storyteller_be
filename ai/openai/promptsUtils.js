@@ -2358,7 +2358,7 @@ export function generateStorytellerDetectiveFirstParagraphLetter(completeNarrati
 
 }
 
-export function generateTypewriterPrompt(existing_text) {
+export function generateTypewriterPromptOld(existing_text) {
     const systemMessage = `You are a narrative composer.
 Given these parameters:
 
@@ -2510,6 +2510,145 @@ Deletes are precise, with exact substring, count, and narrative reason.`;
         { role: "system", content: systemMessage },
         { role: "user", content: userContent }
     ];
+}
+
+export function generateTypewriterPrompt(existing_text){
+  const systemMessage = `The Narrative Continuation Challenge
+— A game of ratio, restraint, revelation, and deep world-integration —
+
+I will start a narrative fragment. You must continue it. You may continue ONLY if you can challenge me with your continuation.
+Your continuation must be golden ratio shorter in word count than the current fragment (e.g. if I wrote a 13-word fragment, you may write up to 8 words; no less than 5).
+Every continuation must be seamless and integral—it should feel like the next sentence or moment had to happen.
+
+🎴 The Challenge
+To truly challenge, you must organically introduce new entities—but only if they serve the flow, not as ornament.
+Every entity must be labeled and mapped to its ASCOPE/PMESII category:
+
+Actors
+
+Structures
+
+Capabilities/Culture
+
+Organizations
+
+People/Population
+
+Environment
+
+Political
+
+Military
+
+Economy
+
+Social
+
+Information
+
+Infrastructure
+
+If you introduce a new entity (e.g. a person, structure, group, artifact, location, custom, symbol), subtract its point cost from your pool (see below).
+If you reference or restate an entity already established, subtract only ⅓ of the original cost (rounded up).
+Point economy is real: when you tie entities tightly and meaningfully to the context, you may regain points.
+
+Assessment:
+You will be judged on:
+
+Integral continuation (it must feel inevitable)
+
+Contextual strengthening (how well it ties to or evolves what came before)
+
+Grounding, showing, not telling
+
+Sensory and social concreteness
+
+Minimalism: every word and entity must earn its place
+
+ASCOPE/PMESII precision: how clearly you’re building the world, not just describing it
+
+Storytelling Point Economy
+You begin with a storytelling_points_pool of 40.
+
+storytelling_points	example entity	setting	impact
+1–4	"a worn talisman", "the council’s banner", "a rusted bell"	low-color	light flavor
+5–9	"war bond office", "faction checkpoint", "village orb vendor"	medium definition	implies system/law
+10–14	"orbital uplink node", "dream-sewn curtain"	high definition	sets tech, magic, genre
+15–20	"pre-collapse AI chapel", "mana core breach"	world-defining	no return
+
+Technology or magic-defining entities are very expensive!
+Be careful and precise—each new entity is a wager on the world.
+
+Earning Back Points
+If your move is tight, integral, and concrete, you may earn points back:
+
+For tightly integrated entities, you may regain up to ⅔ of their cost.
+
+If a move feels forced, generic, or vague, you may lose extra.
+
+🧾 JSON Return Format (Revised, with ASCOPE/PMESII and NER)
+{
+  "meaning": [
+    "what's going on, do you think? (10 words max)",
+    "How will this continuation  lead, deepen, or contextualize the narrative? (10 words max)",
+    "How will it integrate or challenge the previous fragment? (10 words max)"
+    "what makes it cohesive?" :3 words max
+  ],
+"contextual_strengthening": "Short explanation of how this continuation strengthens and ties together existing world/context."
+}
+  "continuation": "your continuation here",
+  "current_storytelling_points_pool": [points after all deductions/awards],
+  "continuation_word_count": [number],
+  "Entities": [#entities are those that you could imagine in an extensive RPG card deck of that storytelling universe.
+    {
+      "entity_name": "Entity Name",
+      "ner_category": "PERSON/ORG/LOCATION/OBJECT/etc.",
+      "ascope_pmesii": "NPCs/Structures/Environment/Org/etc./Items/ ",
+      "storytelling_points": [1–20],
+      "reuse": [true/false] // true if entity is a restatement or reference
+    }
+    // more entities as needed
+  ],
+  "points_earned": [integer, if points are regained this round],
+ "style": { "fontName": fitting google font for the world", "fontSize": integer, "fontColor":one suitable for the world
+}
+  
+
+🧩 Key Integration Principles
+Every new entity must have a clear ASCOPE/PMESII mapping and NER category.
+
+Award yourself points back only if the entity is deeply contextual and necessary, not ornamental.
+
+Your move should never simply add—it must also tie, contrast, or advance the world as it stands.
+
+Contextual strengthening is explicit: explain how your addition tightens the weave of world, character, and logic.
+
+Ready? Every word is a wager. Every entity is a thread. Play the game of ratio and revelation—and show your hand expressed via the JSON schema above! remember, only the JSON reply! rememebr how powerful technlogoy/magic is  so use it carefully. and if you do make it expensive STORYTELLING_POINT WISE!
+bad continuations relationship to the existing fragment by:
+Lack agency, immediacy, or a direct causal action at that moment.
+good continuations relate to the current fragment by being :
+Grounded, narrative-driven, responsive to the moment.
+Causality, Agency, Specificity
+so this is how it begins: may this story rise, and grow and prosper live to its destiny as a storytelling world!!
+"${existing_text}"`
+
+  const wordCount = existing_text ? existing_text.trim().split(/\s+/).length : 0;
+    let desired_length_min = parseInt(Math.max(3, wordCount / (1.61*1.61)));
+    desired_length_min = Math.max(3, desired_length_min); // Cap at 50
+    let desiredlength_max = parseInt(Math.max(3, wordCount / 1.61));
+    desiredlength_max = Math.max(80, desiredlength_max); // Cap at 50
+    const number_of_fades = 4;
+
+    const userContent = JSON.stringify({
+        existing_text,
+        desired_length_min,
+        desiredlength_max,
+    });
+
+    return [
+        { role: "system", content: systemMessage },
+        { role: "user", content: userContent }
+    ]
 }
 
 // Main export block - only includes functions NOT individually exported

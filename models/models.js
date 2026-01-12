@@ -53,14 +53,17 @@ const SessionVectorSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-mongoose.connect('mongodb://localhost:27017/storytelling', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
-  console.log("Connected to MongoDB.");
-}).catch(err => {
-  console.error("MongoDB connection error:", err);
-});
+if (process.env.NODE_ENV !== 'test') {
+  mongoose.connect('mongodb://localhost:27017/storytelling', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  }).then(() => {
+    console.log("Connected to MongoDB.");
+  }).catch(err => {
+    console.error("MongoDB connection error:", err);
+  });
+}
+
 
 export const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
 export const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFragmentSchema);
@@ -68,7 +71,9 @@ export const SessionVector = mongoose.model('SessionVector', SessionVectorSchema
 
 const StorytellerSchema = new mongoose.Schema({
   session_id: { type: String, required: true, index: true },
-  name: { type: String, required: true, unique: true },
+  sessionId: { type: String, index: true },
+  playerId: { type: String, index: true },
+  name: { type: String, required: true },
   immediate_ghost_appearance: { type: String },
   typewriter_key: {
     symbol: { type: String },
@@ -83,6 +88,28 @@ const StorytellerSchema = new mongoose.Schema({
     style: { type: String },
   },
   vector: { type: [Number] },
+  illustration: { type: String },
+  status: { type: String, enum: ['active', 'in_mission'], default: 'active' },
+  missions: {
+    type: [
+      {
+        entityId: { type: mongoose.Schema.Types.ObjectId, ref: 'NarrativeEntity' },
+        entityExternalId: { type: String },
+        playerId: { type: String },
+        storytellingPoints: { type: Number },
+        message: { type: String },
+        durationDays: { type: Number },
+        outcome: { type: String, enum: ['success', 'failure', 'delayed', 'pending'] },
+        userText: { type: String },
+        gmNote: { type: String },
+        subEntityExternalIds: { type: [String], default: [] },
+        createdAt: { type: Date, default: Date.now }
+      }
+    ],
+    default: []
+  },
 }, { timestamps: true });
+
+StorytellerSchema.index({ session_id: 1, playerId: 1, name: 1 }, { unique: true });
 
 export const Storyteller = mongoose.model('Storyteller', StorytellerSchema);

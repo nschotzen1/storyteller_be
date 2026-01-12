@@ -33,15 +33,17 @@ export async function directExternalApiCall(prompts, max_tokens = 2500, temperat
         async function makeApiCall() {
             if (isOpenAi) {
                 let req_obj = {
-                    max_tokens,
-                    model: 'gpt-4.1-mini',
+                    // max_tokens,
+                    // model: 'gpt-4.1-mini',
+                    model: 'gpt-5',
                     messages: prompts,
-                    temperature: 1.08,
-                    presence_penalty: 0.0
+                    // temperature: 1,
+                    presence_penalty: 0.0,
+                    top_p: 1.0,
                 };
 
-                if (explicitJsonObjectFormat)
-                    req_obj['response_format'] = { "type": "json_object" };
+                // if (explicitJsonObjectFormat)
+                //     req_obj['response_format'] = { "type": "json_object" };
 
                 const completion = await getOpenaiClient().chat.completions.create(req_obj);
                 return completion.choices[0].message.content;
@@ -75,13 +77,15 @@ export async function directExternalApiCall(prompts, max_tokens = 2500, temperat
         while (attempts < maxRetries) {
             try {
                 let rawResp = await makeApiCall();
-                rawResp.trim()
-                  .replace(/^[^{[]*/, '') // Remove characters before the opening { or [
-                  .replace(/[^}*\]]*$/, ''); // Remove characters after the closing } or ]
-                if(explicitJsonObjectFormat)
+                rawResp = rawResp
+                    .trim()
+                    .replace(/^```(?:json)?\s*/i, '')         // Remove starting ``` or ```json
+                    .replace(/```$/, '')                      // Remove ending ```
+                    .replace(/^[^{[]*/, '')                   // Remove characters before first { or [
+                    .replace(/[^}\]]*$/, '');   
+                
                 return JSON.parse(rawResp);
-                else
-                return rawResp
+                
             } catch (error) {
                 attempts++;
                 console.warn(`Attempt ${attempts} failed:`, error);

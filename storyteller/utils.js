@@ -44,7 +44,7 @@ export async function ensureDirectoryExists(dirPath) {
   }
 }
 
-export function mapEntity(rawEntity) {
+export function mapEntity(rawEntity, sessionId, playerId) {
   // Create a new object with the mapped keys.
   // For keys that exist in multiple forms (like universal_traits),
   // you might merge them.
@@ -54,7 +54,9 @@ export function mapEntity(rawEntity) {
   normalized.name = rawEntity.name || 'Unnamed';
   normalized.description = rawEntity.description || '';
   normalized.lore = rawEntity.lore || '';
-  normalized.session_id = rawEntity.session_id
+  normalized.session_id = rawEntity.session_id || rawEntity.sessionId || sessionId || '';
+  normalized.sessionId = rawEntity.sessionId || rawEntity.session_id || sessionId || '';
+  normalized.playerId = rawEntity.playerId || playerId || '';
   // Classification:
   normalized.type = rawEntity.ner_type || '';
   normalized.subtype = rawEntity.ner_subtype || '';
@@ -89,11 +91,15 @@ export function mapEntity(rawEntity) {
   normalized.nextLevelSpecifically = rawEntity.next_level_specifically || null;
   normalized.hooks = rawEntity.hooks || null;
   normalized.specificity = rawEntity.specificity || null;
-  normalized.externalId = rawEntity.id ? String(rawEntity.id) : '';
+  normalized.externalId = rawEntity.externalId
+    ? String(rawEntity.externalId)
+    : (rawEntity.id ? String(rawEntity.id) : '');
   normalized.turn = rawEntity.turn || null;
   normalized.skillsAndRolls = rawEntity.skills_and_rolls || null;
   normalized.evolutionState = rawEntity.evolution_state || '';
   normalized.evolutionNotes = rawEntity.evolution_notes || '';
+  normalized.mainEntityId = rawEntity.mainEntityId || '';
+  normalized.isSubEntity = Boolean(rawEntity.isSubEntity);
 
   return normalized;
 }
@@ -102,6 +108,10 @@ export function mapEntity(rawEntity) {
 
 const entitySchema = new mongoose.Schema({
   session_id: { type: String, required: true },
+  sessionId: { type: String },
+  playerId: { type: String, index: true },
+  mainEntityId: { type: String },
+  isSubEntity: { type: Boolean, default: false },
   
   // Basic Info
   name: { type: String, required: true },
@@ -368,11 +378,11 @@ export async function getFragment(sessionId, turn) {
 }
 
 
-export const setEntitiesForSession = async(sessionId, jsonEntities) => {
+export const setEntitiesForSession = async(sessionId, jsonEntities, playerId) => {
   try {
     // Find a document by session_id and turn, update its fragment,
     // or create a new document if none exists.
-    jsonEntities = jsonEntities.map( e => { return mapEntity(e)})
+    jsonEntities = jsonEntities.map((entity) => mapEntity(entity, sessionId, playerId))
     const entities = await NarrativeEntity.insertMany(
       jsonEntities
     );
@@ -912,7 +922,7 @@ export async function chatWithStoryteller(sessionId, fragmentText, userInput = '
   return masterResponse;
 }
 
-export async function generateEntitiesFromFragment(sessionId, fragmentText, turn=1, existinEntities){
+export async function generateEntitiesFromFragment(sessionId, fragmentText, turn = 1, existinEntities, options = {}) {
   const maxEntities = 8
   let commonEntities = []
   if(process.env["MOCK_ENTIITIES"] == 'true')
@@ -929,16 +939,24 @@ export async function generateEntitiesFromFragment(sessionId, fragmentText, turn
     commonEntities = entities
   }
 
+  const mainEntityId = options.mainEntityId || '';
+  const isSubEntity = Boolean(options.isSubEntity);
+  const playerId = options.playerId || '';
+
   commonEntities = commonEntities.map(e => {
     return {
         id: Math.random().toString(36).substring(2, 10), // Generate a random string
         turn: turn,
         ...e,
         session_id: sessionId,
+        sessionId: sessionId,
+        playerId,
+        mainEntityId: mainEntityId,
+        isSubEntity: isSubEntity
     };
   });
   
-  await setEntitiesForSession(sessionId, commonEntities);
+  await setEntitiesForSession(sessionId, commonEntities, playerId);
   return commonEntities
   
 }

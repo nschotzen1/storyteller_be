@@ -4,19 +4,19 @@ import path from 'path';
 import fetch from 'node-fetch';
 
 
-import {directExternalApiCall, getOpenaiClient} from '../openai/apiService.js'
+import { directExternalApiCall, getOpenaiClient } from '../openai/apiService.js'
 
-import { generate_texture_by_fragment_and_conversation} from '../openai/texturePrompts.js';
+import { generate_texture_by_fragment_and_conversation } from '../openai/texturePrompts.js';
 import { developEntityprompt } from '../openai/entityPrompts.js';
-import { 
-    saveTextures, 
-    getFragment, 
-    getSessionChat, 
-    setTexture, 
-    generateEntitiesFromFragment, 
-    getEntitiesForSession, 
-    setEntitiesForSession,
-    ensureDirectoryExists // Import the new utility
+import {
+  saveTextures,
+  getFragment,
+  getSessionChat,
+  setTexture,
+  generateEntitiesFromFragment,
+  getEntitiesForSession,
+  setEntitiesForSession,
+  ensureDirectoryExists // Import the new utility
 } from '../../storyteller/utils.js';
 
 import { promisify } from 'util';
@@ -52,99 +52,107 @@ export function responseToTextureModels(response) {
 
 
 export async function downloadImage(url, path) {
-    return new Promise((resolve, reject) => {
-        https.get(url, (res) => {
-            if (res.statusCode !== 200) {
-                reject(new Error(`Request Failed With Status Code: ${res.statusCode}`));
-                return;
-            }
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`Request Failed With Status Code: ${res.statusCode}`));
+        return;
+      }
 
-            const file = fs.createWriteStream(path);
-            res.pipe(file);
+      const file = fs.createWriteStream(path);
+      res.pipe(file);
 
-            file.on('finish', () => {
-                resolve();
-            });
+      file.on('finish', () => {
+        resolve();
+      });
 
-            file.on('error', (err) => {
-                fs.unlink(path, () => {}); // Delete the file async if we have an error
-                reject(err);
-            });
-        }).on('error', (err) => {
-            reject(err);
-        });
+      file.on('error', (err) => {
+        fs.unlink(path, () => { }); // Delete the file async if we have an error
+        reject(err);
+      });
+    }).on('error', (err) => {
+      reject(err);
     });
+  });
 }
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-export async function textToImageOpenAi(prompt, samples=1, localPath, shouldMock= false, maxRetries=3){
-  if(shouldMock)
-  {
+export async function textToImageOpenAi(prompt, samples = 1, localPath, shouldMock = false, maxRetries = 3) {
+  if (shouldMock) {
     return {
       url: `https://oaidalleapiprodscus.blob.core.windows.net/private/org-QEgcgJZRR8O5I4TU81OtIzQr/user-x8YFabEYMtNouC3KDRNrvqNt/img-DyFU8k9br5ifd27AbfL65YlI.png?st=2023-11-23T23%3A06%3A28Z&se=2023-11-24T01%3A06%3A28Z&sp=r&sv=2021-08-06&sr=b&rscd=inline&rsct=image/png&skoid=6aaadede-4fb3-4698-a8f6-684d7786b067&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2023-11-23T20%3A18%3A16Z&ske=2023-11-24T20%3A18%3A16Z&sks=b&skv=2021-08-06&sig=ePHJceNpabp6Sb8CH5try7uAN3QdzapO6YSAPTkHJ9U%3D`,
-      revised_prompt:`Compose a 1024x1024 full-frame Art Nouveau style illustration influenced by the chilling aura of Siberian folklore for the front side of an RPG character creation card named 'A Wisp Lantern' in Noto Sans font. The scene is bathed in a soft, icy blue light showcasing an ethereal lantern that gives an impression of being made from the chill of a mountaintop. The lantern cage resembles crystalline formations of frost and inside, a blue wisp dances like a flickering flame. This creates long, intric…ld. The scene encapsulates the cold, mysterious aura of a high mountain summit and the secrets of an ancient lighthouse. Remember to use intricate filigree designs inspired by icicles, and flourishes suggesting gusts of wind and snow to embellish the design. This grainy, cinematic, impressionistic artwork should evoke a sense of discovery evocative of a core game book, inviting players to immerse themselves into the character creation process via the selection of this collector's edition card.`
+      revised_prompt: `Compose a 1024x1024 full-frame Art Nouveau style illustration influenced by the chilling aura of Siberian folklore for the front side of an RPG character creation card named 'A Wisp Lantern' in Noto Sans font. The scene is bathed in a soft, icy blue light showcasing an ethereal lantern that gives an impression of being made from the chill of a mountaintop. The lantern cage resembles crystalline formations of frost and inside, a blue wisp dances like a flickering flame. This creates long, intric…ld. The scene encapsulates the cold, mysterious aura of a high mountain summit and the secrets of an ancient lighthouse. Remember to use intricate filigree designs inspired by icicles, and flourishes suggesting gusts of wind and snow to embellish the design. This grainy, cinematic, impressionistic artwork should evoke a sense of discovery evocative of a core game book, inviting players to immerse themselves into the character creation process via the selection of this collector's edition card.`,
+      localPath // Include the localPath in the mock response so callers can use it
     }
   }
-  
-  else{
-    
-    for (let attempt=1; attempt <= maxRetries; attempt+1) {
+
+  else {
+
+    for (let attempt = 1; attempt <= maxRetries; attempt + 1) {
       try {
         const response = await getOpenaiClient().images.generate({
-          model: "dall-e-2",
+          model: 'dall-e-3', // Corrected model name from 'gpt-image-1' to standard 'dall-e-3'
           prompt,
-          size: "1024x1024",
-          n: samples,
-        });
-  
-        const { revised_prompt, url } = response.data[0];
+          n: 1,
+          size: '1024x1024', // Explicit size standard for DALL-E 3
+          response_format: 'b64_json' // Explicitly request base64 for file writing
+        })
+
+
+        const image_base64 = response.data[0].b64_json;
+        const image_bytes = Buffer.from(image_base64, "base64");
+        const url = response.data[0].url || null;
+        const revised_prompt = response.data[0].revised_prompt || null; // Fixed access to revised_prompt
+
+        fs.writeFileSync(localPath, image_bytes);
+
         // const {revised_prompt, url} = {url:"https://i.ibb.co/4VWg3y9/Dusk.png", revised_prompt:"asf"}
-        await downloadImage(url, localPath);
+        // await downloadImage(url, localPath);
         return { revised_prompt, url, localPath };
       } catch (e) {
-        prompt += 'I need this prompt to work. So revise anything that use need to revise. any content policy issue should be smoothed by revising the issues. please!'  
-        if(e.message.includes('must be length 1000'))
-            prompt = prompt.slice(0, 950)
-          console.log('Attempt', attempt + 1, 'failed for OpenAI DALL-E 3:', e);
-        let sleepTo = 5* (attempt^2)
-        
+        prompt += 'I need this prompt to work. So revise anything that use need to revise. any content policy issue should be smoothed by revising the issues. please!'
+        if (e.message.includes('must be length 1000'))
+          prompt = prompt.slice(0, 950)
+        console.log('Attempt', attempt + 1, 'failed for OpenAI DALL-E 3:', e);
+        let sleepTo = 5 * (attempt ^ 2)
+
         await sleep(sleepTo)
       }
     }
-  
+
     console.log('All attempts failed for OpenAI DALL-E 3');
     return { revised_prompt: null, url: null, localPath: null };
-    
-  } 
-  
+
+  }
+
 }
-export function characterCreationOptionPrompt(cardStats){
+export function characterCreationOptionPrompt(cardStats) {
   const { title, illustration, texture, category, subcategory } = cardStats;
-const prompt = `Create a cinematic RPG collector card for ${category}/${subcategory}: "${title}". 
+  const prompt = `Create a cinematic RPG collector card for ${category}/${subcategory}: "${title}". 
 
 Illustration: ${illustration}
 
 The card should be rooted in an in-game scene, as if captured in a moment of action or interaction, with a grainy, cinematic quality. Use the texture "${texture}" as a guideline for the artistic theme and style, infusing the image with embellishments and artistic flourishes that fit the RPG universe.
 
 Focus on a dynamic POV composition, where the scene unfolds as seen through the eyes of a character within the game world.`;
-return prompt;
+  return prompt;
 }
 
-export function bookDeteriorationPrompt(deteriorationLevel, detioriationDescription){
+export function bookDeteriorationPrompt(deteriorationLevel, detioriationDescription) {
   let deteriorationLevelDesc = ''
-  if(deteriorationLevel == 1){
+  if (deteriorationLevel == 1) {
     deteriorationLevelDesc = 'DETERIORATION LEVEL 1(out of 4): Early stages of Deterioration'
   }
-  else if(deteriorationLevel == 2){
+  else if (deteriorationLevel == 2) {
     deteriorationLevelDesc = 'DETERIORATION LEVEL 2(out of 4): Advanced stages of Deterioration'
   }
-  else if(deteriorationLevel == 3){
+  else if (deteriorationLevel == 3) {
     deteriorationLevelDesc = 'DETERIORATION LEVEL 3 (out of 4): Severe Damage! '
   }
-  else{
+  else {
     deteriorationLevelDesc = 'DETERIORATION LEVEL 4 (out of 4): almost complete destruction! '
   }
   const prompt = `${deteriorationLevel}:
@@ -154,7 +162,7 @@ export function bookDeteriorationPrompt(deteriorationLevel, detioriationDescript
   return prompt
 }
 
-export function storytellerDetectiveFirstArrivalIllustrationPrompt(texture, scene){
+export function storytellerDetectiveFirstArrivalIllustrationPrompt(texture, scene) {
   const prompt = `first take this texture and breath it in: "overall texture, essence and vibe of this scene:
   "${texture}"
   it should be in the deepest layers and motiffs and influences of this illustration. this is the core!!
@@ -182,8 +190,8 @@ export function storytellerDetectiveFirstArrivalIllustrationPrompt(texture, scen
 }
 
 
-export function characterCreationOptionPrompt2(cardStats){
-  const {title, font, illustration, description, texture, category, subcategory} = cardStats;
+export function characterCreationOptionPrompt2(cardStats) {
+  const { title, font, illustration, description, texture, category, subcategory } = cardStats;
   const prompt = `${category}/${subcategory}/${title}(${font}):
   create an virtual RPG collector card: 
   
@@ -196,14 +204,14 @@ export function characterCreationOptionPrompt2(cardStats){
   Make it a POV composition. whatever in that card is being seen by someone's perspective. it's rooted and grounded, taken within its context. 
   It's taken from a scene- it's less a presentation rather seeing it as might present itself within a scene context.`
   return prompt
-  
+
 }
 
-export async function textToImage(prompt, samples=1, dirPath){ // Changed path to dirPath for clarity
+export async function textToImage(prompt, samples = 1, dirPath) { // Changed path to dirPath for clarity
   try {
     // Use the new ensureDirectoryExists
     await ensureDirectoryExists(dirPath);
-  
+
     const { res, images } = await generateAsync({
       prompt: `${prompt}`,
       apiKey: 'sk-12DRm1jAa3In5XalwbVahkxBK5VhWzAqKc7KDmBsBodSxCnE', // Placeholder API Key
@@ -220,13 +228,13 @@ export async function textToImage(prompt, samples=1, dirPath){ // Changed path t
     return images.map((img) => {
       return img.filePath.replace(/^.*\/assets/, '/assets');
     });
-  
+
   } catch (e) {
     console.log(e)
   }
 };
 
-export async function generateTextureImgFromPrompt(prompt, apiKey, apiOptions = {}, samples=4) {
+export async function generateTextureImgFromPrompt(prompt, apiKey, apiOptions = {}, samples = 4) {
   // Merge with default options
   const options = {
     width: '512',
@@ -239,7 +247,7 @@ export async function generateTextureImgFromPrompt(prompt, apiKey, apiOptions = 
     panorama: 'no',
     self_attention: 'no',
     upscale: 'no',
-    
+
     ...apiOptions,
   };
 
@@ -265,9 +273,9 @@ export async function generateTextureImgFromPrompt(prompt, apiKey, apiOptions = 
   return textureModels;
 }
 
-export function textureJSONToPrompt(textureJson){
-  const {category, prompt, font, card_material, major_cultural_influences_references } = textureJson
-  
+export function textureJSONToPrompt(textureJson) {
+  const { category, prompt, font, card_material, major_cultural_influences_references } = textureJson
+
   const resPrompt = `${category} RPG card Texture: Create a full-frame card texture that captures the essence of ${category}, 
   incorporating this vision:"${prompt}".
   . The design should feature a texture appearing on ${card_material}. 
@@ -277,8 +285,8 @@ export function textureJSONToPrompt(textureJson){
   reflecting the unique aspects of the card's category enhance the card like quality of the design. 
   ensure the category is presented too`
   return resPrompt;
-  
-  
+
+
 }
 
 export function getRandomCategory() {
@@ -298,34 +306,34 @@ function sanitizeName(name) {
 }
 
 
-export async function developEntity({sessionId, entityId, developmentPoints}){
+export async function developEntity({ sessionId, entityId, developmentPoints }) {
 
-        // Await getFragment (assumption: it fetches some game fragment data)
-        const fragment = await getFragment(sessionId);
+  // Await getFragment (assumption: it fetches some game fragment data)
+  const fragment = await getFragment(sessionId);
 
-      
-        // Fetch all entities related to the session
-        let entities = await getEntitiesForSession(sessionId);
-        
-        // Find the chosen entity
-        const entityIndex = entities.findIndex(e => e.id === entityId);
-        if (entityIndex === -1) {
-          throw Error("could not find entity")
-        }
-        // Create a minimized field list of the rest of the entities
-        const restOfEntities = entities
-            .filter(e => e.id !== entityId)
-            .map(({ id, name, type }) => ({ id, name, type })); // Adjust fields as needed
-        
-        // Await entity development function
-        const entity = entities[entityIndex]
-        const prompt = developEntityprompt(entity, restOfEntities, fragment, developmentPoints);
-        // Call external API
-        const externalApiResponse = await directExternalApiCall([prompt], 2500, undefined, undefined, true, undefined);
-        entities[entityIndex] = updatedEntity
-        await setEntitiesForSession(sessionId, entities);
 
-  
+  // Fetch all entities related to the session
+  let entities = await getEntitiesForSession(sessionId);
+
+  // Find the chosen entity
+  const entityIndex = entities.findIndex(e => e.id === entityId);
+  if (entityIndex === -1) {
+    throw Error("could not find entity")
+  }
+  // Create a minimized field list of the rest of the entities
+  const restOfEntities = entities
+    .filter(e => e.id !== entityId)
+    .map(({ id, name, type }) => ({ id, name, type })); // Adjust fields as needed
+
+  // Await entity development function
+  const entity = entities[entityIndex]
+  const prompt = developEntityprompt(entity, restOfEntities, fragment, developmentPoints);
+  // Call external API
+  const externalApiResponse = await directExternalApiCall([prompt], 2500, undefined, undefined, true, undefined);
+  entities[entityIndex] = updatedEntity
+  await setEntitiesForSession(sessionId, entities);
+
+
 }
 
 
@@ -356,16 +364,16 @@ export async function generateTextureOptionsByText({
         relevance: e.relevance
       };
     });
-    
+
     subset = JSON.stringify(subset)
 
-    
-    
+
+
     const generateTexturesPrompt = generate_texture_by_fragment_and_conversation(fragment, storytellerConversation, subset);
     let textureJsons = await directExternalApiCall(generateTexturesPrompt, 2500, 1.03, openAiMock, true, true);
 
-    
-    if (textureJsons.textures)  
+
+    if (textureJsons.textures)
       textureJsons = textureJsons.textures
     // Ensure textureJsons are available
     if (!textureJsons || textureJsons.length === 0) {
@@ -403,7 +411,7 @@ thick feel for the texture.
     // Optionally generate illustrations
     let illustrations = await generateIllustrationsForEntities(entitiesApiResponse, textures, sessionId, shouldMockImage);
 
-    
+
 
     // Combine results and return
     return {
@@ -421,18 +429,19 @@ thick feel for the texture.
 // This function was not previously exported, if it's meant to be used externally, it should be exported.
 // For now, keeping it as an internal helper. If it's called by exported functions, it's fine.
 async function generateIllustrationsForEntities(entities, textures, sessionId, shouldMockImage) {
-  textures = textures.map( texture => { 
-    if(texture.hasOwnProperty('textureJson')){
-      texture = {texture, ...texture.textureJson}
-  }
-  if(texture.hasOwnProperty('url')){
+  textures = textures.map(texture => {
+    if (texture.hasOwnProperty('textureJson')) {
+      texture = { texture, ...texture.textureJson }
+    }
+    if (texture.hasOwnProperty('url')) {
       texture.localPath = texture.url.localPath
-  }
-  if(texture.hasOwnProperty('texture')){
+    }
+    if (texture.hasOwnProperty('texture')) {
       texture.localPath = texture.texture.url.localPath
       delete texture.texture
-  }
-  return {session_id: sessionId, ...texture}})
+    }
+    return { session_id: sessionId, ...texture }
+  })
   return await Promise.all(entities.map(async (entity, idx) => {
     const selectedTexture = textures.find(texture => texture.text_for_entity === entity.name) || textures[idx % textures.length];
     const illustrationPrompt = `
@@ -454,7 +463,7 @@ async function generateIllustrationsForEntities(entities, textures, sessionId, s
     const subfolderPath = path.join(__dirname, '../../assets', `${sessionId}/illustrations/${idx}`);
     await ensureDirectoryExists(subfolderPath); // Use new async function
     mock_illustrations = false
-    if(process.env["MOCK_ILLUSTRATION"] == 'true')
+    if (process.env["MOCK_ILLUSTRATION"] == 'true')
       mock_illustrations = true
     const url = await textToImageOpenAi(illustrationPrompt, 1, `${subfolderPath}/${sanitizeName(entity.name)}.png`, mock_illustrations);
 
@@ -487,7 +496,7 @@ async function generateIllustrationsForEntities(entities, textures, sessionId, s
 // }
 export async function generateStorytellerSeerReaction({ sessionId, turn, action }) {
   const fragment = await getFragment(sessionId);
-  
+
   const allSessions = await getSessionChat(sessionId);
   const storytellerConversation = allSessions
     .filter(item => item.role !== '2user')
@@ -546,11 +555,11 @@ export async function generateStorytellerSeerReaction({ sessionId, turn, action 
 }
 
 
-export async function generateTextureOptionsByText1(sessionId, shouldMockImage=false, openAiMock=''){
+export async function generateTextureOptionsByText1(sessionId, shouldMockImage = false, openAiMock = '') {
 
   const fragment = await getFragment(sessionId)
   const allSessions = await getSessionChat(sessionId);
-  const storytellerConversation = allSessions.filter((i)=> { return i.role != '2user'}).map((i, idx)=> {return `${idx}: ${i.content}`}).join("\n")
+  const storytellerConversation = allSessions.filter((i) => { return i.role != '2user' }).map((i, idx) => { return `${idx}: ${i.content}` }).join("\n")
 
   const generateTexturesPrompt = generate_texture_by_fragment_and_conversation(fragment, storytellerConversation);
   const [entities, textureJsons] = await Promise.all([
@@ -578,7 +587,7 @@ export async function generateTextureOptionsByText1(sessionId, shouldMockImage=f
     ],
     "universal_traits": ["mystical", "heritage-linked", "central"]
   }]
-  
+
   // const textureJsons = [{
   //   "prompt": "Visualize a texture that embodies the essence of an ancient, weathered stone, akin to the crumbling walls of a forgotten manor, veiled in ivy. This texture suggests the passage of time, with etched symbols and faint, mystical runes that hint at hidden knowledge and lost stories. The color scheme is a blend of dusky greys and muted greens, reflecting the encroachment of nature over man-made structures. The edges of the card feature delicate, vine-like flourishes, subtly framing the texture in a way that enhances its ancient feel. This seamless, full-frame design captures the mystical and adventurous spirit of an RPG, blending elements of dark fantasy and the natural world.",
   //   "font": "Cinzel",
@@ -600,7 +609,7 @@ export async function generateTextureOptionsByText1(sessionId, shouldMockImage=f
   //   "card_material": "Wood",
   //   "major_cultural_influences_references": ["The Elder Scrolls", "The Mists of Avalon", "Princess Mononoke", "John William Waterhouse"]
   // }]
-  
+
   const textures = await Promise.all(textureJsons.map(async (textureJson, index) => {
     // Create a subfolder for the texture
     // {textureName: Str, DecorativeStyle:Str, description:String, font:String, artisticInfluences:[KeyWords], genre:Str. }
@@ -609,21 +618,21 @@ export async function generateTextureOptionsByText1(sessionId, shouldMockImage=f
     textureJson.category = entities[Math.min(index, entities.length - 1)].ner_type
     textureJson.universal_traits = entities[Math.min(index, entities.length - 1)].universal_traits
     textureJson.prompt = textureJSONToPrompt(textureJson)
-    textureJson.prompt =  `"RPG collector card texture prompt category: ${textureJson.category}, subcategory:${textureJson.ner_subtype}, card attributes:${textureJson.universal_traits}:
+    textureJson.prompt = `"RPG collector card texture prompt category: ${textureJson.category}, subcategory:${textureJson.ner_subtype}, card attributes:${textureJson.universal_traits}:
      SEAMLESS. UNCUT FULL FRAME:"${textureJson.prompt} NO TEXT. ARTSTATION WINNER. FULL FRAME"!!`
-    
+
     const subfolderPath = path.join(__dirname, '../../assets', `${sessionId}/textures/${Math.floor(Math.random() * 1000)}`);
     await ensureDirectoryExists(subfolderPath); // Use new async function
 
     // const url = await textToImageOpenAi(`${textureJson.prompt}. Seamless texture. Full Frame design. thick feel for the texture. real material: raw, grainy, cinematic, handheld, film quality, rough, rugged, time worn. inspiring. immersive. exciting. natural light. think of proper embellishments, flourishes. .unbroken. full frame design. surprising idiosyncertic backsdie a unique tarot deck. evidently used ..arcane, magical`, 1, `${subfolderPath}/${index}.png`, shouldMockImage);
     const url = await textToImageOpenAi(`${textureJson.prompt}. Seamless texture. Full Frame design. thick feel for the texture. inspiring. immersive. exciting. magical. think of proper embellishments, flourishes. .unbroken. full frame design. surprising idiosyncertic backsdie a unique tarot deck. evidently used ..arcane, magical`, 1, `${subfolderPath}/${index}.png`, shouldMockImage);
     // const url = await textToImageOpenAi(`CREATE AN RPG COLLECTOR CARD TEXTURE OUT OF THIS GUIDELINE JSON:${JSON.stringify(texturePrompt)}`, 1, `${subfolderPath}/${index}.png`, shouldMockImage);
-    
-    return {url, textureJson, index}
+
+    return { url, textureJson, index }
   }));
   await saveTextures(sessionId, textures)
-  
-  
+
+
   return textures;
 }
 
