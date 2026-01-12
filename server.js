@@ -1,43 +1,99 @@
+class RateLimiter {
+  constructor(n, t) {
+    this.accumulatedRequests = [];
+    this.n = n; // max requests
+    this.t = t; // time window in seconds
+
+  }
+
+  shouldAllow(reqInt) {
+    let allowedWindow = reqInt - this.t;
+    let boolRes = false
+    this.accumulatedRequests = this.accumulatedRequests.filter(timestamp => timestamp > allowedWindow);
+    if (this.accumulatedRequests.length < this.n) {
+      this.accumulatedRequests.push(reqInt);
+      console.log(`returning true for ${reqInt}. accumnulated=${this.accumulatedRequests}`);
+      boolRes = true
+    }
+    else {
+      console.log(`returning false for ${reqInt}. accumnulated=${this.accumulatedRequests}`);
+    }
+    return boolRes;
+  }
+}
+
+
+
+
+let rateLimiter = new RateLimiter(3, 5);
+rateLimiter.shouldAllow(1);
+rateLimiter.shouldAllow(2);
+rateLimiter.shouldAllow(2);
+rateLimiter.shouldAllow(3);
+rateLimiter.shouldAllow(3);
+rateLimiter.shouldAllow(4);
+rateLimiter.shouldAllow(4);
+rateLimiter.shouldAllow(6);
+rateLimiter.shouldAllow(8);
+rateLimiter.shouldAllow(8);
+rateLimiter.shouldAllow(8);
+rateLimiter.shouldAllow(8);
+console.log('asdf')
+
+
+
+
+
+
+
+
+
+
+
 import express from 'express';
 import cors from 'cors';
 import { promises as fs } from 'fs';
 import path from 'path';
-import {generateInitialChatPrompt, generateInitialScenePrompt} from './ai/openai/personaChatPrompts.js';
-import { ChatMessage, NarrativeFragment, SessionVector } from './models/models.js'; // Consolidated and corrected ChatMessage import; Added SessionVector
-import { directExternalApiCall } from './ai/openai/apiService.js'; // Corrected import
-import { 
-    generateContinuationPrompt,
-    generateMasterCartographerChat, 
-    generateFragmentsBeginnings, 
-    generateTypewriterPrompt, 
-    getWorldbuildingVector 
+import { generateInitialChatPrompt, generateInitialScenePrompt } from './ai/openai/personaChatPrompts.js';
+import { ChatMessage, NarrativeFragment, SessionVector, Storyteller } from './models/models.js'; // Consolidated and corrected ChatMessage import; Added SessionVector
+import { createStoryTellerKey } from './services/storytellerService.js';
+import { directExternalApiCall } from './ai/openai/apiService.js';
+import { generateStoryTellerForFragmentPrompt } from './services/storytellerService.js';
+import {
+  generateContinuationPrompt,
+  generateMasterCartographerChat,
+  generateFragmentsBeginnings,
+  generateTypewriterPrompt,
+  getWorldbuildingVector
 } from './ai/openai/promptsUtils.js';
 import { getMockResponse } from './mocks.js';
 import { fileURLToPath } from 'url';
 
 // Storyteller utils and models
-import { 
-    getTurn, 
-    storytellerDetectiveFirstParagraphCreation, 
-    GeneratedContent, 
-    NarrativeEntity, 
-    NarrativeTexture, 
-    SessionState, 
-    SessionSceneState,
-    getSessionChat, // Added for chatWithMasterWorking
-    setChatSessions,  // Added for chatWithMasterWorking
-    generateEntitiesFromFragment, // Added for generateEntitiesPostHandler
-    saveFragment, // Verified for /api/send_typewriter_text
-    updateTurn // Verified for /api/send_typewriter_text
+import {
+  getTurn,
+  storytellerDetectiveFirstParagraphCreation,
+  GeneratedContent,
+  NarrativeEntity,
+  NarrativeTexture,
+  SessionState,
+  SessionSceneState,
+  getSessionChat, // Added for chatWithMasterWorking
+  setChatSessions,  // Added for chatWithMasterWorking
+  generateEntitiesFromFragment, // Added for generateEntitiesPostHandler
+  saveFragment, // Verified for /api/send_typewriter_text
+  updateTurn // Verified for /api/send_typewriter_text
 } from './storyteller/utils.js';
 // import { NarrativeFragment } from './models/models.js'; // Moved to consolidated import above
 import { characterCreationForSessionId } from './character/utils.js';
 // Removed redundant/split import block for ai/openai/promptsUtils.js
-import { 
-    developEntity, // Added for developEntityPostHandler
-    generateTextureOptionsByText // Added for generateTexturesPostHandler
+import {
+  developEntity, // Added for developEntityPostHandler
+  generateTextureOptionsByText // Added for generateTexturesPostHandler
 } from './ai/textToImage/api.js';
 import { mockGenerateTexturesResponse } from './ai/textToImage/mocks.js';
+import { textToEntityFromText } from './services/textToEntityService.js';
+
 
 
 // Configuration from environment variables
@@ -54,6 +110,86 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json());
 app.use(cors());
+import { getOrGenerateSpread, chooseSpreadOption } from './services/story_deck_service.js';
+
+// --- Story Deck Routes ---
+
+/**
+ * POST /api/story/spread
+ * Generate or fetch the current 4-position spread for a given sessionId.
+ */
+app.post('/api/story/spread', async (req, res) => {
+  try {
+    let { sessionId, universeKey } = req.body;
+
+    // Fallback if no sessionId provided
+    if (!sessionId) {
+      // In a real app we might set a cookie or generate a new ID and return it
+      // For this POC, we'll error or just assign a random one for the response
+      // But typically the client sends it.
+      return res.status(400).json({ error: 'sessionId is required' });
+    }
+
+    console.log(`[StoryDeck] Fetching spread for session: ${sessionId}`);
+    const spread = await getOrGenerateSpread(sessionId, universeKey);
+
+    return res.status(200).json({
+      success: true,
+      sessionId,
+      spread: {
+        id: spread._id,
+        universeKey: spread.universe_key,
+        positions: spread.positions.map(p => ({
+          position: p.position,
+          options: p.options, // These are fully populated docs
+          chosenEntityId: p.chosen_entity_id
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('[StoryDeck] Error in /api/story/spread:', error);
+    return res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * POST /api/story/spread/choose
+ * Record the user’s choices for the 4 positions.
+ */
+app.post('/api/story/spread/choose', async (req, res) => {
+  try {
+    const { sessionId, spreadId, choices } = req.body; // choices: { PLACE: id, HERO: id... }
+
+    if (!sessionId || !spreadId || !choices) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    console.log(`[StoryDeck] Submitting choices for spread: ${spreadId}`);
+    const updatedSpread = await chooseSpreadOption(sessionId, spreadId, choices);
+
+    // Optional hook text (placeholder)
+    const hook = "The story waits at the cliff's edge.";
+
+    return res.status(200).json({
+      success: true,
+      spread: {
+        id: updatedSpread._id,
+        positions: updatedSpread.positions.map(p => ({
+          position: p.position,
+          chosenEntityId: p.chosen_entity_id
+        })),
+        hook
+      }
+    });
+
+  } catch (error) {
+    console.error('[StoryDeck] Error in /api/story/spread/choose:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+// --- End Story Deck Routes ---
+
 
 
 function chooseStorytellerMock(sessionId, currentText) {
@@ -108,7 +244,7 @@ function chooseStorytellerMock(sessionId, currentText) {
 
 
 
-app.use('/assets', express.static(path.join(__dirname, 'assets'))); 
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 const PORT = process.env.PORT || 5001;
 
 
@@ -170,7 +306,7 @@ app.post('/api/sendMessage', async (req, res) => {
     else {
       gptResponse = await directExternalApiCall(fullPrompt, 2500, undefined, undefined, true, false);
     }
-    
+
     const { has_chat_ended, message_assistant } = gptResponse || {};
 
     // Save to DB
@@ -183,7 +319,7 @@ app.post('/api/sendMessage', async (req, res) => {
       sceneId: 0,
     });
 
-return res.status(200).json({ reply: message_assistant, has_chat_ended });
+    return res.status(200).json({ reply: message_assistant, has_chat_ended });
 
 
   } catch (err) {
@@ -227,7 +363,7 @@ app.post('/api/next_film_image', async (req, res) => {
     const textureIndex = Math.floor(Math.random() * 10) + 1;
     const paper = `/assets/paper_textures/paper_texture_${textureIndex}.png`;
     const fullUrl = req.protocol + '://' + req.get('host') + paper;
-    
+
 
 
     // Optionally pick a random font config
@@ -251,6 +387,91 @@ app.post('/api/next_film_image', async (req, res) => {
 });
 
 
+function createAIResponse(fullText, metadata, fadeSteps = 3) {
+  // Normalize metadata keys to match first mock
+  const normStyle = {
+    font: metadata.font || metadata.fontName,
+    font_size: metadata.font_size || metadata.fontSize,
+    font_color: metadata.font_color || metadata.fontColor,
+  };
+
+  // Writing sequence: as before
+  const sentences = fullText.match(/[^.!?]+[.!?]*/g) || [fullText];
+  let writing_sequence = [];
+  sentences.forEach((sentence, idx) => {
+    writing_sequence.push({
+      action: "type",
+      text: sentence.trim(),
+      style: normStyle,
+      delay: 0
+    });
+    if (idx < sentences.length - 1) {
+      writing_sequence.push({
+        action: "pause",
+        delay: 1500
+      });
+    }
+  });
+
+  // --- Fade Sequence: starts with pause, longest pause first ---
+  const totalFadeDuration = 18000;  // Total fade time in ms (excluding pauses)
+  const totalPauseDuration = 7000;  // Total pause time in ms
+  const numPauses = fadeSteps;      // Start with a pause before each fade
+
+  // Example: first pause is 2x the average, rest divide the rest evenly
+  const firstPause = Math.floor(totalPauseDuration * 0.5);
+  const remainingPause = totalPauseDuration - firstPause;
+  const subsequentPause = numPauses > 1 ? Math.floor(remainingPause / (numPauses - 1)) : 0;
+
+  const fadeDelay = Math.floor(totalFadeDuration / (fadeSteps + 1)); // includes final fade to empty
+
+  let fade_sequence = [];
+  let stepText = fullText;
+
+  for (let i = 0; i < fadeSteps; i++) {
+    // Insert pause BEFORE fade (longest first)
+    fade_sequence.push({
+      action: "pause",
+      delay: i === 0 ? firstPause : subsequentPause
+    });
+
+    // Fade phase: shorten text
+    let cutoff = Math.round(fullText.length * (1 - (i + 1) / (fadeSteps + 1)));
+    let faded = fullText.slice(0, cutoff).trim();
+
+    fade_sequence.push({
+      action: "fade",
+      phase: i + 1,
+      to_text: faded,           // <--- changed from 'continuation' to 'to_text'
+      style: normStyle,
+      delay: fadeDelay
+    });
+    stepText = faded;
+  }
+
+  // Final pause before fade to empty
+  fade_sequence.push({
+    action: "pause",
+    delay: subsequentPause
+  });
+
+  // Final fade to empty
+  fade_sequence.push({
+    action: "fade",
+    phase: fadeSteps + 1,
+    to_text: "",                // <--- changed from 'continuation' to 'to_text'
+    style: normStyle,
+    delay: fadeDelay
+  });
+
+  return {
+    writing_sequence,
+    fade_sequence,
+    metadata: normStyle       // <--- output normalized metadata keys
+  };
+}
+
+
 
 app.post('/api/send_typewriter_text', async (req, res) => {
   try {
@@ -261,7 +482,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     }
 
     console.log(`✍️ Typewriter API — Session: ${sessionId} — Message: ${message}`);
-    let should_mock = false
+    let should_mock = true
     if (should_mock) {
       const wordCount = message.trim().split(/\s+/).length;
       let mockAIResponse; // Renamed for clarity to avoid conflict with mockResponse variable if it's in a broader scope
@@ -269,103 +490,103 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       if (wordCount <= 5) {
         // Short addition
         const shortMetadata = {
-            font: "'Uncial Antiqua', serif",
-            font_size: "1.8rem",
-            font_color: "#3b1d15"
+          font: "'Uncial Antiqua', serif",
+          font_size: "1.8rem",
+          font_color: "#3b1d15"
         };
         mockAIResponse = {
-            writing_sequence: [
-                { action: "type", thoughtProcess: "Typing narrative: Initial part of the sentence.", existing_fragment: message, continuation: "It was almost", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 4000 },
-                { action: "type", thoughtProcess: "Typing narrative: Continuing after pause.", existing_fragment: "[current_narrative_text_so_far]", continuation: " night", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 6000 },
-                { action: "type", thoughtProcess: "Typing narrative: Adding more detail.", existing_fragment: "[current_narrative_text_so_far]", continuation: " as the band finally", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 8000 },
-                { action: "type", thoughtProcess: "Typing narrative: Nearing a point of interest.", existing_fragment: "[current_narrative_text_so_far]", continuation: " approached", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 5000 },
-                { action: "type", thoughtProcess: "Typing narrative: Describing the location.", existing_fragment: "[current_narrative_text_so_far]", continuation: " what seemed to be like", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 9000 },
-                { action: "type", thoughtProcess: "Typing narrative: Introducing a specific feature.", existing_fragment: "[current_narrative_text_so_far]", continuation: " a broken Ter", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 3000 },
-                { action: "type", thoughtProcess: "Typing narrative: Completing the feature with a slight error.", existing_fragment: "[current_narrative_text_so_far]", continuation: "ra", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "delete", thoughtProcess: "Deleting text: Correcting the slight error.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", count: 1, string_to_delete: "a", delay: 500 },
-                { action: "type", thoughtProcess: "Typing narrative: Retyping correctly after deletion.", existing_fragment: "[current_narrative_text_so_far]", continuation: "a", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "type", thoughtProcess: "Typing narrative: Finishing the sentence.", existing_fragment: "[current_narrative_text_so_far]", continuation: "ce.", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for dramatic effect before fade.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 16000 }
-            ],
-            fade_sequence: [
-                { action: "fade", phase: 1, thoughtProcess: "Fading text: First stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "It was night. The band approached a terrace.", delay: 12000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", delay: 1800 },
-                { action: "fade", phase: 2, thoughtProcess: "Fading text: Second stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. They arrived.", delay: 8000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", delay: 1200 },
-                { action: "fade", phase: 3, thoughtProcess: "Fading text: Third stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "A band. Night.", delay: 6000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
-                { action: "pause", delay: 900 },
-                { action: "fade", phase: 4, thoughtProcess: "Fading text: Final stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 5000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } }
-            ],
-            metadata: shortMetadata
+          writing_sequence: [
+            { action: "type", thoughtProcess: "Typing narrative: Initial part of the sentence.", existing_fragment: message, continuation: "It was almost", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 4000 },
+            { action: "type", thoughtProcess: "Typing narrative: Continuing after pause.", existing_fragment: "[current_narrative_text_so_far]", continuation: " night", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 6000 },
+            { action: "type", thoughtProcess: "Typing narrative: Adding more detail.", existing_fragment: "[current_narrative_text_so_far]", continuation: " as the band finally", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 8000 },
+            { action: "type", thoughtProcess: "Typing narrative: Nearing a point of interest.", existing_fragment: "[current_narrative_text_so_far]", continuation: " approached", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 5000 },
+            { action: "type", thoughtProcess: "Typing narrative: Describing the location.", existing_fragment: "[current_narrative_text_so_far]", continuation: " what seemed to be like", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 9000 },
+            { action: "type", thoughtProcess: "Typing narrative: Introducing a specific feature.", existing_fragment: "[current_narrative_text_so_far]", continuation: " a broken Ter", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for dramatic effect.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 3000 },
+            { action: "type", thoughtProcess: "Typing narrative: Completing the feature with a slight error.", existing_fragment: "[current_narrative_text_so_far]", continuation: "ra", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "delete", thoughtProcess: "Deleting text: Correcting the slight error.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", count: 1, string_to_delete: "a", delay: 500 },
+            { action: "type", thoughtProcess: "Typing narrative: Retyping correctly after deletion.", existing_fragment: "[current_narrative_text_so_far]", continuation: "a", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "type", thoughtProcess: "Typing narrative: Finishing the sentence.", existing_fragment: "[current_narrative_text_so_far]", continuation: "ce.", delay: 0, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for dramatic effect before fade.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 16000 }
+          ],
+          fade_sequence: [
+            { action: "fade", phase: 1, thoughtProcess: "Fading text: First stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "It was night. The band approached a terrace.", delay: 12000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", delay: 1800 },
+            { action: "fade", phase: 2, thoughtProcess: "Fading text: Second stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. They arrived.", delay: 8000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", delay: 1200 },
+            { action: "fade", phase: 3, thoughtProcess: "Fading text: Third stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "A band. Night.", delay: 6000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } },
+            { action: "pause", delay: 900 },
+            { action: "fade", phase: 4, thoughtProcess: "Fading text: Final stage of fade.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 5000, style: { fontName: "Uncial Antiqua", fontSize: parseFloat(shortMetadata.font_size), fontColor: shortMetadata.font_color } }
+          ],
+          metadata: shortMetadata
         };
       } else if (wordCount <= 12) {
         // Medium addition
         const mediumMetadata = {
-            font: "'IM Fell English SC', serif", // Changed font for medium to distinguish
-            font_size: "1.9rem",
-            font_color: "#2a120f"
+          font: "'IM Fell English SC', serif", // Changed font for medium to distinguish
+          font_size: "1.9rem",
+          font_color: "#2a120f"
         };
         mockAIResponse = {
-            writing_sequence: [
-                { action: "type", thoughtProcess: "Typing narrative: Setting the scene.", existing_fragment: message, continuation: "She clutched her amulet to her coat.", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for suspense.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 5000 },
-                { action: "type", thoughtProcess: "Typing narrative: Introducing action with a typo.", existing_fragment: "[current_narrative_text_so_far]", continuation: " As the horses carrying her carriage gal", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing before the typo completion.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 6000 },
-                { action: "type", thoughtProcess: "Typing narrative: Completing the typo.", existing_fragment: "[current_narrative_text_so_far]", continuation: "lo", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
-                { action: "delete", thoughtProcess: "Deleting text: Correcting the typo 'lo'.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", count: 2, string_to_delete: "lo", delay: 300 },
-                { action: "type", thoughtProcess: "Typing narrative: Retyping correctly as 'lop'.", existing_fragment: "[current_narrative_text_so_far]", continuation: "lop", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
-                { action: "type", thoughtProcess: "Typing narrative: Continuing the action.", existing_fragment: "[current_narrative_text_so_far]", continuation: "ped through the front gate", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for dramatic effect before fade.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 8000 }
-            ],
-            fade_sequence: [
-                { action: "fade", phase: 1, thoughtProcess: "Fading text: Summarizing the action.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "She clutched the amulet as the carriage entered the gate.", delay: 15000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
-                { action: "pause", delay: 1800 },
-                { action: "fade", phase: 2, thoughtProcess: "Fading text: Key elements.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Amulet. Horses. Gate.", delay: 10000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
-                { action: "pause", delay: 1200 },
-                { action: "fade", phase: 3, thoughtProcess: "Fading text: Atmosphere.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. Movement.", delay: 8000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
-                { action: "pause", delay: 900 },
-                { action: "fade", phase: 4, thoughtProcess: "Fading text: Final fade out.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 5000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } }
-            ],
-            metadata: mediumMetadata
+          writing_sequence: [
+            { action: "type", thoughtProcess: "Typing narrative: Setting the scene.", existing_fragment: message, continuation: "She clutched her amulet to her coat.", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for suspense.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 5000 },
+            { action: "type", thoughtProcess: "Typing narrative: Introducing action with a typo.", existing_fragment: "[current_narrative_text_so_far]", continuation: " As the horses carrying her carriage gal", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing before the typo completion.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 6000 },
+            { action: "type", thoughtProcess: "Typing narrative: Completing the typo.", existing_fragment: "[current_narrative_text_so_far]", continuation: "lo", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+            { action: "delete", thoughtProcess: "Deleting text: Correcting the typo 'lo'.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", count: 2, string_to_delete: "lo", delay: 300 },
+            { action: "type", thoughtProcess: "Typing narrative: Retyping correctly as 'lop'.", existing_fragment: "[current_narrative_text_so_far]", continuation: "lop", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+            { action: "type", thoughtProcess: "Typing narrative: Continuing the action.", existing_fragment: "[current_narrative_text_so_far]", continuation: "ped through the front gate", delay: 0, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for dramatic effect before fade.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 8000 }
+          ],
+          fade_sequence: [
+            { action: "fade", phase: 1, thoughtProcess: "Fading text: Summarizing the action.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "She clutched the amulet as the carriage entered the gate.", delay: 15000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+            { action: "pause", delay: 1800 },
+            { action: "fade", phase: 2, thoughtProcess: "Fading text: Key elements.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Amulet. Horses. Gate.", delay: 10000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+            { action: "pause", delay: 1200 },
+            { action: "fade", phase: 3, thoughtProcess: "Fading text: Atmosphere.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. Movement.", delay: 8000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } },
+            { action: "pause", delay: 900 },
+            { action: "fade", phase: 4, thoughtProcess: "Fading text: Final fade out.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 5000, style: { fontName: "IM Fell English SC", fontSize: parseFloat(mediumMetadata.font_size), fontColor: mediumMetadata.font_color } }
+          ],
+          metadata: mediumMetadata
         };
       } else {
         // Long addition
         const longMetadata = {
-            font: "'EB Garamond', serif",
-            font_size: "2.0rem",
-            font_color: "#1f0e08"
+          font: "'EB Garamond', serif",
+          font_size: "2.0rem",
+          font_color: "#1f0e08"
         };
         mockAIResponse = {
-            writing_sequence: [
-                { action: "type", thoughtProcess: "Typing narrative: Starting with a warning.", existing_fragment: message, continuation: "'You should not get closer to the ravine,", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for emphasis.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 200 },
-                { action: "type", thoughtProcess: "Typing narrative: Giving advice.", existing_fragment: "[current_narrative_text_so_far]", continuation: " you'd better stay here for the night'.", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing for reflection.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 300 },
-                { action: "type", thoughtProcess: "Typing narrative: Describing character's focus.", existing_fragment: "[current_narrative_text_so_far]", continuation: " His gaze was set to that direction,", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing before naming the location.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 150 },
-                { action: "type", thoughtProcess: "Typing narrative: Naming the location with a slight hesitation/correction.", existing_fragment: "[current_narrative_text_so_far]", continuation: " the \"Yunata R", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing before correction.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 250 },
-                { action: "delete", thoughtProcess: "Deleting text: Correcting the name.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", count: 1, string_to_delete: "R", delay: 200 },
-                { action: "type", thoughtProcess: "Typing narrative: Typing the correct letter.", existing_fragment: "[current_narrative_text_so_far]", continuation: "R", delay: 100, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
-                { action: "type", thoughtProcess: "Typing narrative: Finishing the name.", existing_fragment: "[current_narrative_text_so_far]", continuation: "avine\".", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
-                { action: "pause", thoughtProcess: "Pausing after the reveal.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 220 }
-            ],
-            fade_sequence: [
-                { action: "fade", phase: 1, thoughtProcess: "Fading text: First alternative.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "“Stay here,” he said, staring at the Yunata Ravine.", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
-                { action: "pause", delay: 500 },
-                { action: "fade", phase: 2, thoughtProcess: "Fading text: Second alternative.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Warning. Ravine.", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
-                { action: "pause", delay: 400 },
-                { action: "fade", phase: 3, thoughtProcess: "Fading text: Third alternative.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. Silence.", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
-                { action: "pause", delay: 300 },
-                { action: "fade", phase: 4, thoughtProcess: "Fading text: Fourth alternative (empty).", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } }
-            ],
-            metadata: longMetadata
+          writing_sequence: [
+            { action: "type", thoughtProcess: "Typing narrative: Starting with a warning.", existing_fragment: message, continuation: "'You should not get closer to the ravine,", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for emphasis.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 200 },
+            { action: "type", thoughtProcess: "Typing narrative: Giving advice.", existing_fragment: "[current_narrative_text_so_far]", continuation: " you'd better stay here for the night'.", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing for reflection.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 300 },
+            { action: "type", thoughtProcess: "Typing narrative: Describing character's focus.", existing_fragment: "[current_narrative_text_so_far]", continuation: " His gaze was set to that direction,", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing before naming the location.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 150 },
+            { action: "type", thoughtProcess: "Typing narrative: Naming the location with a slight hesitation/correction.", existing_fragment: "[current_narrative_text_so_far]", continuation: " the \"Yunata R", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing before correction.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 250 },
+            { action: "delete", thoughtProcess: "Deleting text: Correcting the name.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", count: 1, string_to_delete: "R", delay: 200 },
+            { action: "type", thoughtProcess: "Typing narrative: Typing the correct letter.", existing_fragment: "[current_narrative_text_so_far]", continuation: "R", delay: 100, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
+            { action: "type", thoughtProcess: "Typing narrative: Finishing the name.", existing_fragment: "[current_narrative_text_so_far]", continuation: "avine\".", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
+            { action: "pause", thoughtProcess: "Pausing after the reveal.", existing_fragment: "[current_narrative_text_so_far]", continuation: "", delay: 220 }
+          ],
+          fade_sequence: [
+            { action: "fade", phase: 1, thoughtProcess: "Fading text: First alternative.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "“Stay here,” he said, staring at the Yunata Ravine.", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
+            { action: "pause", delay: 500 },
+            { action: "fade", phase: 2, thoughtProcess: "Fading text: Second alternative.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Warning. Ravine.", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
+            { action: "pause", delay: 400 },
+            { action: "fade", phase: 3, thoughtProcess: "Fading text: Third alternative.", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "Night. Silence.", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } },
+            { action: "pause", delay: 300 },
+            { action: "fade", phase: 4, thoughtProcess: "Fading text: Fourth alternative (empty).", existing_fragment: "[completed_narrative_from_writing_sequence]", continuation: "", delay: 0, style: { fontName: "EB Garamond", fontSize: parseFloat(longMetadata.font_size), fontColor: longMetadata.font_color } }
+          ],
+          metadata: longMetadata
         };
       }
 
@@ -387,7 +608,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
         data: systemFragmentData
       };
       await saveFragment(sessionId, systemFragment, systemTurn);
-      
+
       // Define the transformation function
       const transformAIResponseForClient = (responseObject) => {
         if (!responseObject) return null;
@@ -428,29 +649,115 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       let aiResponse;
       try {
         // ***** NEW CODE START *****
-        try {
-          console.log(`Attempting to generate worldbuilding vector for session: ${sessionId}`);
-          const worldbuildingVector = await getWorldbuildingVector(message, TYPEWRITER_MOCK_MODE);
-          if (worldbuildingVector) {
-            const newSessionVector = new SessionVector({
-              session_id: sessionId,
-              ...worldbuildingVector // Spread the vector fields
-            });
-            await newSessionVector.save();
-            console.log(`Worldbuilding vector saved for session: ${sessionId}`);
-          } else {
-            console.log(`Worldbuilding vector was null or undefined for session: ${sessionId}. Skipping save.`);
-          }
-        } catch (vectorError) {
-          console.error(`Error generating or saving worldbuilding vector for session ${sessionId}:`, vectorError);
-          // Decide if this error should affect the main response. For now, it won't.
-        }
-        // ***** NEW CODE END *****
+        // try {
+        //   console.log(`Attempting to generate worldbuilding vector for session: ${sessionId}`);
+        //   const worldbuildingVector = await getWorldbuildingVector(message, TYPEWRITER_MOCK_MODE);
+        //   if (worldbuildingVector) {
+        //     const newSessionVector = new SessionVector({
+        //       session_id: sessionId,
+        //       ...worldbuildingVector // Spread the vector fields
+        //     });
+        //     await newSessionVector.save();
+        //     console.log(`Worldbuilding vector saved for session: ${sessionId}`);
+        //   } else {
+        //     console.log(`Worldbuilding vector was null or undefined for session: ${sessionId}. Skipping save.`);
+        //   }
+        // } catch (vectorError) {
+        //   console.error(`Error generating or saving worldbuilding vector for session ${sessionId}:`, vectorError);
+        //   // Decide if this error should affect the main response. For now, it won't.
+        // }
 
-        const prompt = generateTypewriterPrompt(message);
-        aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true);
-        
-        // Save fragments
+        // // ***** BEGIN NEW STORYTELLER CREATION LOGIC *****
+        // const fragmentText = message; // Assuming 'message' from req.body is the fragment text
+        // const storytellerPrompt = generateStoryTellerForFragmentPrompt(fragmentText);
+
+        // // Log the prompt being sent to the AI for storyteller generation
+        // console.log(`[Storyteller Generation] Session: ${sessionId} - Prompt: "${storytellerPrompt.substring(0, 200)}..."`);
+
+        // // directExternalApiCall(prompt, maxTokens, temperature, openAiMock, useJson, parseJson)
+        // // Expecting a JSON array of storyteller objects
+        // const storytellerDataArray = await directExternalApiCall([{role: 'system', content: storytellerPrompt}], 2500, undefined, undefined, true, true);
+
+        // const savedStorytellers = [];
+        // const storytellerKeyImageUrls = [];
+        // const TYPEWRITER_MOCK_IMAGE_GEN = process.env.TYPEWRITER_MOCK_IMAGE_GEN === 'true'; // Or some other config
+
+        // if (storytellerDataArray && Array.isArray(storytellerDataArray) && storytellerDataArray.length > 0) {
+        //   console.log(`[Storyteller Generation] Received ${storytellerDataArray.length} storytellers from AI.`);
+        //   for (const storytellerData of storytellerDataArray) {
+        //     try {
+        //       const newStoryteller = new Storyteller({
+        //         session_id: sessionId,
+        //         ...storytellerData
+        //       });
+        //       await newStoryteller.save();
+        //       savedStorytellers.push(newStoryteller);
+        //       console.log(`[Storyteller Generation] Saved storyteller: ${newStoryteller.name}`);
+
+        //       if (newStoryteller.typewriter_key && newStoryteller.typewriter_key.symbol) {
+        //         const keyImageResult = await createStoryTellerKey(
+        //           newStoryteller.typewriter_key,
+        //           sessionId,
+        //           newStoryteller.name,
+        //           TYPEWRITER_MOCK_IMAGE_GEN
+        //         );
+        //         if (keyImageResult && keyImageResult.localPath) {
+        //           // Construct a web-accessible URL if assets are served statically
+        //           const imageUrl = `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_keys/${path.basename(keyImageResult.localPath)}`;
+        //           storytellerKeyImageUrls.push({
+        //             storytellerId: newStoryteller._id,
+        //             name: newStoryteller.name,
+        //             imageUrl: imageUrl, // Use web-accessible URL
+        //             localPath: keyImageResult.localPath // Keep for reference if needed
+        //           });
+        //           console.log(`[Storyteller Generation] Key image generated for ${newStoryteller.name}: ${imageUrl}`);
+        //         } else {
+        //           console.log(`[Storyteller Generation] Key image generation skipped or failed for ${newStoryteller.name}.`);
+        //         }
+        //       }
+        //     } catch (dbError) {
+        //       console.error(`[Storyteller Generation] Error saving storyteller or generating key image:`, dbError);
+        //       // Decide if you want to continue with other storytellers or return an error
+        //     }
+        //   }
+        // } else {
+        //   console.log(`[Storyteller Generation] No storytellers returned or data is not an array for session: ${sessionId}`);
+        //   // If no storytellers, we might want to fall back to the original typewriter flow or return an error/empty response.
+        //   // For now, let's allow it to proceed to the original typewriter logic, which might be undesired.
+        //   // A better approach might be to return the storytellers if any, or an error if not.
+        // }
+
+        // // Respond with the created storytellers and their key images
+        // // This changes the original response structure of this endpoint.
+        // // If storytellers were created, we return them. Otherwise, the original flow might proceed.
+        // // For a clean break, if storytellers are the primary goal now, we should return here.
+        // if (savedStorytellers.length > 0) {
+        //   return res.status(200).json({
+        //     storytellers: savedStorytellers,
+        //     keyImages: storytellerKeyImageUrls,
+        //     message: "Storytellers created successfully."
+        //   });
+        // }
+        // // If no storytellers were created, and the original flow is still desired as a fallback:
+        // // console.log("[Storyteller Generation] No storytellers created, proceeding to original typewriter logic.");
+        // // However, the user's request was to *add* this. The initial snippet was placed *before* the original typewriter prompt.
+        // // This implies the storyteller creation is the new primary purpose for this part of the code.
+        // // If the intention is that *sometimes* it creates storytellers, and *sometimes* it does the old thing,
+        // // the control flow needs to be more explicit.
+        // // Given the prompt, it's likely the user wants to replace the old `aiResponse` for the storyteller part.
+
+        // // ***** END NEW STORYTELLER CREATION LOGIC *****
+
+        // // Original typewriter text generation logic (may need to be adjusted or removed based on new flow)
+        // // If the new storyteller logic is meant to replace this, then the following lines up to the
+        // // client response transformation should be conditional or removed.
+        // // For now, I will assume the new logic is primary and returns. If it doesn't return due to no storytellers,
+        // // the old logic will run. This might be confusing.
+
+        const prompt = generateTypewriterPrompt(message); // 'message' is fragmentText
+        aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true); // This was the original AI call
+
+        // Save fragments (original logic)
         const userTurn = await updateTurn(sessionId);
         const userFragment = {
           type: 'user_input',
@@ -502,8 +809,10 @@ app.post('/api/send_typewriter_text', async (req, res) => {
           return clientResponse;
         };
 
-        const clientReadyResponse = transformAIResponseForClient(aiResponse);
-        return res.status(200).json(clientReadyResponse);
+        // const clientReadyResponse = transformAIResponseForClient(aiResponse);
+        const clientReadyResponse = createAIResponse(aiResponse.continuation, aiResponse.style, 3);
+        const finalResp = createAIResponse(aiResponse.continuation, aiResponse.style, 3);
+        return res.status(200).json(finalResp);
       } catch (aiError) {
         console.error('Error calling AI for typewriter response or saving fragments:', aiError);
         // If aiResponse is undefined because the AI call failed, we still might want to save the user part
@@ -656,7 +965,7 @@ app.post('/api/getNarrationScript', async (req, res) => {
 
 
 
-app.use('/assets', express.static(path.join(__dirname, 'assets'))); 
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 
 // Helper function (can be placed in a shared utility file later)
@@ -673,9 +982,9 @@ const sanitizeString = (str) => {
 const storytellingRouteHandler = async (req, res) => {
   try {
     const { userText, textureId, sessionId } = req.body; // textureId is not used in the core logic here but kept for signature consistency
-    
+
     if (!sessionId || !userText) {
-        return res.status(400).json({ message: 'Missing sessionId or userText in request body.' });
+      return res.status(400).json({ message: 'Missing sessionId or userText in request body.' });
     }
 
     const turn = await getTurn(sessionId); // Still reads from JSON for now
@@ -707,11 +1016,11 @@ const storytellingRouteHandler = async (req, res) => {
 const storytelling2RouteHandler = async (req, res) => {
   try {
     const { userText, textureId, sessionId } = req.body; // textureId is not used here
-    
-    if (!sessionId) { 
-        return res.status(400).json({ message: 'Missing sessionId in request body.' });
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing sessionId in request body.' });
     }
-    
+
     let prefixesResponse;
     let currentTurn; // To store turn for GeneratedContent if applicable
 
@@ -726,17 +1035,17 @@ const storytelling2RouteHandler = async (req, res) => {
       const generatedPrefixes = new GeneratedContent({
         sessionId: sessionId,
         contentType: 'prefix_options', // Differentiating content type
-        contentData: prefixesResponse.options || prefixesResponse.choices, 
-        turn: currentTurn 
+        contentData: prefixesResponse.options || prefixesResponse.choices,
+        turn: currentTurn
       });
       await generatedPrefixes.save();
 
     } else {
       // DEMO_MODE logic
       prefixesResponse = {
-        current_narrative: "It was almost", 
-        choices: { 
-          choice_1: { 
+        current_narrative: "It was almost",
+        choices: {
+          choice_1: {
             options: [
               { continuation: "dusk", storytelling_points: 1, fontName: "Tangerine", fontSize: "100px", fontColor: "black" },
               { continuation: "midnight", storytelling_points: 2, fontName: "Tangerine", fontSize: "70px", fontColor: "black" },
@@ -755,26 +1064,26 @@ const storytelling2RouteHandler = async (req, res) => {
       });
       await generatedPrefixesDemo.save();
     }
-    
+
     let responseOptions;
-    if (prefixesResponse.options) { 
-        responseOptions = prefixesResponse.options;
-    } else if (prefixesResponse.choices && prefixesResponse.choices.choice_1 && prefixesResponse.choices.choice_1.options) { 
-        responseOptions = prefixesResponse.choices.choice_1.options;
+    if (prefixesResponse.options) {
+      responseOptions = prefixesResponse.options;
+    } else if (prefixesResponse.choices && prefixesResponse.choices.choice_1 && prefixesResponse.choices.choice_1.options) {
+      responseOptions = prefixesResponse.choices.choice_1.options;
     } else {
-        console.error("Unexpected prefixesResponse structure:", prefixesResponse);
-        return res.status(500).json({ message: "Internal server error due to unexpected data structure." });
+      console.error("Unexpected prefixesResponse structure:", prefixesResponse);
+      return res.status(500).json({ message: "Internal server error due to unexpected data structure." });
     }
 
     res.json({
       prefixes: responseOptions.map(option => ({
         prefix: option.continuation,
         storytelling_points: option.storytelling_points,
-        fontName: option.fontName || "Tangerine", 
-        fontSize: option.fontSize || "60px", 
-        fontColor: option.fontColor || "black" 
+        fontName: option.fontName || "Tangerine",
+        fontSize: option.fontSize || "60px",
+        fontColor: option.fontColor || "black"
       })),
-      current_narrative: prefixesResponse.current_narrative || userText 
+      current_narrative: prefixesResponse.current_narrative || userText
     });
   } catch (err) {
     console.error('Error in /api/storytelling2:', err);
@@ -791,15 +1100,15 @@ app.post('/api/storytelling2', storytelling2RouteHandler);
 const characterCreationGetHandler = async (req, res) => {
   try {
     const sessionId = req.query.sessionId || 'Unknown Session';
-    const userInput = req.query.userInput || ''; 
+    const userInput = req.query.userInput || '';
 
-    const data = await characterCreationForSessionId(sessionId, userInput, null); 
-    
+    const data = await characterCreationForSessionId(sessionId, userInput, null);
+
     res.json(data);
   } catch (err) {
     console.error('Error in /charactercreation:', err);
     if (err.name === 'CastError') {
-        return res.status(400).json({ message: 'Invalid ID format provided.' });
+      return res.status(400).json({ message: 'Invalid ID format provided.' });
     }
     res.status(500).json({ message: 'Server error during character creation process.' });
   }
@@ -814,17 +1123,17 @@ const createCharacterGetHandler = async (req, res) => {
     }
 
     const session = await SessionState.findOneAndUpdate(
-      { sessionId: sessionId }, 
-      { $setOnInsert: { sessionId: sessionId, lastUpdatedAt: new Date() } }, 
+      { sessionId: sessionId },
+      { $setOnInsert: { sessionId: sessionId, lastUpdatedAt: new Date() } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: `Session for ${sessionId} ensured/initialized.`,
-      sessionData: { 
-          sessionId: session.sessionId,
-          turn: session.turn, 
-          lastUpdatedAt: session.lastUpdatedAt
+      sessionData: {
+        sessionId: session.sessionId,
+        turn: session.turn,
+        lastUpdatedAt: session.lastUpdatedAt
       }
     });
 
@@ -847,11 +1156,11 @@ const chatWithMasterWorkingGetHandler = async (req, res) => {
     if (!sessionId) {
       return res.status(400).json({ message: 'Session ID is required.' });
     }
-    if (!fragmentText && !mock) { 
-        return res.status(400).json({ message: 'fragmentText is required for non-mock requests.' });
+    if (!fragmentText && !mock) {
+      return res.status(400).json({ message: 'fragmentText is required for non-mock requests.' });
     }
 
-    let chatHistory = await getSessionChat(sessionId); 
+    let chatHistory = await getSessionChat(sessionId);
 
     if (userInput) {
       chatHistory.push({ role: 'user', content: userInput });
@@ -861,10 +1170,10 @@ const chatWithMasterWorkingGetHandler = async (req, res) => {
 
     if (!mock) {
       const initialPrompts = generateMasterCartographerChat(fragmentText);
-      const fullPromptHistory = initialPrompts.concat(chatHistory.map(item => ({role: item.role, content: item.content}))); 
-      
+      const fullPromptHistory = initialPrompts.concat(chatHistory.map(item => ({ role: item.role, content: item.content })));
+
       const aiResponse = await directExternalApiCall(fullPromptHistory);
-      
+
       if (!aiResponse || !aiResponse.guardianOfRealmsReply) {
         console.error("Invalid AI Response structure:", aiResponse);
         return res.status(500).json({ message: 'Error processing AI response.' });
@@ -877,10 +1186,10 @@ const chatWithMasterWorkingGetHandler = async (req, res) => {
         sessionId: sessionId,
         contentType: 'masterChatResponse',
         contentData: {
-            guardianOfRealmsReply: masterResponseText,
-            discoveredEntities: discoveredEntities,
+          guardianOfRealmsReply: masterResponseText,
+          discoveredEntities: discoveredEntities,
         },
-        fragmentText: fragmentText, 
+        fragmentText: fragmentText,
       });
       await masterChatContent.save();
 
@@ -892,7 +1201,7 @@ const chatWithMasterWorkingGetHandler = async (req, res) => {
       chatHistory.push({ role: 'system', content: masterResponseText });
     }
 
-    await setChatSessions(sessionId, chatHistory); 
+    await setChatSessions(sessionId, chatHistory);
 
     res.json({ text: masterResponseText });
 
@@ -972,16 +1281,16 @@ const developEntityPostHandler = async (req, res) => {
     }
 
     const updatedEntityData = await developEntity({ sessionId, entityId, developmentPoints });
-    
+
     if (!updatedEntityData) {
-        return res.status(500).json({ message: 'Entity development process did not return data.' });
+      return res.status(500).json({ message: 'Entity development process did not return data.' });
     }
 
     return res.status(200).json({ success: true, updatedEntity: updatedEntityData });
   } catch (error) {
     console.error('Error in /api/developEntity:', error);
-    if (error.message.includes("could not find entity")) { 
-        return res.status(404).json({ message: 'Entity not found for development.' });
+    if (error.message.includes("could not find entity")) {
+      return res.status(404).json({ message: 'Entity not found for development.' });
     }
     res.status(500).json({ message: 'Server error during entity development.' });
   }
@@ -996,10 +1305,10 @@ const generateEntitiesPostHandler = async (req, res) => {
     }
 
     const entities = await generateEntitiesFromFragment(sessionId, userText);
-    const groupedEntities = processEntitiesToGroups(entities); 
+    const groupedEntities = processEntitiesToGroups(entities);
     // console.log("Grouped Entities (not returned in response):", groupedEntities);
 
-    res.status(200).json({ entities: entities, message: "Entities generated and saved." }); 
+    res.status(200).json({ entities: entities, message: "Entities generated and saved." });
 
   } catch (error) {
     console.error('Error in /api/generateEntities:', error);
@@ -1010,6 +1319,63 @@ const generateEntitiesPostHandler = async (req, res) => {
 // Add new POST routes for entity development and generation
 app.post('/api/developEntity', developEntityPostHandler);
 app.post('/api/generateEntities', generateEntitiesPostHandler);
+
+const textToEntityPostHandler = async (req, res) => {
+  try {
+    const {
+      sessionId,
+      playerId,
+      text,
+      userText,
+      fragment,
+      includeCards,
+      includeFront,
+      includeBack,
+      debug,
+      mock
+    } = req.body;
+
+    const fragmentText = text || userText || fragment;
+
+    if (!sessionId || !playerId || !fragmentText) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or text.' });
+    }
+
+    const shouldMock = Boolean(debug || mock);
+    const options = {
+      sessionId,
+      playerId,
+      text: fragmentText,
+      includeCards: includeCards === undefined ? false : Boolean(includeCards),
+      includeFront: includeFront === undefined ? true : Boolean(includeFront),
+      includeBack: includeBack === undefined ? true : Boolean(includeBack),
+      debug: shouldMock
+    };
+
+    const result = await textToEntityFromText(options);
+
+    const response = {
+      sessionId,
+      entities: result.entities,
+      mocked: result.mocked
+    };
+
+    if (options.includeCards) {
+      response.cards = result.cards || [];
+      response.cardOptions = {
+        includeFront: options.includeFront,
+        includeBack: options.includeBack
+      };
+    }
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error('Error in /api/textToEntity:', error);
+    res.status(500).json({ message: 'Server error during text-to-entity generation.' });
+  }
+};
+
+app.post('/api/textToEntity', textToEntityPostHandler);
 
 // Texture Generation and Prefixes Route Handlers
 
@@ -1022,13 +1388,13 @@ const generateTexturesPostHandler = async (req, res) => {
       return res.json(mockGenerateTexturesResponse);
     }
 
-    if (!sessionId || userText === undefined) { 
+    if (!sessionId || userText === undefined) {
       return res.status(400).json({ message: 'Missing required parameters: sessionId or userText.' });
     }
-    const fragment = userText; 
+    const fragment = userText;
 
-    const turn = await updateTurn(sessionId); 
-    await saveFragment(sessionId, fragment, turn); 
+    const turn = await updateTurn(sessionId);
+    await saveFragment(sessionId, fragment, turn);
 
     const { entitiesWithIllustrations } = await generateTextureOptionsByText({ sessionId, turn, shouldMockImage: false });
 
@@ -1042,11 +1408,11 @@ const generateTexturesPostHandler = async (req, res) => {
 
 const dynamicPrefixesPostHandler = async (req, res) => {
   const mockPrefixes = [
-    {"fontName":"Tangerine", "prefix": "it wasn't unusual for them to see wolf tracks so close to the farm, but this one was different, its grand size imprinting a distinct story on the soft soil", "fontSize":"34px"},
-    {"fontName":"Tangerine", "prefix": "It was almost dark as they finally reached", "fontSize": "34px"},
-    {"fontName":"Tangerine", "prefix": "she grasped her amulet strongly, as the horses started galloping", "fontSize": "34px"},
-    {"fontName":"Tangerine", "prefix": "Run! Now! and don't look back until you reach the river", "fontSize": "34px"},
-    {"fontName":"Tangerine", "prefix": "I admit it, seeing the dark woods for the first time was scary", "fontSize": "34px"}
+    { "fontName": "Tangerine", "prefix": "it wasn't unusual for them to see wolf tracks so close to the farm, but this one was different, its grand size imprinting a distinct story on the soft soil", "fontSize": "34px" },
+    { "fontName": "Tangerine", "prefix": "It was almost dark as they finally reached", "fontSize": "34px" },
+    { "fontName": "Tangerine", "prefix": "she grasped her amulet strongly, as the horses started galloping", "fontSize": "34px" },
+    { "fontName": "Tangerine", "prefix": "Run! Now! and don't look back until you reach the river", "fontSize": "34px" },
+    { "fontName": "Tangerine", "prefix": "I admit it, seeing the dark woods for the first time was scary", "fontSize": "34px" }
   ];
 
   try {
@@ -1071,14 +1437,14 @@ const dynamicPrefixesPostHandler = async (req, res) => {
       return res.status(400).json({ message: 'contextText is required for non-mock mode.' });
     }
 
-    const aiPrompts = generateFragmentsBeginnings(contextText, 5); 
-    const generatedPrefixesFromAI = await directExternalApiCall(aiPrompts); 
+    const aiPrompts = generateFragmentsBeginnings(contextText, 5);
+    const generatedPrefixesFromAI = await directExternalApiCall(aiPrompts);
 
     if (!Array.isArray(generatedPrefixesFromAI)) {
-        console.error("AI did not return an array for prefixes:", generatedPrefixesFromAI);
-        return res.status(500).json({ message: "Error processing AI response for prefixes."});
+      console.error("AI did not return an array for prefixes:", generatedPrefixesFromAI);
+      return res.status(500).json({ message: "Error processing AI response for prefixes." });
     }
-    
+
     const prefixLog = new GeneratedContent({
       sessionId: sessionId,
       contentType: 'dynamicPrefixList',
@@ -1101,3 +1467,5 @@ app.post('/api/prefixes', dynamicPrefixesPostHandler);
 
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+
+export { app };

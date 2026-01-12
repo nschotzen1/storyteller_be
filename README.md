@@ -1,1 +1,262 @@
 # storyteller_be
+
+## Text to Entity API
+
+`POST /api/textToEntity` generates entities from text and can optionally return card prompts for front/back sides.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "text": "A wind-scoured pass with a rusted watchtower and a lone courier arriving at dusk.",
+  "includeCards": true,
+  "includeFront": true,
+  "includeBack": true,
+  "debug": false
+}
+```
+
+Notes:
+- Use `text`, `userText`, or `fragment` for the input text (the route picks the first provided).
+- `includeCards` defaults to `false`.
+- `includeFront` and `includeBack` default to `true` when cards are requested.
+- `debug` or `mock` returns mock entities/cards without external API calls.
+
+Response (cards included):
+```json
+{
+  "sessionId": "demo-1",
+  "entities": [
+    {
+      "id": "abc123",
+      "name": "Emberline Waystation",
+      "ner_type": "LOCATION",
+      "ner_subtype": "Border Outpost",
+      "description": "A soot-stained refuge of iron and red stone...",
+      "relevance": "A waypoint rumored to sit on the edge..."
+    }
+  ],
+  "cards": [
+    {
+      "entityId": "abc123",
+      "entityName": "Emberline Waystation",
+      "front": {
+        "prompt": "Create a highly detailed RPG collector card front illustration...",
+        "imageUrl": "/assets/demo-1/cards/abc123_front.png"
+      },
+      "back": {
+        "prompt": "Card texture: A worn, full-frame RPG card back...",
+        "texture": {
+          "text_for_entity": "Emberline Waystation",
+          "font": "Cormorant Garamond",
+          "font_size": "22px",
+          "font_color": "weathered silver",
+          "card_material": "aged parchment",
+          "major_cultural_influences_references": [
+            "Numenera",
+            "The Broken Earth Trilogy",
+            "Dark Crystal",
+            "Moebius"
+          ]
+        },
+        "imageUrl": "/assets/demo-1/cards/abc123_back.png"
+      }
+    }
+    }
+  ],
+  "mocked": false,
+  "cardOptions": {
+    "includeFront": true,
+    "includeBack": true
+  }
+}
+```
+
+```
+
+## Text to Storyteller API
+
+`POST /api/textToStoryteller` generates storyteller personas from a fragment and saves them.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "text": "A wind-scoured pass with a rusted watchtower and a lone courier arriving at dusk.",
+  "count": 3,
+  "generateKeyImages": false
+}
+```
+
+## Send Storyteller to Entity API
+
+`POST /api/sendStorytellerToEntity` assigns a storyteller to an entity, records the outcome, and generates sub-entities.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "entityId": "abc123",
+  "storytellerId": "66c9e9f0b5a5c7d123456789",
+  "storytellingPoints": 12,
+  "message": "Investigate the source of the whispering lanterns.",
+  "duration": 3,
+  "debug": false
+}
+```
+
+## Storyteller Listing API
+
+`GET /api/storytellers?sessionId=...` returns storytellers with status and last mission summary.
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "storytellers": [
+    {
+      "id": "66c9e9f0b5a5c7d123456789",
+      "name": "Aster Vell",
+      "status": "active",
+      "level": 12,
+      "lastMission": {
+        "outcome": "success",
+        "message": "Investigate the lanterns.",
+        "entityExternalId": "mock-entity-1",
+        "createdAt": "2025-03-01T12:00:00.000Z"
+      }
+    }
+  ]
+}
+```
+
+## Storyteller Detail API
+
+`GET /api/storytellers/:id` returns a single storyteller with mission history.
+
+Response:
+```json
+{
+  "storyteller": {
+    "_id": "66c9e9f0b5a5c7d123456789",
+    "name": "Aster Vell",
+    "status": "active",
+    "missions": []
+  }
+}
+```
+
+## Entity Listing API
+
+`GET /api/entities?sessionId=...` returns entities for a session.
+
+Optional filters:
+- `mainEntityId=...`
+- `isSubEntity=true|false`
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "entities": [
+    {
+      "_id": "66c9e9f0b5a5c7d123456790",
+      "name": "Emberline Waystation",
+      "externalId": "mock-entity-1",
+      "isSubEntity": false
+    }
+  ]
+}
+```
+
+## Entity Refresh API
+
+`POST /api/entities/:id/refresh` generates new sub-entities for an existing entity.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "note": "Focus on hidden dangers or secret factions.",
+  "debug": false
+}
+```
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "entity": { "name": "Emberline Waystation" },
+  "subEntities": [],
+  "mocked": false
+}
+```
+
+## Test Flow (Mocked)
+
+`server_new.flow.test.js` exercises a mocked end-to-end flow that still persists data:
+
+- Start with a fragment.
+- Create entities via `/api/textToEntity` (`debug: true`).
+- Create a storyteller via `/api/textToStoryteller` (`debug: true`).
+- Send the storyteller on a mission via `/api/sendStorytellerToEntity` (`debug: true`).
+
+This verifies:
+- Entities get external IDs and are saved to Mongo.
+- Storytellers are saved with `status` and `missions`.
+- Missions create sub-entities linked by `mainEntityId`.
+
+Notes:
+- `entityId` should match the `id` returned from `/api/textToEntity`.
+- `storytellerId` is the Mongo `_id` from `/api/textToStoryteller` (name also works for lookup).
+- `storytellingPoints` and `message` are required.
+- `duration` is expected in days.
+- Use `debug` or `mock` to return a mocked outcome and mocked sub-entities.
+
+Response (shape):
+```json
+{
+  "sessionId": "demo-1",
+  "storytellerId": "66c9e9f0b5a5c7d123456789",
+  "outcome": "success",
+  "userText": "The mission concludes...",
+  "gmNote": "Lean into the sensory details...",
+  "entity": { "name": "Emberline Waystation" },
+  "subEntities": []
+}
+```
+
+Notes:
+- Use `text`, `userText`, or `fragment` for the input text (the route picks the first provided).
+- `count` (or `numberOfStorytellers`) defaults to `3` and is clamped to 1–10.
+- Set `generateKeyImages` to `true` to create typewriter key images (requires image service).
+- An illustration for each storyteller is automatically generated and saved, with the path returned in the `illustration` field.
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "storytellers": [
+    {
+      "_id": "66c9e9f0b5a5c7d123456789",
+      "session_id": "demo-1",
+      "name": "Aster Vell",
+      "immediate_ghost_appearance": "A ripple of ink and smoke...",
+      "typewriter_key": {
+        "symbol": "ink moth",
+        "description": "A tarnished brass key with..."
+      },
+      "influences": ["Obsidian Canticles", "Wasteland Noir"],
+      "known_universes": ["The Riven Orrery"],
+      "level": 12,
+      "voice_creation": {
+        "voice": "female",
+        "age": "ageless",
+        "style": "measured, smoky"
+      },
+      "illustration": "/assets/demo-1/storyteller_illustrations/Aster_Vell_illustration.png"
+    }
+  ],
+  "keyImages": [],
+  "count": 1
+}
