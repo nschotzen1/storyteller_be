@@ -4,7 +4,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { BrewRoom } from './models/brewing_models.js';
 import { directExternalApiCall } from './ai/openai/apiService.js';
-import { Storyteller, SessionPlayer } from './models/models.js';
+import { Storyteller, SessionPlayer, Arena } from './models/models.js';
 import {
   generateStoryTellerForFragmentPrompt,
   generateSendStorytellerToEntityPrompt,
@@ -131,6 +131,15 @@ function buildMockStorytellers(count, fragmentText) {
   return [baseStoryteller, ...fallbackStorytellers].slice(0, count);
 }
 
+function normalizeArenaPayload(arena) {
+  const payload = arena && typeof arena === 'object' ? arena : {};
+  return {
+    ...payload,
+    entities: Array.isArray(payload.entities) ? payload.entities : [],
+    storytellers: Array.isArray(payload.storytellers) ? payload.storytellers : []
+  };
+}
+
 async function findEntityById(sessionId, playerId, entityId) {
   if (!entityId) {
     return null;
@@ -192,6 +201,69 @@ app.post('/api/sessions/:sessionId/players', async (req, res) => {
   } catch (error) {
     console.error('Error in /api/sessions/:sessionId/players (POST):', error);
     return res.status(500).json({ message: 'Server error during session player registration.' });
+  }
+});
+
+// Session Arena
+app.get('/api/sessions/:sessionId/arena', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { playerId } = req.query;
+
+    if (!sessionId || !playerId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId or playerId.' });
+    }
+
+    const arenaDoc = await Arena.findOne({ sessionId }).lean();
+    const arena = normalizeArenaPayload(arenaDoc?.arena);
+
+    return res.status(200).json({
+      sessionId,
+      playerId,
+      arena,
+      lastUpdatedBy: arenaDoc?.lastUpdatedBy,
+      updatedAt: arenaDoc?.updatedAt
+    });
+  } catch (error) {
+    console.error('Error in /api/sessions/:sessionId/arena (GET):', error);
+    return res.status(500).json({ message: 'Server error during arena fetch.' });
+  }
+});
+
+app.post('/api/sessions/:sessionId/arena', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { playerId } = req.body || {};
+
+    if (!sessionId || !playerId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId or playerId.' });
+    }
+
+    const body = req.body || {};
+    const arenaPayload = body.arena || { entities: body.entities, storytellers: body.storytellers };
+    const arena = normalizeArenaPayload(arenaPayload);
+
+    const updatedArena = await Arena.findOneAndUpdate(
+      { sessionId },
+      {
+        $set: {
+          arena,
+          lastUpdatedBy: playerId
+        }
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    return res.status(200).json({
+      sessionId,
+      playerId,
+      arena: normalizeArenaPayload(updatedArena?.arena),
+      lastUpdatedBy: updatedArena?.lastUpdatedBy,
+      updatedAt: updatedArena?.updatedAt
+    });
+  } catch (error) {
+    console.error('Error in /api/sessions/:sessionId/arena (POST):', error);
+    return res.status(500).json({ message: 'Server error during arena update.' });
   }
 });
 

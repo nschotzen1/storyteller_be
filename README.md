@@ -1,8 +1,31 @@
 # storyteller_be
 
-## Text to Entity API
+## Overview
 
-`POST /api/textToEntity` generates entities from text and can optionally return card prompts for front/back sides.
+Node/Express backend for Storyteller game services. The primary entrypoint is `server_new.js` (ESM).
+Assets are served from `/assets` (local `assets/`). MongoDB is required at
+`mongodb://localhost:27017/storytelling`.
+
+## Quick Start
+
+```bash
+npm install
+node server_new.js
+```
+
+Default port: `5001`.
+
+## Request Conventions
+
+- Most routes require `sessionId` and `playerId`.
+- `debug` or `mock` returns mocked outputs and skips external API calls.
+- `text`, `userText`, or `fragment` are accepted for text input.
+
+## Core Routes
+
+### POST `/api/textToEntity`
+
+Generates entities from text and can optionally return card prompts for front/back sides.
 
 Request body:
 ```json
@@ -63,7 +86,6 @@ Response (cards included):
         "imageUrl": "/assets/demo-1/cards/abc123_back.png"
       }
     }
-    }
   ],
   "mocked": false,
   "cardOptions": {
@@ -73,11 +95,9 @@ Response (cards included):
 }
 ```
 
-```
+### POST `/api/textToStoryteller`
 
-## Text to Storyteller API
-
-`POST /api/textToStoryteller` generates storyteller personas from a fragment and saves them.
+Generates storyteller personas from a fragment and saves them.
 
 Request body:
 ```json
@@ -90,186 +110,10 @@ Request body:
 }
 ```
 
-## Send Storyteller to Entity API
-
-`POST /api/sendStorytellerToEntity` assigns a storyteller to an entity, records the outcome, and generates sub-entities.
-
-Request body:
-```json
-{
-  "sessionId": "demo-1",
-  "playerId": "player-1",
-  "entityId": "abc123",
-  "storytellerId": "66c9e9f0b5a5c7d123456789",
-  "storytellingPoints": 12,
-  "message": "Investigate the source of the whispering lanterns.",
-  "duration": 3,
-  "debug": false
-}
-```
-
-## Storyteller Listing API
-
-`GET /api/storytellers?sessionId=...&playerId=...` returns storytellers with status and last mission summary.
-
-Response:
-```json
-{
-  "sessionId": "demo-1",
-  "storytellers": [
-    {
-      "id": "66c9e9f0b5a5c7d123456789",
-      "name": "Aster Vell",
-      "status": "active",
-      "level": 12,
-      "lastMission": {
-        "outcome": "success",
-        "message": "Investigate the lanterns.",
-        "entityExternalId": "mock-entity-1",
-        "createdAt": "2025-03-01T12:00:00.000Z"
-      }
-    }
-  ]
-}
-```
-
-## Storyteller Detail API
-
-`GET /api/storytellers/:id?sessionId=...&playerId=...` returns a single storyteller with mission history.
-
-Response:
-```json
-{
-  "storyteller": {
-    "_id": "66c9e9f0b5a5c7d123456789",
-    "name": "Aster Vell",
-    "status": "active",
-    "missions": []
-  }
-}
-```
-
-## Entity Listing API
-
-`GET /api/entities?sessionId=...&playerId=...` returns entities for a session.
-
-Optional filters:
-- `mainEntityId=...`
-- `isSubEntity=true|false`
-
-Response:
-```json
-{
-  "sessionId": "demo-1",
-  "entities": [
-    {
-      "_id": "66c9e9f0b5a5c7d123456790",
-      "name": "Emberline Waystation",
-      "externalId": "mock-entity-1",
-      "isSubEntity": false
-    }
-  ]
-}
-```
-
-## Entity Refresh API
-
-`POST /api/entities/:id/refresh` generates new sub-entities for an existing entity.
-
-Request body:
-```json
-{
-  "sessionId": "demo-1",
-  "playerId": "player-1",
-  "note": "Focus on hidden dangers or secret factions.",
-  "debug": false
-}
-```
-
-Response:
-```json
-{
-  "sessionId": "demo-1",
-  "entity": { "name": "Emberline Waystation" },
-  "subEntities": [],
-  "mocked": false
-}
-```
-
-## Session Players API
-
-`GET /api/sessions/:sessionId/players` returns the players registered for a session.
-
-Response:
-```json
-{
-  "count": 2,
-  "players": [
-    {
-      "id": "player-uuid",
-      "playerId": "player-uuid",
-      "playerName": "Ada"
-    }
-  ]
-}
-```
-
-`POST /api/sessions/:sessionId/players` registers a new player.
-
-Request body:
-```json
-{
-  "playerName": "Ada"
-}
-```
-
-Response:
-```json
-{
-  "playerId": "player-uuid",
-  "id": "player-uuid"
-}
-```
-
-## Test Flow (Mocked)
-
-`server_new.flow.test.js` exercises a mocked end-to-end flow that still persists data:
-
-- Start with a fragment.
-- Create entities via `/api/textToEntity` (`debug: true`).
-- Create a storyteller via `/api/textToStoryteller` (`debug: true`).
-- Send the storyteller on a mission via `/api/sendStorytellerToEntity` (`debug: true`).
-
-This verifies:
-- Entities get external IDs and are saved to Mongo.
-- Storytellers are saved with `status` and `missions`.
-- Missions create sub-entities linked by `mainEntityId`.
-
 Notes:
-- `entityId` should match the `id` returned from `/api/textToEntity`.
-- `storytellerId` is the Mongo `_id` from `/api/textToStoryteller` (name also works for lookup).
-- `storytellingPoints` and `message` are required.
-- `duration` is expected in days.
-- Use `debug` or `mock` to return a mocked outcome and mocked sub-entities.
-
-Response (shape):
-```json
-{
-  "sessionId": "demo-1",
-  "storytellerId": "66c9e9f0b5a5c7d123456789",
-  "outcome": "success",
-  "userText": "The mission concludes...",
-  "gmNote": "Lean into the sensory details...",
-  "entity": { "name": "Emberline Waystation" },
-  "subEntities": []
-}
-```
-
-Notes:
-- Use `text`, `userText`, or `fragment` for the input text (the route picks the first provided).
 - `count` (or `numberOfStorytellers`) defaults to `3` and is clamped to 1–10.
 - Set `generateKeyImages` to `true` to create typewriter key images (requires image service).
-- An illustration for each storyteller is automatically generated and saved, with the path returned in the `illustration` field.
+- An illustration for each storyteller is automatically generated and saved.
 
 Response:
 ```json
@@ -299,3 +143,214 @@ Response:
   "keyImages": [],
   "count": 1
 }
+```
+
+### POST `/api/sendStorytellerToEntity`
+
+Assigns a storyteller to an entity, records the outcome, and generates sub-entities.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "entityId": "abc123",
+  "storytellerId": "66c9e9f0b5a5c7d123456789",
+  "storytellingPoints": 12,
+  "message": "Investigate the source of the whispering lanterns.",
+  "duration": 3,
+  "debug": false
+}
+```
+
+Response (shape):
+```json
+{
+  "sessionId": "demo-1",
+  "storytellerId": "66c9e9f0b5a5c7d123456789",
+  "outcome": "success",
+  "userText": "The mission concludes...",
+  "gmNote": "Lean into the sensory details...",
+  "entity": { "name": "Emberline Waystation" },
+  "subEntities": []
+}
+```
+
+### GET `/api/storytellers?sessionId=...&playerId=...`
+
+Returns storytellers with status and last mission summary.
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "storytellers": [
+    {
+      "id": "66c9e9f0b5a5c7d123456789",
+      "name": "Aster Vell",
+      "status": "active",
+      "level": 12,
+      "lastMission": {
+        "outcome": "success",
+        "message": "Investigate the lanterns.",
+        "entityExternalId": "mock-entity-1",
+        "createdAt": "2025-03-01T12:00:00.000Z"
+      }
+    }
+  ]
+}
+```
+
+### GET `/api/storytellers/:id?sessionId=...&playerId=...`
+
+Returns a single storyteller with mission history.
+
+Response:
+```json
+{
+  "storyteller": {
+    "_id": "66c9e9f0b5a5c7d123456789",
+    "name": "Aster Vell",
+    "status": "active",
+    "missions": []
+  }
+}
+```
+
+### GET `/api/entities?sessionId=...&playerId=...`
+
+Returns entities for a session.
+
+Optional filters:
+- `mainEntityId=...`
+- `isSubEntity=true|false`
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "entities": [
+    {
+      "_id": "66c9e9f0b5a5c7d123456790",
+      "name": "Emberline Waystation",
+      "externalId": "mock-entity-1",
+      "isSubEntity": false
+    }
+  ]
+}
+```
+
+### POST `/api/entities/:id/refresh`
+
+Generates new sub-entities for an existing entity.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "note": "Focus on hidden dangers or secret factions.",
+  "debug": false
+}
+```
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "entity": { "name": "Emberline Waystation" },
+  "subEntities": [],
+  "mocked": false
+}
+```
+
+### GET `/api/sessions/:sessionId/players`
+
+Returns the players registered for a session.
+
+Response:
+```json
+{
+  "count": 2,
+  "players": [
+    {
+      "id": "player-uuid",
+      "playerId": "player-uuid",
+      "playerName": "Ada"
+    }
+  ]
+}
+```
+
+### POST `/api/sessions/:sessionId/players`
+
+Registers a new player.
+
+Request body:
+```json
+{
+  "playerName": "Ada"
+}
+```
+
+Response:
+```json
+{
+  "playerId": "player-uuid",
+  "id": "player-uuid"
+}
+```
+
+### GET `/api/sessions/:sessionId/arena?playerId=...`
+
+Loads the shared arena for a session.
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "arena": { "entities": [], "storytellers": [] },
+  "lastUpdatedBy": "player-1",
+  "updatedAt": "2025-03-01T12:00:00.000Z"
+}
+```
+
+### POST `/api/sessions/:sessionId/arena`
+
+Persists the shared arena for a session.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "arena": { "entities": [], "storytellers": [] }
+}
+```
+
+### /api/brewing/*
+
+Multiplayer brewing room endpoints and SSE (room create/join/ready/start/turn submit/events).
+See `server_new.js` for full route list and payloads.
+
+## Test Flow (Mocked)
+
+`server_new.flow.test.js` exercises a mocked end-to-end flow that still persists data:
+
+- Start with a fragment.
+- Create entities via `/api/textToEntity` (`debug: true`).
+- Create a storyteller via `/api/textToStoryteller` (`debug: true`).
+- Send the storyteller on a mission via `/api/sendStorytellerToEntity` (`debug: true`).
+
+This verifies:
+- Entities get external IDs and are saved to Mongo.
+- Storytellers are saved with `status` and `missions`.
+- Missions create sub-entities linked by `mainEntityId`.
+
+Notes:
+- `entityId` should match the `id` returned from `/api/textToEntity`.
+- `storytellerId` is the Mongo `_id` from `/api/textToStoryteller` (name also works for lookup).
+- `storytellingPoints` and `message` are required.
+- `duration` is expected in days.
+- Use `debug` or `mock` to return a mocked outcome and mocked sub-entities.
