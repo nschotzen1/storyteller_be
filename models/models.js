@@ -78,6 +78,14 @@ const SessionPlayerSchema = new mongoose.Schema({
 
 export const SessionPlayer = mongoose.model('SessionPlayer', SessionPlayerSchema);
 
+const ArenaSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, index: true, unique: true },
+  arena: { type: mongoose.Schema.Types.Mixed, default: { entities: [], storytellers: [] } },
+  lastUpdatedBy: { type: String }
+}, { timestamps: true });
+
+export const Arena = mongoose.model('Arena', ArenaSchema);
+
 const StorytellerSchema = new mongoose.Schema({
   session_id: { type: String, required: true, index: true },
   sessionId: { type: String, index: true },
