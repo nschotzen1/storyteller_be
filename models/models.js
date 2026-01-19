@@ -127,6 +127,6 @@ const StorytellerSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-StorytellerSchema.index({ session_id: 1, playerId: 1, name: 1 }, { unique: true });
+StorytellerSchema.index({ session_id: 1, playerId: 1, name: 1 });
 
 export const Storyteller = mongoose.model('Storyteller', StorytellerSchema);

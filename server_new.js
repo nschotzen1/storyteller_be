@@ -14,6 +14,7 @@ import {
 import { NarrativeEntity } from './storyteller/utils.js';
 import { textToEntityFromText } from './services/textToEntityService.js';
 
+
 const app = express();
 app.use(express.json());
 app.use(cors());
@@ -343,7 +344,7 @@ app.get('/api/entities', async (req, res) => {
 app.post('/api/entities/:id/refresh', async (req, res) => {
   try {
     const { id } = req.params;
-    const { sessionId, playerId, note, debug, mock } = req.body;
+    const { sessionId, playerId, note, debug, mock, mock_api_calls, mocked_api_calls } = req.body;
 
     if (!sessionId || !playerId) {
       return res.status(400).json({ message: 'Missing required parameter: sessionId or playerId.' });
@@ -361,7 +362,7 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
       note ? `GM note: ${note}` : ''
     ].filter(Boolean).join('\n');
 
-    const shouldMock = Boolean(debug || mock);
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
     const subEntityResult = await textToEntityFromText({
       sessionId,
       playerId,
@@ -411,7 +412,9 @@ app.post('/api/textToEntity', async (req, res) => {
       includeFront,
       includeBack,
       debug,
-      mock
+      mock,
+      mock_api_calls,
+      mocked_api_calls
     } = req.body;
 
     const fragmentText = text || userText || fragment;
@@ -420,7 +423,7 @@ app.post('/api/textToEntity', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or text.' });
     }
 
-    const shouldMock = Boolean(debug || mock);
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
     const options = {
       sessionId,
       playerId,
@@ -457,7 +460,18 @@ app.post('/api/textToEntity', async (req, res) => {
 // Text to Storyteller
 app.post('/api/textToStoryteller', async (req, res) => {
   try {
-    const { sessionId, playerId, count, numberOfStorytellers, generateKeyImages, mockImage, debug, mock } = req.body;
+    const {
+      sessionId,
+      playerId,
+      count,
+      numberOfStorytellers,
+      generateKeyImages,
+      mockImage,
+      debug,
+      mock,
+      mock_api_calls,
+      mocked_api_calls
+    } = req.body;
     const fragmentText = getFragmentText(req.body);
 
     if (!sessionId || !playerId || !fragmentText) {
@@ -465,7 +479,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
     }
 
     const storytellerCount = normalizeStorytellerCount(count ?? numberOfStorytellers);
-    const shouldMock = Boolean(debug || mock);
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
     let storytellerDataArray;
 
     if (shouldMock) {
@@ -571,7 +585,9 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       message,
       duration,
       debug,
-      mock
+      mock,
+      mock_api_calls,
+      mocked_api_calls
     } = req.body;
 
     if (!sessionId || !playerId || !entityId || !storytellerId) {
@@ -597,7 +613,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       return res.status(404).json({ message: 'Storyteller not found.' });
     }
 
-    const shouldMock = Boolean(debug || mock);
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
     const durationDays = Number.isFinite(Number(duration)) ? Number(duration) : undefined;
 
     await Storyteller.findByIdAndUpdate(
