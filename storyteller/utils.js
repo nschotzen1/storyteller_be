@@ -931,7 +931,13 @@ export async function generateEntitiesFromFragment(sessionId, fragmentText, turn
     const prompts = generate_entities_by_fragment(fragmentText, maxEntities);
     if(! existinEntities)
       existinEntities = []
-    const  response = await directExternalApiCall(prompts.concat(existinEntities), max_tokens = 6000, temperature=0.7, mockedResponse=null, explicitJsonObjectFormat=true, isOpenAi=true);
+    const response = await directExternalApiCall(prompts.concat(existinEntities), {
+      max_tokens: 6000,
+      temperature: 0.7,
+      mockedResponse: null,
+      explicitJsonObjectFormat: true,
+      isOpenAi: true,
+    });
     let { clusters, entities} = response
     if(entities.card_backs){
       entities = entities.card_backs

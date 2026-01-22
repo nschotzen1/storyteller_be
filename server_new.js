@@ -14,12 +14,14 @@ import {
 import { NarrativeEntity } from './storyteller/utils.js';
 import { textToEntityFromText } from './services/textToEntityService.js';
 
+
 const app = express();
 app.use(express.json());
 app.use(cors());
 
 const PORT = process.env.PORT || 5001;
 const ASSETS_ROOT = path.resolve(process.cwd(), 'assets');
+const MOCK_STORYTELLER_ILLUSTRATION_URL = '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png';
 
 app.use('/assets', express.static(ASSETS_ROOT));
 
@@ -36,7 +38,8 @@ const MOCK_STORYTELLER = {
   influences: [
     'Ashen Cantos',
     'Voyager Myths'
-  ]
+  ],
+  illustration: MOCK_STORYTELLER_ILLUSTRATION_URL
 };
 
 // --- State Management ---
@@ -343,7 +346,7 @@ app.get('/api/entities', async (req, res) => {
 app.post('/api/entities/:id/refresh', async (req, res) => {
   try {
     const { id } = req.params;
-    const { sessionId, playerId, note, debug, mock } = req.body;
+    const { sessionId, playerId, note, debug, mock, mock_api_calls, mocked_api_calls } = req.body;
 
     if (!sessionId || !playerId) {
       return res.status(400).json({ message: 'Missing required parameter: sessionId or playerId.' });
@@ -361,7 +364,7 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
       note ? `GM note: ${note}` : ''
     ].filter(Boolean).join('\n');
 
-    const shouldMock = Boolean(debug || mock);
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
     const subEntityResult = await textToEntityFromText({
       sessionId,
       playerId,
@@ -411,7 +414,9 @@ app.post('/api/textToEntity', async (req, res) => {
       includeFront,
       includeBack,
       debug,
-      mock
+      mock,
+      mock_api_calls,
+      mocked_api_calls
     } = req.body;
 
     const fragmentText = text || userText || fragment;
@@ -420,7 +425,7 @@ app.post('/api/textToEntity', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or text.' });
     }
 
-    const shouldMock = Boolean(debug || mock);
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
     const options = {
       sessionId,
       playerId,
@@ -457,7 +462,18 @@ app.post('/api/textToEntity', async (req, res) => {
 // Text to Storyteller
 app.post('/api/textToStoryteller', async (req, res) => {
   try {
-    const { sessionId, playerId, count, numberOfStorytellers, generateKeyImages, mockImage, debug, mock } = req.body;
+    const {
+      sessionId,
+      playerId,
+      count,
+      numberOfStorytellers,
+      generateKeyImages,
+      mockImage,
+      debug,
+      mock,
+      mock_api_calls,
+      mocked_api_calls
+    } = req.body;
     const fragmentText = getFragmentText(req.body);
 
     if (!sessionId || !playerId || !fragmentText) {
@@ -465,7 +481,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
     }
 
     const storytellerCount = normalizeStorytellerCount(count ?? numberOfStorytellers);
-    const shouldMock = Boolean(debug || mock);
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
     let storytellerDataArray;
 
     if (shouldMock) {
@@ -501,6 +517,9 @@ app.post('/api/textToStoryteller', async (req, res) => {
         fragmentText,
         ...storytellerData
       };
+      if (shouldMock && !payload.illustration) {
+        payload.illustration = MOCK_STORYTELLER_ILLUSTRATION_URL;
+      }
 
       const savedStoryteller = await Storyteller.findOneAndUpdate(
         { session_id: sessionId, playerId, name: payload.name },
@@ -509,7 +528,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
       );
       savedStorytellers.push(savedStoryteller);
 
-      if (generateKeyImages && payload.typewriter_key?.symbol) {
+      if (!shouldMock && generateKeyImages && payload.typewriter_key?.symbol) {
         const keyImageResult = await createStoryTellerKey(
           payload.typewriter_key,
           sessionId,
@@ -528,22 +547,24 @@ app.post('/api/textToStoryteller', async (req, res) => {
         }
       }
 
-      // Generate Illustration
-      const illustrationResult = await createStorytellerIllustration(
-        payload,
-        sessionId,
-        Boolean(mockImage)
-      );
+      if (!shouldMock) {
+        // Generate Illustration
+        const illustrationResult = await createStorytellerIllustration(
+          payload,
+          sessionId,
+          Boolean(mockImage)
+        );
 
-      if (illustrationResult?.localPath) {
-        const illustrationUrl = `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_illustrations/${path.basename(illustrationResult.localPath)}`;
+        if (illustrationResult?.localPath) {
+          const illustrationUrl = `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_illustrations/${path.basename(illustrationResult.localPath)}`;
 
-        await Storyteller.findByIdAndUpdate(savedStoryteller._id, {
-          illustration: illustrationUrl
-        });
+          await Storyteller.findByIdAndUpdate(savedStoryteller._id, {
+            illustration: illustrationUrl
+          });
 
-        // Update the object in the list for response
-        savedStoryteller.illustration = illustrationUrl;
+          // Update the object in the list for response
+          savedStoryteller.illustration = illustrationUrl;
+        }
       }
     }
 
@@ -571,7 +592,9 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       message,
       duration,
       debug,
-      mock
+      mock,
+      mock_api_calls,
+      mocked_api_calls
     } = req.body;
 
     if (!sessionId || !playerId || !entityId || !storytellerId) {
@@ -597,7 +620,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       return res.status(404).json({ message: 'Storyteller not found.' });
     }
 
-    const shouldMock = Boolean(debug || mock);
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
     const durationDays = Number.isFinite(Number(duration)) ? Number(duration) : undefined;
 
     await Storyteller.findByIdAndUpdate(

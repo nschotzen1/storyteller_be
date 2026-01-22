@@ -18,7 +18,7 @@ Default port: `5001`.
 ## Request Conventions
 
 - Most routes require `sessionId` and `playerId`.
-- `debug` or `mock` returns mocked outputs and skips external API calls.
+- `debug`, `mock`, or `mocked_api_calls` returns mocked outputs and skips external API calls.
 - `text`, `userText`, or `fragment` are accepted for text input.
 
 ## Core Routes
@@ -36,7 +36,8 @@ Request body:
   "includeCards": true,
   "includeFront": true,
   "includeBack": true,
-  "debug": false
+  "debug": false,
+  "mocked_api_calls": false
 }
 ```
 
@@ -44,7 +45,7 @@ Notes:
 - Use `text`, `userText`, or `fragment` for the input text (the route picks the first provided).
 - `includeCards` defaults to `false`.
 - `includeFront` and `includeBack` default to `true` when cards are requested.
-- `debug` or `mock` returns mock entities/cards without external API calls.
+- `debug`, `mock`, or `mocked_api_calls` returns mock entities/cards without external API calls.
 
 Response (cards included):
 ```json
@@ -106,12 +107,14 @@ Request body:
   "playerId": "player-1",
   "text": "A wind-scoured pass with a rusted watchtower and a lone courier arriving at dusk.",
   "count": 3,
-  "generateKeyImages": false
+  "generateKeyImages": false,
+  "mocked_api_calls": false
 }
 ```
 
 Notes:
 - `count` (or `numberOfStorytellers`) defaults to `3` and is clamped to 1–10.
+- `debug`, `mock`, or `mocked_api_calls` returns mock storytellers without external API calls.
 - Set `generateKeyImages` to `true` to create typewriter key images (requires image service).
 - An illustration for each storyteller is automatically generated and saved.
 
@@ -159,7 +162,8 @@ Request body:
   "storytellingPoints": 12,
   "message": "Investigate the source of the whispering lanterns.",
   "duration": 3,
-  "debug": false
+  "debug": false,
+  "mocked_api_calls": false
 }
 ```
 
@@ -175,6 +179,9 @@ Response (shape):
   "subEntities": []
 }
 ```
+
+Notes:
+- `debug`, `mock`, or `mocked_api_calls` returns a mocked mission outcome and mocked sub-entities.
 
 ### GET `/api/storytellers?sessionId=...&playerId=...`
 
@@ -250,7 +257,8 @@ Request body:
   "sessionId": "demo-1",
   "playerId": "player-1",
   "note": "Focus on hidden dangers or secret factions.",
-  "debug": false
+  "debug": false,
+  "mocked_api_calls": false
 }
 ```
 
@@ -332,7 +340,150 @@ Request body:
 ### /api/brewing/*
 
 Multiplayer brewing room endpoints and SSE (room create/join/ready/start/turn submit/events).
-See `server_new.js` for full route list and payloads.
+
+### POST `/api/brewing/rooms`
+
+Creates a new room.
+
+Response:
+```json
+{
+  "roomId": "ABCD"
+}
+```
+
+### GET `/api/brewing/rooms/:roomId`
+
+Fetches the current room state.
+
+Response (shape):
+```json
+{
+  "roomId": "ABCD",
+  "phase": "lobby",
+  "players": [
+    {
+      "playerId": "player-uuid",
+      "maskId": "mask-1",
+      "maskName": "Mask 1",
+      "displayName": "Ada",
+      "status": "not_ready",
+      "isBot": false
+    }
+  ],
+  "turn": {
+    "index": 0,
+    "activePlayerId": "player-uuid",
+    "round": 1,
+    "totalRounds": 6
+  },
+  "brew": {
+    "summaryLines": ["The cauldron bubbles quietly..."],
+    "vials": [
+      {
+        "id": "vial-uuid",
+        "title": "Essence of Rain",
+        "containerDescription": "A twisted glass bottle emitting faint smoke.",
+        "substanceDescription": "A glowing liquid derived from rain.",
+        "pourEffect": "The universe shudders slightly.",
+        "timestamp": 1700000000000,
+        "addedByMaskId": "mask-1"
+      }
+    ]
+  }
+}
+```
+
+Notes:
+- `privateIngredient` is never returned in public room state.
+
+### POST `/api/brewing/rooms/:roomId/join`
+
+Adds a player to the room.
+
+Request body:
+```json
+{
+  "maskId": "mask-1",
+  "displayName": "Ada"
+}
+```
+
+Response:
+```json
+{
+  "playerId": "player-uuid",
+  "roomState": { "roomId": "ABCD" }
+}
+```
+
+### POST `/api/brewing/rooms/:roomId/players/:playerId/ready`
+
+Sets a player ready state.
+
+Request body:
+```json
+{
+  "ready": true
+}
+```
+
+Response:
+```json
+{
+  "roomId": "ABCD"
+}
+```
+
+### POST `/api/brewing/rooms/:roomId/start`
+
+Moves the room to brewing and starts the first turn.
+
+Response:
+```json
+{
+  "roomId": "ABCD"
+}
+```
+
+### POST `/api/brewing/rooms/:roomId/turn/submit`
+
+Submits an ingredient for the active player.
+
+Headers:
+- `x-player-id: player-uuid`
+
+Request body:
+```json
+{
+  "ingredient": "Rain"
+}
+```
+
+Response:
+```json
+{
+  "ok": true
+}
+```
+
+### GET `/api/brewing/events?roomId=...`
+
+SSE stream of room events. Each event is JSON with `type` and `payload`.
+
+Event examples:
+```json
+{ "type": "CONNECTED", "payload": { "roomId": "ABCD" } }
+{ "type": "PLAYER_JOINED", "payload": { "player": {}, "roomState": {} } }
+{ "type": "PLAYER_READY_CHANGED", "payload": { "playerId": "player-uuid", "status": "ready", "roomState": {} } }
+{ "type": "PHASE_CHANGED", "payload": { "phase": "brewing", "roomState": {} } }
+{ "type": "TURN_STARTED", "payload": { "turn": {} } }
+{ "type": "INGREDIENT_ACCEPTED", "payload": { "playerId": "player-uuid", "text": "Rain" } }
+{ "type": "VIAL_REVEALED", "payload": { "vial": {} } }
+{ "type": "BREW_SUMMARY_UPDATED", "payload": { "summaryLines": [] } }
+{ "type": "TURN_ENDED", "payload": {} }
+{ "type": "BREW_COMPLETED", "payload": { "brew": {} } }
+```
 
 ## Test Flow (Mocked)
 

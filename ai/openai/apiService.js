@@ -25,6 +25,14 @@ export function getOpenaiClient() {
 }
 
 export async function directExternalApiCall(prompts, max_tokens = 2500, temperature, mockedResponse, explicitJsonObjectFormat, isOpenAi) {
+    if (typeof max_tokens === 'object' && max_tokens !== null) {
+        const opts = max_tokens;
+        max_tokens = opts.max_tokens ?? 2500;
+        temperature = opts.temperature;
+        mockedResponse = opts.mockedResponse;
+        explicitJsonObjectFormat = opts.explicitJsonObjectFormat;
+        isOpenAi = opts.isOpenAi;
+    }
     try {
         let rawResp;
         const maxRetries = 3;
