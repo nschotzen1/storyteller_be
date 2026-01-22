@@ -293,3 +293,68 @@ describe('Multiplayer arena flow: two players share session arena', () => {
     expect(remainingArena).toBe(0);
   });
 });
+
+describe('Multiplayer arena flow: cards are shared between players', () => {
+  it('stores cards in the arena and returns them for another player', async () => {
+    const sessionId = 'arena-cards-test-1';
+    const fragment = 'A tideworn observatory glows with soft brass light.';
+
+    const playerOneRes = await request(app)
+      .post(`/api/sessions/${sessionId}/players`)
+      .send({ playerName: 'Ada' })
+      .expect(201);
+
+    const playerTwoRes = await request(app)
+      .post(`/api/sessions/${sessionId}/players`)
+      .send({ playerName: 'Bram' })
+      .expect(201);
+
+    const playerOneId = playerOneRes.body.playerId;
+    const playerTwoId = playerTwoRes.body.playerId;
+
+    const playerOneEntitiesRes = await request(app)
+      .post('/api/textToEntity')
+      .send({
+        sessionId,
+        playerId: playerOneId,
+        text: fragment,
+        includeCards: true,
+        includeFront: true,
+        includeBack: true,
+        debug: true
+      })
+      .expect(200);
+
+    const cards = playerOneEntitiesRes.body.cards || [];
+    const entities = playerOneEntitiesRes.body.entities || [];
+
+    expect(cards.length).toBeGreaterThan(0);
+    expect(entities.length).toBeGreaterThan(0);
+    expect(cards[0].front?.imageUrl).toBeTruthy();
+    expect(cards[0].back?.imageUrl).toBeTruthy();
+
+    const arenaPayload = {
+      entities,
+      storytellers: [],
+      cards
+    };
+
+    const arenaPostRes = await request(app)
+      .post(`/api/sessions/${sessionId}/arena`)
+      .send({ sessionId, playerId: playerOneId, arena: arenaPayload })
+      .expect(200);
+
+    expect(arenaPostRes.body.arena.cards).toHaveLength(cards.length);
+    expect(arenaPostRes.body.arena.cards[0].front?.imageUrl).toBe(cards[0].front?.imageUrl);
+    expect(arenaPostRes.body.arena.cards[0].back?.imageUrl).toBe(cards[0].back?.imageUrl);
+
+    const arenaGetRes = await request(app)
+      .get(`/api/sessions/${sessionId}/arena`)
+      .query({ playerId: playerTwoId })
+      .expect(200);
+
+    expect(arenaGetRes.body.arena.cards).toHaveLength(cards.length);
+    expect(arenaGetRes.body.arena.cards[0].front?.imageUrl).toBe(cards[0].front?.imageUrl);
+    expect(arenaGetRes.body.arena.cards[0].back?.imageUrl).toBe(cards[0].back?.imageUrl);
+  });
+});

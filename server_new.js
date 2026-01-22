@@ -21,6 +21,7 @@ app.use(cors());
 
 const PORT = process.env.PORT || 5001;
 const ASSETS_ROOT = path.resolve(process.cwd(), 'assets');
+const MOCK_STORYTELLER_ILLUSTRATION_URL = '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png';
 
 app.use('/assets', express.static(ASSETS_ROOT));
 
@@ -37,7 +38,8 @@ const MOCK_STORYTELLER = {
   influences: [
     'Ashen Cantos',
     'Voyager Myths'
-  ]
+  ],
+  illustration: MOCK_STORYTELLER_ILLUSTRATION_URL
 };
 
 // --- State Management ---
@@ -515,6 +517,9 @@ app.post('/api/textToStoryteller', async (req, res) => {
         fragmentText,
         ...storytellerData
       };
+      if (shouldMock && !payload.illustration) {
+        payload.illustration = MOCK_STORYTELLER_ILLUSTRATION_URL;
+      }
 
       const savedStoryteller = await Storyteller.findOneAndUpdate(
         { session_id: sessionId, playerId, name: payload.name },
@@ -523,7 +528,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
       );
       savedStorytellers.push(savedStoryteller);
 
-      if (generateKeyImages && payload.typewriter_key?.symbol) {
+      if (!shouldMock && generateKeyImages && payload.typewriter_key?.symbol) {
         const keyImageResult = await createStoryTellerKey(
           payload.typewriter_key,
           sessionId,
@@ -542,22 +547,24 @@ app.post('/api/textToStoryteller', async (req, res) => {
         }
       }
 
-      // Generate Illustration
-      const illustrationResult = await createStorytellerIllustration(
-        payload,
-        sessionId,
-        Boolean(mockImage)
-      );
+      if (!shouldMock) {
+        // Generate Illustration
+        const illustrationResult = await createStorytellerIllustration(
+          payload,
+          sessionId,
+          Boolean(mockImage)
+        );
 
-      if (illustrationResult?.localPath) {
-        const illustrationUrl = `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_illustrations/${path.basename(illustrationResult.localPath)}`;
+        if (illustrationResult?.localPath) {
+          const illustrationUrl = `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_illustrations/${path.basename(illustrationResult.localPath)}`;
 
-        await Storyteller.findByIdAndUpdate(savedStoryteller._id, {
-          illustration: illustrationUrl
-        });
+          await Storyteller.findByIdAndUpdate(savedStoryteller._id, {
+            illustration: illustrationUrl
+          });
 
-        // Update the object in the list for response
-        savedStoryteller.illustration = illustrationUrl;
+          // Update the object in the list for response
+          savedStoryteller.illustration = illustrationUrl;
+        }
       }
     }
 
