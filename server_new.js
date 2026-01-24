@@ -13,6 +13,13 @@ import {
 } from './services/storytellerService.js';
 import { NarrativeEntity } from './storyteller/utils.js';
 import { textToEntityFromText } from './services/textToEntityService.js';
+import {
+  normalizePredicate,
+  getExistingEdgesForEntities,
+  checkDuplicateEdge,
+  evaluateRelationship,
+  calculatePoints
+} from './services/arenaService.js';
 
 
 const app = express();
@@ -716,6 +723,226 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
   } catch (err) {
     console.error('Error in /api/sendStorytellerToEntity:', err);
     return res.status(500).json({ message: 'Server error during storyteller mission.' });
+  }
+});
+
+
+
+// --- Arena Relationships Routes ---
+
+// Propose Relationship
+app.post('/api/arena/relationships/propose', async (req, res) => {
+  try {
+    const {
+      sessionId,
+      playerId,
+      arenaId,
+      source,
+      targets,
+      relationship,
+      options,
+      debug,
+      mock,
+      mock_api_calls,
+      mocked_api_calls
+    } = req.body || {};
+
+    // Validate required parameters
+    if (!sessionId || !playerId) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or playerId.' });
+    }
+    if (!source || (!source.cardId && !source.entityId)) {
+      return res.status(400).json({ message: 'Missing required parameter: source (cardId or entityId).' });
+    }
+    if (!Array.isArray(targets) || targets.length === 0) {
+      return res.status(400).json({ message: 'Missing required parameter: targets array.' });
+    }
+    if (!relationship?.surfaceText) {
+      return res.status(400).json({ message: 'Missing required parameter: relationship.surfaceText.' });
+    }
+
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
+    const dryRun = Boolean(options?.dryRun);
+
+    // Load Arena doc
+    const arenaDoc = await Arena.findOne({ sessionId });
+    const arena = arenaDoc?.arena || { entities: [], storytellers: [], edges: [], scores: {} };
+
+    // Normalize predicate
+    const predicate = relationship.predicateHint
+      ? normalizePredicate(relationship.predicateHint)
+      : normalizePredicate(relationship.surfaceText);
+
+    // Collect all entity IDs involved
+    const involvedEntityIds = [
+      source.cardId || source.entityId,
+      ...targets.map(t => t.cardId || t.entityId)
+    ].filter(Boolean);
+
+    // Get existing edges for context
+    const existingEdges = getExistingEdgesForEntities(arena, involvedEntityIds);
+
+    // Check for duplicate edge
+    const fromId = source.cardId || source.entityId;
+    for (const target of targets) {
+      const toId = target.cardId || target.entityId;
+      const duplicate = checkDuplicateEdge(existingEdges, fromId, toId, predicate);
+      if (duplicate) {
+        return res.status(409).json({
+          message: 'Duplicate edge already exists.',
+          existingEdge: duplicate
+        });
+      }
+    }
+
+    // Evaluate relationship
+    const evaluation = await evaluateRelationship(
+      source,
+      targets,
+      relationship,
+      existingEdges,
+      shouldMock
+    );
+
+    // Handle rejection
+    if (evaluation.verdict !== 'accepted') {
+      return res.status(200).json({
+        verdict: 'rejected',
+        quality: evaluation.quality,
+        suggestions: evaluation.suggestions || []
+      });
+    }
+
+    // If dryRun, return without committing
+    if (dryRun) {
+      return res.status(200).json({
+        verdict: 'accepted',
+        dryRun: true,
+        quality: evaluation.quality,
+        predicate,
+        message: 'Relationship would be accepted (dry run, not committed).'
+      });
+    }
+
+    // Commit edges
+    const createdEdges = [];
+    const edgesArray = Array.isArray(arena.edges) ? arena.edges : [];
+
+    for (const target of targets) {
+      const edge = {
+        edgeId: `edge_${randomUUID().slice(0, 8)}`,
+        fromCardId: source.cardId || source.entityId,
+        toCardId: target.cardId || target.entityId,
+        surfaceText: relationship.surfaceText,
+        predicate,
+        direction: relationship.direction || 'source_to_target',
+        quality: evaluation.quality,
+        createdBy: playerId,
+        createdAt: new Date().toISOString()
+      };
+      edgesArray.push(edge);
+      createdEdges.push(edge);
+    }
+
+    // Calculate and update points
+    const pointsAwarded = calculatePoints(evaluation.quality.score);
+    const scores = arena.scores || {};
+    const previousTotal = scores[playerId] || 0;
+    scores[playerId] = previousTotal + pointsAwarded;
+
+    // Save Arena
+    await Arena.findOneAndUpdate(
+      { sessionId },
+      {
+        $set: {
+          'arena.edges': edgesArray,
+          'arena.scores': scores,
+          lastUpdatedBy: playerId
+        }
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    // Build response
+    const response = {
+      verdict: 'accepted',
+      edge: createdEdges.length === 1 ? createdEdges[0] : createdEdges,
+      points: {
+        awarded: pointsAwarded,
+        playerTotal: scores[playerId],
+        breakdown: [`Base quality score: ${evaluation.quality.score.toFixed(2)} → ${pointsAwarded} points`]
+      },
+      evolution: {
+        affected: targets.map(t => ({
+          cardId: t.cardId || t.entityId,
+          delta: Math.ceil(evaluation.quality.score * 2),
+          changeSummary: `Connection established: "${relationship.surfaceText}"`
+        })),
+        regenSuggested: []
+      },
+      clusters: {
+        touched: [],
+        metrics: []
+      },
+      existingEdgesCount: existingEdges.length,
+      mocked: shouldMock
+    };
+
+    return res.status(200).json(response);
+  } catch (error) {
+    console.error('Error in /api/arena/relationships/propose:', error);
+    return res.status(500).json({ message: 'Server error during relationship proposal.' });
+  }
+});
+
+// Validate Relationship (dry run only)
+app.post('/api/arena/relationships/validate', async (req, res) => {
+  // Force dryRun mode
+  req.body = req.body || {};
+  req.body.options = req.body.options || {};
+  req.body.options.dryRun = true;
+
+  // Forward to propose handler by calling the same logic inline
+  const handler = app._router.stack.find(
+    layer => layer.route?.path === '/api/arena/relationships/propose' && layer.route?.methods?.post
+  );
+
+  if (handler) {
+    return handler.route.stack[0].handle(req, res);
+  }
+
+  return res.status(500).json({ message: 'Validate route configuration error.' });
+});
+
+// Get Arena State (full graph snapshot)
+app.get('/api/arena/state', async (req, res) => {
+  try {
+    const { sessionId, playerId, arenaId } = req.query;
+
+    if (!sessionId || !playerId) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or playerId.' });
+    }
+
+    const arenaDoc = await Arena.findOne({ sessionId }).lean();
+    const arena = arenaDoc?.arena || { entities: [], storytellers: [], edges: [], scores: {}, clusters: [] };
+
+    return res.status(200).json({
+      sessionId,
+      playerId,
+      arenaId: arenaId || 'default',
+      arena: {
+        entities: Array.isArray(arena.entities) ? arena.entities : [],
+        storytellers: Array.isArray(arena.storytellers) ? arena.storytellers : []
+      },
+      edges: Array.isArray(arena.edges) ? arena.edges : [],
+      clusters: Array.isArray(arena.clusters) ? arena.clusters : [],
+      scores: arena.scores || {},
+      lastUpdatedBy: arenaDoc?.lastUpdatedBy,
+      updatedAt: arenaDoc?.updatedAt
+    });
+  } catch (error) {
+    console.error('Error in /api/arena/state:', error);
+    return res.status(500).json({ message: 'Server error during arena state fetch.' });
   }
 });
 
