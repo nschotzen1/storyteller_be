@@ -6,6 +6,7 @@ let NarrativeEntity;
 let Storyteller;
 let SessionPlayer;
 let Arena;
+const DEFAULT_FLOW_DEBUG = process.env.FLOW_DEBUG !== 'false';
 
 jest.setTimeout(20000);
 
@@ -90,7 +91,7 @@ describe('Mocked flow: fragment -> entities -> storyteller -> mission', () => {
     logStep('flow-test: POST /api/textToEntity');
     const entityRes = await request(app)
       .post('/api/textToEntity')
-      .send({ sessionId, playerId, text: fragment, debug: true })
+      .send({ sessionId, playerId, text: fragment, debug: DEFAULT_FLOW_DEBUG })
       .expect(200);
 
     expect(entityRes.body.entities?.length).toBeGreaterThan(0);
@@ -101,7 +102,7 @@ describe('Mocked flow: fragment -> entities -> storyteller -> mission', () => {
     logStep('flow-test: POST /api/textToStoryteller');
     const storytellerRes = await request(app)
       .post('/api/textToStoryteller')
-      .send({ sessionId, playerId, text: fragment, count: 1, debug: true, mockImage: true })
+      .send({ sessionId, playerId, text: fragment, count: 1, debug: DEFAULT_FLOW_DEBUG, mockImage: true })
       .expect(200);
 
     expect(storytellerRes.body.storytellers?.length).toBe(1);
@@ -121,7 +122,7 @@ describe('Mocked flow: fragment -> entities -> storyteller -> mission', () => {
         storytellingPoints: 12,
         message: 'Investigate the whispering lanterns.',
         duration: 3,
-        debug: true
+        debug: DEFAULT_FLOW_DEBUG
       })
       .expect(200);
 
@@ -188,13 +189,13 @@ describe('Multiplayer arena flow: two players share session arena', () => {
     logStep('arena-test: POST /api/textToEntity (player one)');
     const playerOneEntitiesRes = await request(app)
       .post('/api/textToEntity')
-      .send({ sessionId, playerId: playerOneId, text: fragmentOne, debug: true })
+      .send({ sessionId, playerId: playerOneId, text: fragmentOne, debug: DEFAULT_FLOW_DEBUG })
       .expect(200);
 
     logStep('arena-test: POST /api/textToEntity (player two)');
     const playerTwoEntitiesRes = await request(app)
       .post('/api/textToEntity')
-      .send({ sessionId, playerId: playerTwoId, text: fragmentTwo, debug: true })
+      .send({ sessionId, playerId: playerTwoId, text: fragmentTwo, debug: DEFAULT_FLOW_DEBUG })
       .expect(200);
 
     const playerOneEntity = playerOneEntitiesRes.body.entities?.[0];
@@ -208,13 +209,13 @@ describe('Multiplayer arena flow: two players share session arena', () => {
     logStep('arena-test: POST /api/textToStoryteller (player one)');
     const playerOneStorytellerRes = await request(app)
       .post('/api/textToStoryteller')
-      .send({ sessionId, playerId: playerOneId, text: fragmentOne, count: 1, debug: true, mockImage: true })
+      .send({ sessionId, playerId: playerOneId, text: fragmentOne, count: 1, debug: DEFAULT_FLOW_DEBUG, mockImage: true })
       .expect(200);
 
     logStep('arena-test: POST /api/textToStoryteller (player two)');
     const playerTwoStorytellerRes = await request(app)
       .post('/api/textToStoryteller')
-      .send({ sessionId, playerId: playerTwoId, text: fragmentTwo, count: 1, debug: true, mockImage: true })
+      .send({ sessionId, playerId: playerTwoId, text: fragmentTwo, count: 1, debug: DEFAULT_FLOW_DEBUG, mockImage: true })
       .expect(200);
 
     const playerOneStoryteller = playerOneStorytellerRes.body.storytellers?.[0];
@@ -321,7 +322,7 @@ describe('Multiplayer arena flow: cards are shared between players', () => {
         includeCards: true,
         includeFront: true,
         includeBack: true,
-        debug: true
+        debug: DEFAULT_FLOW_DEBUG
       })
       .expect(200);
 

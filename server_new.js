@@ -92,6 +92,7 @@ function getFragmentText(body) {
   return body?.text || body?.userText || body?.fragment || '';
 }
 
+
 function buildLastMissionSummary(storyteller) {
   const missions = Array.isArray(storyteller?.missions) ? storyteller.missions : [];
   if (missions.length === 0) {
