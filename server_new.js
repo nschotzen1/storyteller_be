@@ -4,7 +4,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { BrewRoom } from './models/brewing_models.js';
 import { directExternalApiCall } from './ai/openai/apiService.js';
-import { Storyteller, SessionPlayer, Arena } from './models/models.js';
+import { Storyteller, SessionPlayer, Arena, World, WorldElement } from './models/models.js';
 import {
   generateStoryTellerForFragmentPrompt,
   generateSendStorytellerToEntityPrompt,
@@ -142,6 +142,125 @@ function buildMockStorytellers(count, fragmentText) {
   return [baseStoryteller, ...fallbackStorytellers].slice(0, count);
 }
 
+function buildMockWorld(seedText, name) {
+  return {
+    name: name || 'The Shale Meridian',
+    summary: 'A salt-crusted inland sea holds the last trade routes between cliffside cities and drifting shrine-islands.',
+    tone: 'weathered, luminous, quietly political',
+    pillars: [
+      'scarcity-driven diplomacy',
+      'ancient machines waking with the tides',
+      'ritual navigation through living storms'
+    ],
+    themes: [
+      'oaths and debt',
+      'memory as currency',
+      'survival through fragile alliances'
+    ],
+    palette: ['ash white', 'oxidized copper', 'glacier blue']
+  };
+}
+
+function buildMockElements(type, count) {
+  const templates = {
+    faction: [
+      {
+        name: 'The Tide Ledger',
+        description: 'A merchant synod that writes contracts into barnacle-shell tablets.',
+        tags: ['trade', 'ritual', 'law'],
+        traits: ['meticulous', 'soft-spoken', 'ruthless on debt'],
+        hooks: ['They need an oathbreaker retrieved from a storm-tower.']
+      },
+      {
+        name: 'Basilisk Pilgrims',
+        description: 'Nomadic archivists who follow the footsteps of a petrified sea-god.',
+        tags: ['nomads', 'faith', 'relics'],
+        traits: ['patient', 'cryptic', 'unyielding'],
+        hooks: ['They offer a relic if you translate a forbidden tide-script.']
+      }
+    ],
+    location: [
+      {
+        name: 'Redwake Steps',
+        description: 'Terraced docks carved into a canyon, glowing with bioluminescent kelp.',
+        tags: ['port', 'ritual', 'market'],
+        traits: ['crowded', 'humid', 'whispering'],
+        hooks: ['A storm-gate opens here for one night each season.']
+      },
+      {
+        name: 'The Glass Brine',
+        description: 'A mirror-slick salt flat where ancient machines rise at dusk.',
+        tags: ['ruins', 'mystery', 'hazard'],
+        traits: ['silent', 'reflective', 'electric'],
+        hooks: ['A lost convoy is frozen inside the salt.']
+      }
+    ],
+    rumor: [
+      {
+        name: 'The Ninth Tide',
+        description: 'A storm cycle returns that erases written contracts from stone.',
+        tags: ['omen', 'storms'],
+        traits: ['urgent', 'contested'],
+        hooks: ['Find the missing contract before the Ninth Tide hits.']
+      },
+      {
+        name: 'Salt-Sworn Ghosts',
+        description: 'Sailors report a choir singing coordinates from beneath the sea.',
+        tags: ['ghosts', 'navigation'],
+        traits: ['haunting', 'specific'],
+        hooks: ['Follow the coordinates to a buried vault.']
+      }
+    ],
+    lore: [
+      {
+        name: 'The First Beacon Pact',
+        description: 'The cliff cities keep a living beacon fueled by the last emberwood grove.',
+        tags: ['history', 'pact'],
+        traits: ['solemn', 'foundational'],
+        hooks: ['The grove is dying; who broke the pact?']
+      },
+      {
+        name: 'The Brine Alphabet',
+        description: 'A script etched into saltglass that only appears at low tide.',
+        tags: ['language', 'mystery'],
+        traits: ['fragile', 'cyclical'],
+        hooks: ['Decode a message before the tide returns.']
+      }
+    ]
+  };
+
+  const source = templates[type] || [];
+  const results = [];
+  for (let i = 0; i < Math.max(1, count); i++) {
+    results.push(source[i % source.length]);
+  }
+  return results;
+}
+
+function buildWorldPrompt(seedText, name) {
+  return `You are a worldbuilding designer. Return JSON only.
+Create a setting for a cooperative narrative game.
+Seed: "${seedText}"
+${name ? `World name hint: "${name}"` : ''}
+Return JSON with keys:
+name, summary (1-2 sentences), tone (3-6 words), pillars (3-5), themes (3-5), palette (3-5 evocative color/texture phrases).`;
+}
+
+function buildWorldElementsPrompt(type, world, seedText, count) {
+  return `You are a worldbuilding designer. Return JSON only.
+World name: "${world.name}"
+World tone: "${world.tone || ''}"
+World summary: "${world.summary || ''}"
+Seed: "${seedText || world.seedText}"
+Create ${count} ${type} entries for this world.
+Return JSON as an array of objects with:
+name, description (1-2 sentences), tags (3-5), traits (2-4), hooks (1-2).`;
+}
+
+async function findWorldForPlayer(sessionId, playerId, worldId) {
+  return World.findOne({ worldId, sessionId, playerId });
+}
+
 function normalizeArenaPayload(arena) {
   const payload = arena && typeof arena === 'object' ? arena : {};
   return {
@@ -277,6 +396,181 @@ app.post('/api/sessions/:sessionId/arena', async (req, res) => {
     return res.status(500).json({ message: 'Server error during arena update.' });
   }
 });
+
+// Worldbuilding Routes
+app.post('/api/worlds', async (req, res) => {
+  try {
+    const { sessionId, playerId, seedText, name, debug, mock, mock_api_calls, mocked_api_calls } = req.body || {};
+
+    if (!sessionId || !playerId || !seedText) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or seedText.' });
+    }
+
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
+    let worldData;
+
+    if (shouldMock) {
+      worldData = buildMockWorld(seedText, name);
+    } else {
+      const prompt = buildWorldPrompt(seedText, name);
+      worldData = await directExternalApiCall(
+        [{ role: 'system', content: prompt }],
+        1200,
+        undefined,
+        undefined,
+        true,
+        true
+      );
+    }
+
+    if (!worldData || typeof worldData !== 'object') {
+      return res.status(502).json({ message: 'World generation failed.' });
+    }
+
+    const world = await World.create({
+      worldId: randomUUID(),
+      sessionId,
+      playerId,
+      seedText,
+      name: worldData.name || name || 'Untitled World',
+      summary: worldData.summary || '',
+      tone: worldData.tone || '',
+      pillars: Array.isArray(worldData.pillars) ? worldData.pillars : [],
+      themes: Array.isArray(worldData.themes) ? worldData.themes : [],
+      palette: Array.isArray(worldData.palette) ? worldData.palette : []
+    });
+
+    return res.status(201).json({ world, mocked: shouldMock });
+  } catch (error) {
+    console.error('Error in /api/worlds:', error);
+    return res.status(500).json({ message: 'Server error during world creation.' });
+  }
+});
+
+app.get('/api/worlds', async (req, res) => {
+  try {
+    const { sessionId, playerId } = req.query;
+    if (!sessionId || !playerId) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or playerId.' });
+    }
+
+    const worlds = await World.find({ sessionId, playerId }).sort({ createdAt: 1 });
+    return res.status(200).json({ sessionId, worlds });
+  } catch (error) {
+    console.error('Error in /api/worlds (GET):', error);
+    return res.status(500).json({ message: 'Server error during world listing.' });
+  }
+});
+
+app.get('/api/worlds/:worldId', async (req, res) => {
+  try {
+    const { worldId } = req.params;
+    const { sessionId, playerId } = req.query;
+    if (!sessionId || !playerId) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or playerId.' });
+    }
+
+    const world = await findWorldForPlayer(sessionId, playerId, worldId);
+    if (!world) {
+      return res.status(404).json({ message: 'World not found.' });
+    }
+
+    return res.status(200).json({ world });
+  } catch (error) {
+    console.error('Error in /api/worlds/:worldId (GET):', error);
+    return res.status(500).json({ message: 'Server error during world fetch.' });
+  }
+});
+
+app.get('/api/worlds/:worldId/state', async (req, res) => {
+  try {
+    const { worldId } = req.params;
+    const { sessionId, playerId } = req.query;
+    if (!sessionId || !playerId) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or playerId.' });
+    }
+
+    const world = await findWorldForPlayer(sessionId, playerId, worldId);
+    if (!world) {
+      return res.status(404).json({ message: 'World not found.' });
+    }
+
+    const elements = await WorldElement.find({ worldId, sessionId, playerId }).sort({ createdAt: 1 });
+    const grouped = elements.reduce((acc, element) => {
+      acc[element.type] = acc[element.type] || [];
+      acc[element.type].push(element);
+      return acc;
+    }, {});
+
+    return res.status(200).json({ world, elements: grouped });
+  } catch (error) {
+    console.error('Error in /api/worlds/:worldId/state:', error);
+    return res.status(500).json({ message: 'Server error during world state fetch.' });
+  }
+});
+
+async function handleWorldElements(req, res, type) {
+  try {
+    const { worldId } = req.params;
+    const { sessionId, playerId, count, seedText, debug, mock, mock_api_calls, mocked_api_calls } = req.body || {};
+
+    if (!sessionId || !playerId) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or playerId.' });
+    }
+
+    const world = await findWorldForPlayer(sessionId, playerId, worldId);
+    if (!world) {
+      return res.status(404).json({ message: 'World not found.' });
+    }
+
+    const requestedCount = Number.isFinite(Number(count)) ? Math.max(1, Math.min(6, Number(count))) : 3;
+    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
+    let elementsData;
+
+    if (shouldMock) {
+      elementsData = buildMockElements(type, requestedCount);
+    } else {
+      const prompt = buildWorldElementsPrompt(type, world, seedText, requestedCount);
+      const result = await directExternalApiCall(
+        [{ role: 'system', content: prompt }],
+        1400,
+        undefined,
+        undefined,
+        true,
+        true
+      );
+      elementsData = Array.isArray(result) ? result : result?.elements;
+    }
+
+    if (!Array.isArray(elementsData) || elementsData.length === 0) {
+      return res.status(502).json({ message: 'World element generation failed.' });
+    }
+
+    const payloads = elementsData.slice(0, requestedCount).map((element) => ({
+      worldId,
+      sessionId,
+      playerId,
+      type,
+      name: element?.name || `${type} ${randomUUID().slice(0, 4)}`,
+      description: element?.description || '',
+      tags: Array.isArray(element?.tags) ? element.tags : [],
+      traits: Array.isArray(element?.traits) ? element.traits : [],
+      hooks: Array.isArray(element?.hooks) ? element.hooks : []
+    }));
+
+    const saved = await WorldElement.insertMany(payloads);
+
+    return res.status(201).json({ worldId, type, elements: saved, mocked: shouldMock });
+  } catch (error) {
+    console.error(`Error in /api/worlds/:worldId/${type}:`, error);
+    return res.status(500).json({ message: 'Server error during world element generation.' });
+  }
+}
+
+app.post('/api/worlds/:worldId/factions', (req, res) => handleWorldElements(req, res, 'faction'));
+app.post('/api/worlds/:worldId/locations', (req, res) => handleWorldElements(req, res, 'location'));
+app.post('/api/worlds/:worldId/rumors', (req, res) => handleWorldElements(req, res, 'rumor'));
+app.post('/api/worlds/:worldId/lore', (req, res) => handleWorldElements(req, res, 'lore'));
 
 // List Storytellers
 app.get('/api/storytellers', async (req, res) => {

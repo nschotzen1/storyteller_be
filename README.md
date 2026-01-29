@@ -96,6 +96,84 @@ Response (cards included):
 }
 ```
 
+### POST `/api/worlds`
+
+Creates a world from a seed fragment and stores it for the session/player.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "seedText": "A trade sea of salt glass, where storms rewrite maps each season.",
+  "name": "The Shale Meridian",
+  "debug": true
+}
+```
+
+Response:
+```json
+{
+  "world": {
+    "worldId": "e1a2b3c4-d5f6-7890-1234-56789abcdeff",
+    "sessionId": "demo-1",
+    "playerId": "player-1",
+    "seedText": "A trade sea of salt glass, where storms rewrite maps each season.",
+    "name": "The Shale Meridian",
+    "summary": "A salt-crusted inland sea holds the last trade routes...",
+    "tone": "weathered, luminous, quietly political",
+    "pillars": ["scarcity-driven diplomacy", "ancient machines waking with the tides"],
+    "themes": ["oaths and debt", "memory as currency"],
+    "palette": ["ash white", "oxidized copper", "glacier blue"]
+  },
+  "mocked": true
+}
+```
+
+### POST `/api/worlds/:worldId/factions|locations|rumors|lore`
+
+Generates world elements for a given world and stores them.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "count": 2,
+  "debug": true
+}
+```
+
+Response:
+```json
+{
+  "worldId": "e1a2b3c4-d5f6-7890-1234-56789abcdeff",
+  "type": "faction",
+  "elements": [
+    {
+      "name": "The Tide Ledger",
+      "description": "A merchant synod that writes contracts...",
+      "tags": ["trade", "ritual", "law"],
+      "traits": ["meticulous", "soft-spoken"],
+      "hooks": ["They need an oathbreaker retrieved..."]
+    }
+  ],
+  "mocked": true
+}
+```
+
+### GET `/api/worlds?sessionId=...&playerId=...`
+
+Lists worlds for the session/player.
+
+### GET `/api/worlds/:worldId?sessionId=...&playerId=...`
+
+Fetches a single world.
+
+### GET `/api/worlds/:worldId/state?sessionId=...&playerId=...`
+
+Returns the world plus grouped elements by type.
+
 ### POST `/api/textToStoryteller`
 
 Generates storyteller personas from a fragment and saves them.
