@@ -20,6 +20,12 @@ import {
   evaluateRelationship,
   calculatePoints
 } from './services/arenaService.js';
+import {
+  getClusterForEntities,
+  createRelationship,
+  syncEntityNode,
+  buildClusterContext
+} from './services/neo4jService.js';
 
 
 const app = express();
@@ -1077,6 +1083,16 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
     // Get existing edges for context
     const existingEdges = getExistingEdgesForEntities(arena, involvedEntityIds);
 
+    // Query Neo4j for cluster context (graceful fallback if Neo4j unavailable)
+    let clusterContext = null;
+    let cluster = null;
+    try {
+      cluster = await getClusterForEntities(sessionId, involvedEntityIds);
+      clusterContext = buildClusterContext(cluster);
+    } catch (neo4jError) {
+      console.warn('Neo4j cluster query failed (continuing without cluster context):', neo4jError.message);
+    }
+
     // Check for duplicate edge
     const fromId = source.cardId || source.entityId;
     for (const target of targets) {
@@ -1090,13 +1106,14 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
       }
     }
 
-    // Evaluate relationship
+    // Evaluate relationship (with cluster context)
     const evaluation = await evaluateRelationship(
       source,
       targets,
       relationship,
       existingEdges,
-      shouldMock
+      shouldMock,
+      clusterContext
     );
 
     // Handle rejection
@@ -1145,7 +1162,7 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
     const previousTotal = scores[playerId] || 0;
     scores[playerId] = previousTotal + pointsAwarded;
 
-    // Save Arena
+    // Save Arena to MongoDB
     await Arena.findOneAndUpdate(
       { sessionId },
       {
@@ -1157,6 +1174,22 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
+
+    // Sync to Neo4j (graceful fallback if unavailable)
+    try {
+      // Sync source entity node
+      await syncEntityNode(sessionId, source);
+      // Sync target entity nodes
+      for (const target of targets) {
+        await syncEntityNode(sessionId, target);
+      }
+      // Create relationships in Neo4j
+      for (const edge of createdEdges) {
+        await createRelationship(sessionId, edge);
+      }
+    } catch (neo4jError) {
+      console.warn('Neo4j sync failed (MongoDB updated successfully):', neo4jError.message);
+    }
 
     // Build response
     const response = {
@@ -1176,8 +1209,8 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
         regenSuggested: []
       },
       clusters: {
-        touched: [],
-        metrics: []
+        touched: cluster?.entities?.map(e => e.entityId) || [],
+        metrics: cluster ? [{ entitiesInCluster: cluster.entities?.length || 0, relationshipsInCluster: cluster.relationships?.length || 0 }] : []
       },
       existingEdgesCount: existingEdges.length,
       mocked: shouldMock

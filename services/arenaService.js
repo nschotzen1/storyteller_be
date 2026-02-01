@@ -97,12 +97,18 @@ export function buildMockJudgment(source, targets, relationship, existingEdges) 
  * @param {Object} relationship 
  * @param {Array} existingEdges 
  * @param {boolean} shouldMock 
+ * @param {string} clusterContext - Formatted cluster context string (optional)
  * @returns {Promise<Object>}
  */
-export async function evaluateRelationship(source, targets, relationship, existingEdges, shouldMock) {
+export async function evaluateRelationship(source, targets, relationship, existingEdges, shouldMock, clusterContext = null) {
     if (shouldMock) {
         return buildMockJudgment(source, targets, relationship, existingEdges);
     }
+
+    // Build cluster context section
+    const clusterSection = clusterContext
+        ? `\n- Cluster context (connected entities and relationships):\n${clusterContext}`
+        : '';
 
     // Real mode: use LLM for judgment
     const prompt = `You are a worldbuilding judge for a collaborative storytelling game.
@@ -111,13 +117,14 @@ A player proposes a relationship between entities in an arena:
 - Source: ${JSON.stringify(source)}
 - Targets: ${JSON.stringify(targets)}
 - Proposed relationship: "${relationship.surfaceText}"
-- Existing connections: ${JSON.stringify(existingEdges.slice(0, 5))}
+- Existing direct connections: ${JSON.stringify(existingEdges.slice(0, 5))}${clusterSection}
 
 Evaluate this relationship on:
 1. Type coherence (does it make sense for these entity types?)
 2. Specificity (is it descriptive, not vague?)
 3. Non-redundancy (is it different from existing edges?)
 4. Narrative grounding (does it feel plausible in this world?)
+5. Cluster coherence (does it fit with the broader network of relationships?)
 
 Return JSON:
 {

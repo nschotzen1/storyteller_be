@@ -415,6 +415,130 @@ Request body:
 }
 ```
 
+### Arena Relationships (Graph-Based)
+
+The arena supports relationship creation between entities. Relationships are evaluated by an LLM for quality and stored in both MongoDB (for persistence) and Neo4j (for graph traversal).
+
+#### Architecture
+
+```
+┌─────────────────┐     ┌─────────────────┐
+│    MongoDB      │     │     Neo4j       │
+│  (Arena State)  │     │  (Graph Store)  │
+│                 │     │                 │
+│  - entities     │     │  Entity Nodes   │
+│  - edges        │◄───►│  Relationships  │
+│  - scores       │     │  Cluster Query  │
+└─────────────────┘     └─────────────────┘
+```
+
+#### Setup
+
+Start Neo4j alongside MongoDB:
+
+```bash
+docker-compose up -d
+```
+
+Neo4j browser: http://localhost:7474 (login: `neo4j` / `storyteller123`)
+
+#### POST `/api/arena/relationships/propose`
+
+Proposes a relationship between entities. The endpoint:
+1. Queries Neo4j for the **cluster context** (connected entities within 2 hops)
+2. Evaluates the relationship using an LLM with cluster awareness
+3. On acceptance: saves to MongoDB AND Neo4j
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "source": { "entityId": "entity-abc" },
+  "targets": [{ "entityId": "entity-xyz" }],
+  "relationship": {
+    "surfaceText": "sometimes seen at the summit during storms",
+    "direction": "source_to_target"
+  },
+  "options": { "dryRun": false },
+  "debug": false
+}
+```
+
+Notes:
+- `source` and `targets` can use `entityId` or `cardId`
+- `targets` is an array—you can connect one source to multiple targets
+- `surfaceText` should be descriptive (>10 chars) for higher quality scores
+- `dryRun: true` evaluates without committing
+
+Response (accepted):
+```json
+{
+  "verdict": "accepted",
+  "edge": {
+    "edgeId": "edge_abc12345",
+    "fromCardId": "entity-abc",
+    "toCardId": "entity-xyz",
+    "surfaceText": "sometimes seen at the summit during storms",
+    "predicate": "sometimes_seen_at_the_summit_during_storms",
+    "quality": { "score": 0.85, "confidence": 0.8, "reasons": ["..."] }
+  },
+  "points": {
+    "awarded": 18,
+    "playerTotal": 42,
+    "breakdown": ["Base quality score: 0.85 → 18 points"]
+  },
+  "clusters": {
+    "touched": ["entity-abc", "entity-xyz", "entity-related"],
+    "metrics": [{ "entitiesInCluster": 5, "relationshipsInCluster": 3 }]
+  },
+  "evolution": {
+    "affected": [{ "cardId": "entity-xyz", "delta": 2, "changeSummary": "..." }]
+  }
+}
+```
+
+Response (rejected):
+```json
+{
+  "verdict": "rejected",
+  "quality": { "score": 0.35, "confidence": 0.6, "reasons": ["Relationship text is too brief"] },
+  "suggestions": [
+    { "predicate": "sometimes_seen_at", "surfaceText": "sometimes seen at" }
+  ]
+}
+```
+
+#### POST `/api/arena/relationships/validate`
+
+Dry-run validation—same as propose with `dryRun: true`.
+
+#### GET `/api/arena/state`
+
+Returns the full arena graph snapshot including all edges.
+
+Query params: `sessionId`, `playerId`, `arenaId` (optional)
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "arena": { "entities": [...], "storytellers": [...] },
+  "edges": [
+    {
+      "edgeId": "edge_abc12345",
+      "fromCardId": "entity-abc",
+      "toCardId": "entity-xyz",
+      "surfaceText": "sometimes seen at the summit during storms",
+      "predicate": "sometimes_seen_at_the_summit_during_storms",
+      "quality": { "score": 0.85 }
+    }
+  ],
+  "scores": { "player-1": 42 },
+  "clusters": []
+}
+```
+
 ### /api/brewing/*
 
 Multiplayer brewing room endpoints and SSE (room create/join/ready/start/turn submit/events).

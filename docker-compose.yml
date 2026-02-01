@@ -14,5 +14,18 @@ services:
       # Option B: (Uncomment the next line and comment out Option A if you prefer a bind mount)
       # - ./data:/data/db
 
+  neo4j:
+    image: neo4j:5-community
+    container_name: neo4j
+    restart: always
+    ports:
+      - "7474:7474"   # HTTP (Browser)
+      - "7687:7687"   # Bolt (Driver)
+    environment:
+      - NEO4J_AUTH=neo4j/storyteller123
+    volumes:
+      - neo4j_data:/data
+
 volumes:
   mongodb_data:
+  neo4j_data:
