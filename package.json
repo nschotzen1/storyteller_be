@@ -5,7 +5,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "cleanup:persistent-relationships": "node scripts/cleanup_persistent_relationships_test.js"
   },
   "author": "",
   "license": "ISC",

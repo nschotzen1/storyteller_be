@@ -707,3 +707,16 @@ Notes:
 - `storytellingPoints` and `message` are required.
 - `duration` is expected in days.
 - Use `debug` or `mock` to return a mocked outcome and mocked sub-entities.
+
+## Persistent Arena Relationship Test
+
+`arena_relationships_persist.e2e.test.js` creates entities and relationships and intentionally leaves data in MongoDB + Neo4j for inspection.
+
+Identifiers used by the test:
+- `sessionId`: `persistent-relationships-test`
+- `playerId`: `persistent-player`
+
+Cleanup command:
+```bash
+npm run cleanup:persistent-relationships
+```
