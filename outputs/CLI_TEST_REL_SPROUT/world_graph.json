@@ -1,0 +1,124 @@
+[
+  {
+    "narrative_weight": 85,
+    "name": "The Sovereign Keeper",
+    "description": "A figure cloaked in silver-threaded twilight mist, keeper of the sovereign paths. (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: cters, locations, objects) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure)",
+    "entityId": "ent_1770066499157_1",
+    "sessionId": "CLI_TEST_REL_SPROUT",
+    "type": "CHARACTER",
+    "slug": "the-sovereign-keeper",
+    "relationships": [
+      {
+        "type": "RELATES_TO",
+        "target": "the-iron-bound-door",
+        "props": {
+          "createdAt": "2026-02-02T22:21:04.697Z",
+          "predicate": "connected_to",
+          "edgeId": "edge_L_SPROUT_connect_cycle_1",
+          "createdBy": "player_L_SPROUT_0",
+          "qualityScore": 0.75,
+          "surfaceText": "connected to",
+          "direction": "source_to_target"
+        }
+      }
+    ]
+  },
+  {
+    "narrative_weight": 90,
+    "name": "The Iron-Bound Door",
+    "description": "A massive slab of black oak reinforced with rusted iron bands. It stands alone in the center of the threshold. (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: Named elements: characters, locations, objects) (Reflecting: cters, locations, objects) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure) (Reflecting: nt dominant theme: figure)",
+    "entityId": "ent_1770066499157_door",
+    "sessionId": "CLI_TEST_REL_SPROUT",
+    "type": "OBJECT",
+    "slug": "the-iron-bound-door",
+    "relationships": []
+  },
+  {
+    "narrative_weight": 0,
+    "name": "The Shadow of Auto",
+    "description": "A specific manifestation of the luminosity found within Auto.",
+    "entityId": "ent_1770066499157_the-shadow-of-auto",
+    "sessionId": "CLI_TEST_REL_SPROUT",
+    "type": "LOCATION",
+    "slug": "the-shadow-of-auto",
+    "updatedAt": {
+      "year": {
+        "low": 2026,
+        "high": 0
+      },
+      "month": {
+        "low": 2,
+        "high": 0
+      },
+      "day": {
+        "low": 2,
+        "high": 0
+      },
+      "hour": {
+        "low": 22,
+        "high": 0
+      },
+      "minute": {
+        "low": 21,
+        "high": 0
+      },
+      "second": {
+        "low": 4,
+        "high": 0
+      },
+      "nanosecond": {
+        "low": 553000000,
+        "high": 0
+      },
+      "timeZoneOffsetSeconds": {
+        "low": 0,
+        "high": 0
+      }
+    },
+    "relationships": []
+  },
+  {
+    "narrative_weight": 0,
+    "name": "The Bridge of 1 and door",
+    "description": "A manifestation of the relationship between ent 1770066499157 1 and ent 1770066499157 door. It represents the connected to that binds them together.",
+    "entityId": "ent_deriv_584648850",
+    "sessionId": "CLI_TEST_REL_SPROUT",
+    "type": "OBJECT",
+    "slug": "the-bridge-of-1-and-door",
+    "updatedAt": {
+      "year": {
+        "low": 2026,
+        "high": 0
+      },
+      "month": {
+        "low": 2,
+        "high": 0
+      },
+      "day": {
+        "low": 2,
+        "high": 0
+      },
+      "hour": {
+        "low": 22,
+        "high": 0
+      },
+      "minute": {
+        "low": 21,
+        "high": 0
+      },
+      "second": {
+        "low": 4,
+        "high": 0
+      },
+      "nanosecond": {
+        "low": 737000000,
+        "high": 0
+      },
+      "timeZoneOffsetSeconds": {
+        "low": 0,
+        "high": 0
+      }
+    },
+    "relationships": []
+  }
+]

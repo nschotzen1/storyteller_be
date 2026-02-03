@@ -129,7 +129,9 @@ const StorytellerSchema = new mongoose.Schema({
   },
   influences: { type: [String] },
   known_universes: { type: [String] },
-  level: { type: Number },
+  level: { type: Number, default: 1 },
+  experience: { type: Number, default: 0 },
+  totalStorytellingPoints: { type: Number, default: 0 },
   voice_creation: {
     voice: { type: String },
     age: { type: String },

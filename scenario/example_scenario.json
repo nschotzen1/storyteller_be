@@ -1,0 +1,45 @@
+{
+    "seed": 42,
+    "fragment": "A wind-scoured pass with a rusted watchtower and a lone courier arriving at dusk.",
+    "players": {
+        "count": 2
+    },
+    "universe": {
+        "generate_storytellers": true,
+        "storyteller_count": 3,
+        "memory_count": 5
+    },
+    "mock_overrides": {
+        "generate_memories": true,
+        "generate_entities": true,
+        "generate_storytellers": true,
+        "validate_connection": true,
+        "storyteller_investigate": true
+    },
+    "steps": [
+        {
+            "id": "step_1",
+            "action": "PLACE_AND_CONNECT",
+            "player_seat": 0,
+            "source_card_id": "auto",
+            "target_card_ids": [
+                "auto"
+            ],
+            "relationship": {
+                "surfaceText": "watches over the approach to",
+                "direction": "source_to_target"
+            }
+        },
+        {
+            "id": "step_2",
+            "action": "ACQUIRE_STORYTELLER",
+            "player_seat": 1
+        },
+        {
+            "id": "step_3",
+            "action": "SEND_STORYTELLER",
+            "player_seat": 1,
+            "message": "Investigate the source of the whispering lanterns."
+        }
+    ]
+}

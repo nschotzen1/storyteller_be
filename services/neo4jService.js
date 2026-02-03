@@ -64,17 +64,21 @@ export async function syncEntityNode(sessionId, entity) {
 
         const result = await session.run(
             `MERGE (e:Entity {entityId: $entityId, sessionId: $sessionId})
-       SET e.name = $name,
+       SET e.slug = $slug,
+           e.name = $name,
            e.type = $type,
            e.description = $description,
+           e.narrative_weight = $narrative_weight,
            e.updatedAt = datetime()
        RETURN e`,
             {
                 entityId: String(entityId),
                 sessionId: String(sessionId),
+                slug: entity.slug || '',
                 name: entity.name || entity.entityName || 'Unknown',
                 type: entity.ner_type || entity.type || 'ENTITY',
-                description: entity.description || ''
+                description: entity.description || '',
+                narrative_weight: entity.narrative_weight || 0
             }
         );
 
@@ -320,4 +324,251 @@ export function buildClusterContext(cluster) {
     }
 
     return lines.join('\n');
+}
+/**
+ * Create a session node in Neo4j.
+ */
+export async function createSession(sessionId, seed, fragment) {
+    const session = getSession();
+    try {
+        await session.run(
+            `MERGE (s:Session {sessionId: $sessionId})
+       SET s.seed = $seed,
+           s.fragment = $fragment,
+           s.createdAt = datetime()`,
+            { sessionId: String(sessionId), seed: Number(seed), fragment: String(fragment) }
+        );
+    } finally {
+        await session.close();
+    }
+}
+
+/**
+ * Update an entity's description in the graph.
+ */
+export async function updateEntityDescription(sessionId, entityId, newDescription) {
+    if (!driver) return;
+    const session = driver.session();
+    try {
+        await session.run(`
+            MATCH (e:Entity { entityId: $entityId, sessionId: $sessionId })
+            SET e.description = $newDescription
+        `, { entityId: String(entityId), sessionId: String(sessionId), newDescription: String(newDescription) });
+    } finally {
+        await session.close();
+    }
+}
+
+/**
+ * Update a specific property of an entity in Neo4j.
+ */
+export async function updateEntityProperty(sessionId, entityId, property, newValue) {
+    if (!driver) return;
+    const session = driver.session();
+    try {
+        await session.run(`
+            MATCH (e:Entity { sessionId: $sessionId })
+            WHERE e.entityId = $entityId OR e.slug = $entityId OR e.name = $entityId
+            SET e += $props
+        `, {
+            entityId: String(entityId),
+            sessionId: String(sessionId),
+            props: { [property]: String(newValue) }
+        });
+    } finally {
+        await session.close();
+    }
+}
+
+/**
+ * Persist players as nodes in Neo4j.
+ */
+export async function persistPlayers(sessionId, players) {
+    const session = getSession();
+    try {
+        for (const player of players) {
+            await session.run(
+                `MATCH (s:Session {sessionId: $sessionId})
+         MERGE (p:Player {playerId: $playerId, sessionId: $sessionId})
+         SET p.seat = $seat, p.name = $name
+         MERGE (p)-[:IN_SESSION]->(s)`,
+                {
+                    sessionId: String(sessionId),
+                    playerId: String(player.id),
+                    seat: Number(player.seat),
+                    name: String(player.name)
+                }
+            );
+        }
+    } finally {
+        await session.close();
+    }
+}
+
+/**
+ * Create memories as nodes in Neo4j.
+ */
+export async function createMemories(sessionId, memories) {
+    const session = getSession();
+    try {
+        for (const mem of memories) {
+            await session.run(
+                `MATCH (s:Session {sessionId: $sessionId})
+         MERGE (m:Memory {id: $id, sessionId: $sessionId})
+         SET m.content = $content, m.intensity = $intensity
+         MERGE (m)-[:IN_ARENA]->(s)`,
+                {
+                    sessionId: String(sessionId),
+                    id: String(mem.id),
+                    content: String(mem.content),
+                    intensity: Number(mem.intensity || 0.5)
+                }
+            );
+        }
+    } finally {
+        await session.close();
+    }
+}
+
+/**
+ * Create storytellers as nodes in Neo4j.
+ */
+export async function createStorytellers(sessionId, storytellers) {
+    const session = getSession();
+    try {
+        for (const st of storytellers) {
+            await session.run(
+                `MATCH (s:Session {sessionId: $sessionId})
+         MERGE (t:Storyteller {name: $name, sessionId: $sessionId})
+         SET t.style = $style, t.level = $level
+         MERGE (t)-[:IN_ARENA]->(s)`,
+                {
+                    sessionId: String(sessionId),
+                    name: String(st.name),
+                    style: String(st.style || ''),
+                    level: Number(st.level || 10)
+                }
+            );
+        }
+    } finally {
+        await session.close();
+    }
+}
+
+/**
+ * Create entities and deal to player in Neo4j.
+ */
+export async function createEntitiesAndDealToPlayer(sessionId, player, entities) {
+    const session = getSession();
+    try {
+        for (const ent of entities) {
+            await session.run(
+                `MATCH (p:Player {playerId: $playerId, sessionId: $sessionId})
+         MERGE (e:Entity {entityId: $id, sessionId: $sessionId})
+         SET e.slug = $slug, e.name = $name, e.type = $type, e.description = $description, e.narrative_weight = $narrative_weight
+         MERGE (e)-[:IN_HAND]->(p)`,
+                {
+                    sessionId: String(sessionId),
+                    playerId: String(player.id),
+                    id: String(ent.id),
+                    slug: String(ent.slug || ''),
+                    name: String(ent.name),
+                    type: String(ent.type || 'UNKNOWN'),
+                    description: String(ent.description || ''),
+                    narrative_weight: ent.narrative_weight || 0
+                }
+            );
+        }
+    } finally {
+        await session.close();
+    }
+}
+
+/**
+ * Export full graph snapshot for a session.
+ */
+export async function exportGraphSnapshot(sessionId) {
+    const session = getSession();
+    try {
+        const result = await session.run(
+            `MATCH (n {sessionId: $sessionId})
+       OPTIONAL MATCH (n)-[r]->(m {sessionId: $sessionId})
+       RETURN collect(distinct n) as nodes, 
+              collect(distinct {
+                start: id(n), 
+                end: id(m), 
+                type: type(r), 
+                props: properties(r)
+              }) as relationships`,
+            { sessionId: String(sessionId) }
+        );
+
+        const record = result.records[0];
+        const nodes = record?.get('nodes') || [];
+        const relationships = record?.get('relationships') || [];
+
+        return {
+            nodes: nodes.map(n => ({ labels: n.labels, properties: n.properties })),
+            relationships: relationships.filter(r => r.end !== null)
+        };
+    } finally {
+        await session.close();
+    }
+}
+
+/**
+ * Calculate physics metrics for a session's narrative cluster.
+ * 
+ * @param {string} sessionId 
+ * @returns {Promise<{totalMass: number, bindingEnergy: number, density: number, entityCount: number, connectionCount: number}>}
+ */
+export async function calculateClusterMetrics(sessionId) {
+    const session = getSession();
+    try {
+        const query = `
+            MATCH (e:Entity {sessionId: $sessionId})
+            OPTIONAL MATCH (e)-[r]->(:Entity {sessionId: $sessionId})
+            RETURN 
+                count(DISTINCT e) as entityCount,
+                count(r) as connectionCount,
+                sum(e.narrative_weight) as totalMass,
+                sum(r.qualityScore) as bindingEnergy
+        `;
+
+        const result = await session.run(query, { sessionId });
+        const record = result.records[0];
+
+        if (!record) return { totalMass: 0, bindingEnergy: 0, density: 0, entityCount: 0, connectionCount: 0 };
+
+        const toNum = (val) => {
+            if (!val) return 0;
+            if (val.toNumber) return val.toNumber();
+            return Number(val);
+        };
+
+        const entityCount = toNum(record.get('entityCount'));
+        const connectionCount = toNum(record.get('connectionCount'));
+
+        // Mass is often null if property is missing, defaulting to count * 10
+        let totalMass = toNum(record.get('totalMass'));
+        if (totalMass === 0 && entityCount > 0) totalMass = entityCount * 10;
+
+        const bindingEnergy = toNum(record.get('bindingEnergy'));
+
+        // Density = Energy / Mass (How tightly bound is the matter?)
+        const density = totalMass > 0 ? (bindingEnergy / totalMass) : 0;
+
+        return {
+            totalMass,
+            bindingEnergy,
+            density,
+            entityCount,
+            connectionCount
+        };
+    } catch (err) {
+        console.warn('Failed to calculate cluster metrics:', err.message);
+        return { totalMass: 0, bindingEnergy: 0, density: 0, entityCount: 0, connectionCount: 0 };
+    } finally {
+        await session.close();
+    }
 }

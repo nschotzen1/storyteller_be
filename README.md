@@ -415,308 +415,58 @@ Request body:
 }
 ```
 
-### Arena Relationships (Graph-Based)
+## 5 Pillar Architecture (v100)
 
-The arena supports relationship creation between entities. Relationships are evaluated by an LLM for quality and stored in both MongoDB (for persistence) and Neo4j (for graph traversal).
+The system is designed for maximum maintainability and clarity, organized into 5 functional layers:
 
-#### Architecture
+1.  **Engine** (`scenarioRunnerService.js`): Orchestrates session lifecycles and narrative steps.
+2.  **Brain** (`mockLLMService.js`): Simulates LLM responses with context-aware grounding logic.
+3.  **Contract** (`llmModuleSchemas.js`): Enforces strict JSON schemas (including mandatory **Slugs**).
+4.  **Voice** (`llmPromptService.js`): Translates context into human-readable LLM instructions.
+5.  **Memory** (`agentReflectionService.js`): Analyzes past sessions to evolve agent understanding.
 
+---
+
+## Technical Rigor: The Slug System
+
+Entities are identified by three layers of identity:
+- **UUID**: Primary database key (e.g., `ent_123_abc`).
+- **Slug**: Technical, human-readable reference (e.g., `the-obsidian-hound`). **Required in all scripts.**
+- **Name**: Human-readable display text (e.g., "The Obsidian Hound").
+
+The system automatically resolves references in the order: `UUID` -> `Slug` -> `Name`.
+
+---
+
+## Execution Pipeline
+
+We have consolidated all experimental logic into three core entry points:
+
+### 1. `scripts/master_runner.js`
+The primary tool for running world scenarios. Supports multiple "Lore Cycles" (e.g., Desert Watch, Threshold).
+```bash
+# Run the Desert Watch scenario
+NODE_ENV=test node scripts/master_runner.js desert_watch
 ```
-┌─────────────────┐     ┌─────────────────┐
-│    MongoDB      │     │     Neo4j       │
-│  (Arena State)  │     │  (Graph Store)  │
-│                 │     │                 │
-│  - entities     │     │  Entity Nodes   │
-│  - edges        │◄───►│  Relationships  │
-│  - scores       │     │  Cluster Query  │
-└─────────────────┘     └─────────────────┘
+
+### 2. `scripts/seed_world.js`
+Rapidly seeds a world with initial entities and memories based on a fragment.
+```bash
+NODE_ENV=test node scripts/seed_world.js "A silent forest where the trees whisper secrets."
 ```
 
-#### Setup
+### 3. `scripts/teach_agent.js`
+Injects new narrative principles or themes into the Agent's brain.
 
-Start Neo4j alongside MongoDB:
+---
 
+## Development & Persistence
+
+- **MongoDB**: Stores the rich state (Sensory Profiles, Dynamic States, Lore).
+- **Neo4j**: Stores the spatial graph (Entity relationships and clusters).
+- **Brain (Locus)**: The `.gemini/brain` directory contains the task list, achievement reports, and architecture plans.
+
+Running locally requires Docker for Neo4j:
 ```bash
 docker-compose up -d
-```
-
-Neo4j browser: http://localhost:7474 (login: `neo4j` / `storyteller123`)
-
-#### POST `/api/arena/relationships/propose`
-
-Proposes a relationship between entities. The endpoint:
-1. Queries Neo4j for the **cluster context** (connected entities within 2 hops)
-2. Evaluates the relationship using an LLM with cluster awareness
-3. On acceptance: saves to MongoDB AND Neo4j
-
-Request body:
-```json
-{
-  "sessionId": "demo-1",
-  "playerId": "player-1",
-  "source": { "entityId": "entity-abc" },
-  "targets": [{ "entityId": "entity-xyz" }],
-  "relationship": {
-    "surfaceText": "sometimes seen at the summit during storms",
-    "direction": "source_to_target"
-  },
-  "options": { "dryRun": false },
-  "debug": false
-}
-```
-
-Notes:
-- `source` and `targets` can use `entityId` or `cardId`
-- `targets` is an array—you can connect one source to multiple targets
-- `surfaceText` should be descriptive (>10 chars) for higher quality scores
-- `dryRun: true` evaluates without committing
-
-Response (accepted):
-```json
-{
-  "verdict": "accepted",
-  "edge": {
-    "edgeId": "edge_abc12345",
-    "fromCardId": "entity-abc",
-    "toCardId": "entity-xyz",
-    "surfaceText": "sometimes seen at the summit during storms",
-    "predicate": "sometimes_seen_at_the_summit_during_storms",
-    "quality": { "score": 0.85, "confidence": 0.8, "reasons": ["..."] }
-  },
-  "points": {
-    "awarded": 18,
-    "playerTotal": 42,
-    "breakdown": ["Base quality score: 0.85 → 18 points"]
-  },
-  "clusters": {
-    "touched": ["entity-abc", "entity-xyz", "entity-related"],
-    "metrics": [{ "entitiesInCluster": 5, "relationshipsInCluster": 3 }]
-  },
-  "evolution": {
-    "affected": [{ "cardId": "entity-xyz", "delta": 2, "changeSummary": "..." }]
-  }
-}
-```
-
-Response (rejected):
-```json
-{
-  "verdict": "rejected",
-  "quality": { "score": 0.35, "confidence": 0.6, "reasons": ["Relationship text is too brief"] },
-  "suggestions": [
-    { "predicate": "sometimes_seen_at", "surfaceText": "sometimes seen at" }
-  ]
-}
-```
-
-#### POST `/api/arena/relationships/validate`
-
-Dry-run validation—same as propose with `dryRun: true`.
-
-#### GET `/api/arena/state`
-
-Returns the full arena graph snapshot including all edges.
-
-Query params: `sessionId`, `playerId`, `arenaId` (optional)
-
-Response:
-```json
-{
-  "sessionId": "demo-1",
-  "arena": { "entities": [...], "storytellers": [...] },
-  "edges": [
-    {
-      "edgeId": "edge_abc12345",
-      "fromCardId": "entity-abc",
-      "toCardId": "entity-xyz",
-      "surfaceText": "sometimes seen at the summit during storms",
-      "predicate": "sometimes_seen_at_the_summit_during_storms",
-      "quality": { "score": 0.85 }
-    }
-  ],
-  "scores": { "player-1": 42 },
-  "clusters": []
-}
-```
-
-### /api/brewing/*
-
-Multiplayer brewing room endpoints and SSE (room create/join/ready/start/turn submit/events).
-
-### POST `/api/brewing/rooms`
-
-Creates a new room.
-
-Response:
-```json
-{
-  "roomId": "ABCD"
-}
-```
-
-### GET `/api/brewing/rooms/:roomId`
-
-Fetches the current room state.
-
-Response (shape):
-```json
-{
-  "roomId": "ABCD",
-  "phase": "lobby",
-  "players": [
-    {
-      "playerId": "player-uuid",
-      "maskId": "mask-1",
-      "maskName": "Mask 1",
-      "displayName": "Ada",
-      "status": "not_ready",
-      "isBot": false
-    }
-  ],
-  "turn": {
-    "index": 0,
-    "activePlayerId": "player-uuid",
-    "round": 1,
-    "totalRounds": 6
-  },
-  "brew": {
-    "summaryLines": ["The cauldron bubbles quietly..."],
-    "vials": [
-      {
-        "id": "vial-uuid",
-        "title": "Essence of Rain",
-        "containerDescription": "A twisted glass bottle emitting faint smoke.",
-        "substanceDescription": "A glowing liquid derived from rain.",
-        "pourEffect": "The universe shudders slightly.",
-        "timestamp": 1700000000000,
-        "addedByMaskId": "mask-1"
-      }
-    ]
-  }
-}
-```
-
-Notes:
-- `privateIngredient` is never returned in public room state.
-
-### POST `/api/brewing/rooms/:roomId/join`
-
-Adds a player to the room.
-
-Request body:
-```json
-{
-  "maskId": "mask-1",
-  "displayName": "Ada"
-}
-```
-
-Response:
-```json
-{
-  "playerId": "player-uuid",
-  "roomState": { "roomId": "ABCD" }
-}
-```
-
-### POST `/api/brewing/rooms/:roomId/players/:playerId/ready`
-
-Sets a player ready state.
-
-Request body:
-```json
-{
-  "ready": true
-}
-```
-
-Response:
-```json
-{
-  "roomId": "ABCD"
-}
-```
-
-### POST `/api/brewing/rooms/:roomId/start`
-
-Moves the room to brewing and starts the first turn.
-
-Response:
-```json
-{
-  "roomId": "ABCD"
-}
-```
-
-### POST `/api/brewing/rooms/:roomId/turn/submit`
-
-Submits an ingredient for the active player.
-
-Headers:
-- `x-player-id: player-uuid`
-
-Request body:
-```json
-{
-  "ingredient": "Rain"
-}
-```
-
-Response:
-```json
-{
-  "ok": true
-}
-```
-
-### GET `/api/brewing/events?roomId=...`
-
-SSE stream of room events. Each event is JSON with `type` and `payload`.
-
-Event examples:
-```json
-{ "type": "CONNECTED", "payload": { "roomId": "ABCD" } }
-{ "type": "PLAYER_JOINED", "payload": { "player": {}, "roomState": {} } }
-{ "type": "PLAYER_READY_CHANGED", "payload": { "playerId": "player-uuid", "status": "ready", "roomState": {} } }
-{ "type": "PHASE_CHANGED", "payload": { "phase": "brewing", "roomState": {} } }
-{ "type": "TURN_STARTED", "payload": { "turn": {} } }
-{ "type": "INGREDIENT_ACCEPTED", "payload": { "playerId": "player-uuid", "text": "Rain" } }
-{ "type": "VIAL_REVEALED", "payload": { "vial": {} } }
-{ "type": "BREW_SUMMARY_UPDATED", "payload": { "summaryLines": [] } }
-{ "type": "TURN_ENDED", "payload": {} }
-{ "type": "BREW_COMPLETED", "payload": { "brew": {} } }
-```
-
-## Test Flow (Mocked)
-
-`server_new.flow.test.js` exercises a mocked end-to-end flow that still persists data:
-
-- Start with a fragment.
-- Create entities via `/api/textToEntity` (`debug: true`).
-- Create a storyteller via `/api/textToStoryteller` (`debug: true`).
-- Send the storyteller on a mission via `/api/sendStorytellerToEntity` (`debug: true`).
-
-This verifies:
-- Entities get external IDs and are saved to Mongo.
-- Storytellers are saved with `status` and `missions`.
-- Missions create sub-entities linked by `mainEntityId`.
-
-Notes:
-- `entityId` should match the `id` returned from `/api/textToEntity`.
-- `storytellerId` is the Mongo `_id` from `/api/textToStoryteller` (name also works for lookup).
-- `storytellingPoints` and `message` are required.
-- `duration` is expected in days.
-- Use `debug` or `mock` to return a mocked outcome and mocked sub-entities.
-
-## Persistent Arena Relationship Test
-
-`arena_relationships_persist.e2e.test.js` creates entities and relationships and intentionally leaves data in MongoDB + Neo4j for inspection.
-
-Identifiers used by the test:
-- `sessionId`: `persistent-relationships-test`
-- `playerId`: `persistent-player`
-
-Cleanup command:
-```bash
-npm run cleanup:persistent-relationships
 ```
