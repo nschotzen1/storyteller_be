@@ -88,6 +88,8 @@ const ScenarioEventLogSchema = new mongoose.Schema({
     action: { type: String, required: true },
     inputs: { type: mongoose.Schema.Types.Mixed },
     outputsSummary: { type: String },
+    prompt: { type: String },
+    formattedTrace: { type: String },
     durationMs: { type: Number },
     success: { type: Boolean, default: true },
     error: { type: String }

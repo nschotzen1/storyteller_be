@@ -160,6 +160,17 @@ function mutateBaseSample(moduleName, base, ctx) {
         });
     }
 
+    // Inject reasoning if missing (for legacy samples)
+    const defaultReasoning = `Refining a high-quality previous output from the ${moduleName} module to maintain narrative continuity.`;
+
+    if (Array.isArray(mutated)) {
+        mutated.forEach(item => {
+            if (!item.reasoning) item.reasoning = defaultReasoning;
+        });
+    } else if (mutated && !mutated.reasoning) {
+        mutated.reasoning = defaultReasoning;
+    }
+
     return mutated;
 }
 
@@ -178,13 +189,15 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                         id: `mem_${seed}_lore_1`,
                         content: 'The stars of the vast heavens are the map of the ancestors.',
                         intensity: 0.8,
-                        tags: ['astronomy', 'lore']
+                        tags: ['astronomy', 'lore'],
+                        reasoning: 'Reinforcing the nomadic celestial theme established in the Desert Watch context.'
                     },
                     {
                         id: `mem_${seed}_lore_2`,
                         content: 'Silveranu, the moon of the nomads, has been absent for three cycles.',
                         intensity: 0.9,
-                        tags: ['moon', 'prophecy']
+                        tags: ['moon', 'prophecy'],
+                        reasoning: 'Adding narrative tension by introducing a missing celestial body, essential for the Desert Watch mythos.'
                     }
                 ];
             }
@@ -192,12 +205,14 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                 {
                     id: `mem_${seed}_1`,
                     content: 'A faded memory of stars falling into the sea',
-                    intensity: 0.7
+                    intensity: 0.7,
+                    reasoning: 'Basic celestial imagery to establish a sense of cosmic history.'
                 },
                 {
                     id: `mem_${seed}_2`,
                     content: 'The echo of a name spoken in an empty hall',
-                    intensity: 0.5
+                    intensity: 0.5,
+                    reasoning: 'Introducing mystery and isolation to the initial memory set.'
                 }
             ];
         },
@@ -223,14 +238,15 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                         },
                         traits: ['silent', 'supernatural', 'guardian'],
                         secrets: ['It does not breathe air, but intent.'],
-                        narrative_weight: 90
+                        narrative_weight: 90,
+                        reasoning: 'Creating a high-presence guardian entity that embodies the watchful nature of the desert cliffside.'
                     },
                     {
                         id: `ent_${seed}_traveler`,
                         slug: 'the-weary-traveler',
                         name: 'The Weary Traveler',
                         type: 'CHARACTER',
-                        description: 'A figure too weary and ragged to pose a threat, yet his presence at the cliff edge is an impossibility.',
+                        description: 'A figure too weary and ragged to pose a threat, yet his presence at the cliff edge is an impossiblity.',
                         sensory_profile: {
                             sight: 'Tattered robes that blend with the rock, trembling hands',
                             sound: 'A raspy, shallow breathing almost lost to the wind',
@@ -243,7 +259,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                         },
                         traits: ['ragged', 'mysterious', 'frail'],
                         secrets: ['Carries a seal from the outer lands.'],
-                        narrative_weight: 80
+                        narrative_weight: 80,
+                        reasoning: 'Introducing a frail but significant character to provide a human perspective on the vast, hostile desert environment.'
                     },
                     {
                         id: `ent_${seed}_path`,
@@ -263,7 +280,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                         },
                         traits: ['natural', 'hidden', 'vertical'],
                         secrets: ['The Plateau can only be reached if the moon is absent.'],
-                        narrative_weight: 95
+                        narrative_weight: 95,
+                        reasoning: 'Establishing a critical navigational challenge that ties into the lunar cycles mentioned in memories.'
                     }
                 ];
             }
@@ -283,7 +301,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                     dynamic_state: { mood: 'ponderous' },
                     traits: ['vigilant', 'ancient', 'mercurial'],
                     secrets: ['Remembers the first breath of the Spire'],
-                    narrative_weight: 85
+                    narrative_weight: 85,
+                    reasoning: 'A standard high-fantasy guide character to ground the player in the initial sovereign world.'
                 },
                 {
                     id: `ent_${seed}_door`,
@@ -300,7 +319,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                     dynamic_state: { state: 'locked' },
                     traits: ['grounded', 'heavy', 'rusted', 'immobile'],
                     secrets: ['The wood was harvested from a tree that never saw the sun.'],
-                    narrative_weight: 90
+                    narrative_weight: 90,
+                    reasoning: 'Introducing a central puzzle element with high physical presence and mystery.'
                 }
             ];
         },
@@ -311,14 +331,16 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                 style: flags.isDesertWatch ? 'alert, protective, sensory-first' : 'melancholic, precise',
                 level: 8 + (seed % 5),
                 immediate_ghost_appearance: flags.isDesertWatch ? 'A shimmer of heat-haze in the shape of a man' : 'A shimmer of dust motes forming weathered maps',
-                influences: flags.isDesertWatch ? ['survival', 'stars', 'observation'] : ['cartography', 'lost civilizations']
+                influences: flags.isDesertWatch ? ['survival', 'stars', 'observation'] : ['cartography', 'lost civilizations'],
+                reasoning: `Selected ${flags.isDesertWatch ? 'Sentinel' : 'Atlas'} to fit the current geographic and thematic focus of this session.`
             },
             {
                 name: 'The Ember Witness',
                 style: 'warm, cryptic',
                 level: 6 + (seed % 7),
                 immediate_ghost_appearance: 'Flickering warmth like a dying hearth',
-                influences: ['fire', 'memory']
+                influences: ['fire', 'memory'],
+                reasoning: 'Added a secondary storyteller with a warm/fire theme to contrast with the cold mist or desert heat.'
             }
         ],
 
@@ -334,7 +356,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                     world_mutations: [
                         { entity_id: 'The Iron-Bound Door', property: 'state', new_value: 'ajar', operation: 'set' }
                     ],
-                    discovered_secrets: ['The humming stops as soon as the door moves.']
+                    discovered_secrets: ['The humming stops as soon as the door moves.'],
+                    reasoning: 'The player chose to interact with the door, so I am transitioning its state to "ajar" to show progress and silence its humming as a narrative reward.'
                 };
             }
             return {
@@ -343,7 +366,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                 world_mutations: [
                     { entity_id: ctx.lastScene?.scene_id || 'world', property: 'stability', new_value: 'wavering', operation: 'set' }
                 ],
-                discovered_secrets: ['The Spire responds to your intent.']
+                discovered_secrets: ['The Spire responds to your intent.'],
+                reasoning: 'The choice was abstract, so I am mutating the world stability to reflect the weight of the decision.'
             };
         },
 
@@ -353,7 +377,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                 score: 0.75,
                 confidence: 0.8,
                 reasons: ['Mock validation: relationship appears coherent']
-            }
+            },
+            reasoning: 'The proposed relationship matches the known attributes of the entities, so I accepted it with a high quality score to encourage narrative growth.'
         }),
 
         storyteller_investigate: () => ({
@@ -366,7 +391,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                 }
             ],
             userText: 'The storyteller returns with tales of what was found.',
-            gmNote: 'Consider introducing a related mystery in future turns.'
+            gmNote: 'Consider introducing a related mystery in future turns.',
+            reasoning: 'The investigation was successful because the storyteller has matching level/influence for the target area.'
         }),
 
         deepen_entity: (ctx) => {
@@ -409,7 +435,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                             surfaceText: 'was built to petition what lies behind',
                             direction: 'target_to_source'
                         }
-                    ]
+                    ],
+                    reasoning: 'Deepening the door to reveal its archaic construction and proximity to a new ritualistic site (The Ash Altar).'
                 };
             }
             if (isHound) {
@@ -447,7 +474,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                             surfaceText: 'is guided by the warmth of',
                             direction: 'target_to_source'
                         }
-                    ]
+                    ],
+                    reasoning: 'Evolving the hound into a light-consuming anomaly and adding a dependent character to create a protective dynamic.'
                 };
             }
             const slug = ctx.targetEntitySlug || slugify(ctx.targetEntityId || 'unknown');
@@ -502,7 +530,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                         surfaceText: `is the source of the ${newDynamicKey} in`,
                         direction: 'target_to_source'
                     }
-                ]
+                ],
+                reasoning: `Deepening ${id} by increasing its ${newDynamicKey} and sprouting ${sproutName} to expand the narrative cluster.`
             };
         },
 
@@ -555,7 +584,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                             connectionType: predicate
                         }
                     }
-                ]
+                ],
+                reasoning: `Sprouting a ${concept} between ${cleanSource} and ${cleanTarget} to represent the emergent complexity of their ${predicate} relationship.`
             };
         },
 
@@ -575,7 +605,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                     character_interiority: 'A paralyzing conflict between the need to know and the terror of being remembered.',
                     choice_points: ['Place your palm on the indentation', 'Turn back toward the safety of the mist', 'Attempt to speak to whatever is humming'],
                     emotional_resonance: 'Visceral longing suppressed by existential dread.',
-                    clarity_score: 0.99
+                    clarity_score: 0.99,
+                    reasoning: 'The presence of the "door" in the context triggered a specific gothic threshold scene designed to test the player\'s curiosity vs fear.'
                 };
             }
             return {
@@ -591,7 +622,8 @@ function getDefaultMockForModule(moduleName, ctx, flags = {}) {
                 character_interiority: 'A sudden, crushing sense of smallness in the face of the Infinite.',
                 choice_points: ['Step into the silver light', 'Retreat into the velvet shadows', 'Touch the etched stone'],
                 emotional_resonance: 'Awe mixed with profound dread.',
-                clarity_score: 0.99
+                clarity_score: 0.99,
+                reasoning: 'Generic sovereign scene used when no specific triggers are found, focusing on the core aesthetic of overwhelming clarity.'
             };
         }
     };

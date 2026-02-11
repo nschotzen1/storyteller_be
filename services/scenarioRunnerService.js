@@ -73,8 +73,10 @@ export async function runScenario(config) {
     };
 
     // 6) Generate initial content (memories)
+    const memoriesTime = Date.now();
     const memories = await callLLMOrMock('generate_memories', ctx, config);
     await saveSample(sessionId, 'generate_memories', 'init_memories', ctx, memories, config);
+    await logEvent(sessionId, 'init_memories', 'GENERATE_MEMORIES', { action: 'GENERATE_MEMORIES' }, JSON.stringify(memories), Date.now() - memoriesTime, true, null, memories._meta?.fullPrompt, memories.map(m => m.reasoning).filter(r => r).join('; '));
     try {
         await neo4jService.createMemories(sessionId, memories);
     } catch (err) {
@@ -84,8 +86,10 @@ export async function runScenario(config) {
     // 7) Generate storyteller pool if configured
     let storytellersPool = [];
     if (config.universe?.generate_storytellers !== false) {
+        const stTime = Date.now();
         storytellersPool = await callLLMOrMock('generate_storytellers', ctx, config);
         await saveSample(sessionId, 'generate_storytellers', 'init_storytellers', ctx, storytellersPool, config);
+        await logEvent(sessionId, 'init_storytellers', 'GENERATE_STORYTELLERS', { action: 'GENERATE_STORYTELLERS' }, JSON.stringify(storytellersPool), Date.now() - stTime, true, null, storytellersPool._meta?.fullPrompt, storytellersPool.map(s => s.reasoning).filter(r => r).join('; '));
         try {
             await neo4jService.createStorytellers(sessionId, storytellersPool);
         } catch (err) {
@@ -97,8 +101,10 @@ export async function runScenario(config) {
     // 8) Deal hands to players (generate entities)
     const playerHands = {};
     for (const player of players) {
+        const entTime = Date.now();
         const entities = await callLLMOrMock('generate_entities', { ...ctx, player }, config);
         await saveSample(sessionId, 'generate_entities', `deal_p${player.seat}`, { ...ctx, player }, entities, config);
+        await logEvent(sessionId, `deal_p${player.seat}`, 'GENERATE_ENTITIES', { action: 'GENERATE_ENTITIES', player_seat: player.seat }, JSON.stringify(entities), Date.now() - entTime, true, null, entities._meta?.fullPrompt, entities.map(e => e.reasoning).filter(r => r).join('; '));
         try {
             await neo4jService.createEntitiesAndDealToPlayer(sessionId, player, entities);
         } catch (err) {
@@ -131,6 +137,14 @@ export async function runScenario(config) {
                     level: s.level,
                     experience: s.experience,
                     totalStorytellingPoints: s.totalStorytellingPoints
+                })),
+                memories: memories.map(m => ({
+                    id: m.id || `mem_${m.year}_${randomUUID().slice(0, 4)}`,
+                    year: m.year,
+                    title: m.title,
+                    content: m.content,
+                    entities: m.entities, // associated entity slugs/ids
+                    location: m.location
                 }))
             }
         });
@@ -237,8 +251,29 @@ async function executeStep(ctx, step, config) {
                 console.warn(`[ScenarioRunner] Unknown action: ${step.action}`);
         }
 
-        const safeOutput = typeof output === 'object' ? JSON.stringify(output) : (output || 'completed');
-        await logEvent(ctx.sessionId, stepId, action, step, safeOutput, Date.now() - stepStart, true);
+        let prompt = null;
+        let reasoning = null;
+        let safeOutput = 'completed';
+
+        if (output && typeof output === 'object') {
+            prompt = output._meta?.fullPrompt;
+            reasoning = output.reasoning;
+
+            // If output is an array (e.g. generate_entities), check for _meta property
+            if (Array.isArray(output)) {
+                prompt = output._meta?.fullPrompt;
+                reasoning = output.map(item => item.reasoning).filter(r => r).join('; ');
+            }
+
+            // Create a clean summary for logging
+            const logSummary = { ...output };
+            delete logSummary._meta;
+            safeOutput = JSON.stringify(logSummary);
+        } else {
+            safeOutput = output || 'completed';
+        }
+
+        await logEvent(ctx.sessionId, stepId, action, step, safeOutput, Date.now() - stepStart, true, null, prompt, reasoning);
 
     } catch (error) {
         console.error(`[ScenarioRunner] Step ${stepId} failed:`, error.message);
@@ -320,18 +355,18 @@ async function executeConnectionStep(ctx, step, config) {
 
                 if (derived?.sprout_entities?.length > 0) {
                     await processContextualSprouting(ctx, proposal.sourceCardId, derived.sprout_entities);
-                    return {
-                        status: 'connected_and_sprouted',
-                        quality: verdict.quality.score,
-                        sprouts: derived.sprout_entities.map(s => s.name)
-                    };
+                    // Merge derived info into verdict for logging
+                    verdict.sprouted = derived.sprout_entities.map(s => s.name);
+                    if (derived._meta) verdict._meta_derived = derived._meta;
                 }
             } catch (sproutErr) {
                 console.warn(`[ScenarioRunner] Failed to sprout from relationship: ${sproutErr.message}`);
             }
         }
+        return verdict;
     } else {
         console.log(`[ScenarioRunner] Connection rejected: ${verdict.quality?.reasons?.join(', ')}`);
+        return verdict;
     }
 }
 
@@ -450,7 +485,7 @@ async function executeEntityDeepening(ctx, step, config) {
                 { $set: { "arena.entities": arena.entities } }
             );
         } catch (err) {
-            console.warn('[ScenarioRunner] Failed to persist arena to MongoDB:', err.message);
+            console.warn('[ScenarioRunner] MongoDB deepen sync failed:', err.message);
         }
 
         // 4. Update Original Entity in Neo4j
@@ -574,6 +609,8 @@ async function executePlayerChoice(ctx, step, config) {
             await applyWorldMutation(ctx, mutation);
         }
     }
+
+    return consequences;
 }
 
 /**
@@ -616,14 +653,26 @@ async function applyWorldMutation(ctx, mutation) {
 /**
  * Log a step event.
  */
-async function logEvent(sessionId, stepId, action, inputs, outputsSummary, durationMs, success, error = null) {
+async function logEvent(sessionId, stepId, action, inputs, outputsSummary, durationMs, success, error = null, prompt = null, reasoning = null) {
     try {
+        const userId = inputs?.player_seat !== undefined ? `Player_${inputs.player_seat}` : 'System';
+
+        // Construct the human-readable trace
+        let tracePrompt = prompt || 'N/A';
+        if (tracePrompt.includes('[TASK]')) {
+            tracePrompt = tracePrompt.split('[TASK]')[1].trim().split('\n')[0]; // Just the main task line for brevity in trace
+        }
+
+        const formattedTrace = `in session ${sessionId} the user ${userId} wanted to ${action} . ${tracePrompt}. and the returned json was ${outputsSummary}. my reasoning for it was ${reasoning || 'N/A'}`;
+
         const event = new ScenarioEventLog({
             sessionId,
             stepId,
             action,
             inputs: { id: inputs.id, action: inputs.action, player_seat: inputs.player_seat },
             outputsSummary,
+            prompt,
+            formattedTrace,
             durationMs,
             success,
             error

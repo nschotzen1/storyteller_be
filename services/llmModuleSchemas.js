@@ -13,7 +13,8 @@ export const LLM_MODULE_SCHEMAS = {
                 id: { type: 'string' },
                 content: { type: 'string' },
                 intensity: { type: 'number', minimum: 0, maximum: 1 },
-                tags: { type: 'array', items: { type: 'string' } }
+                tags: { type: 'array', items: { type: 'string' } },
+                reasoning: { type: 'string' }
             }
         }
     },
@@ -47,7 +48,8 @@ export const LLM_MODULE_SCHEMAS = {
                 },
                 traits: { type: 'array', items: { type: 'string' } },
                 secrets: { type: 'array', items: { type: 'string' } },
-                narrative_weight: { type: 'number', minimum: 0, maximum: 100 }
+                narrative_weight: { type: 'number', minimum: 0, maximum: 100 },
+                reasoning: { type: 'string' }
             }
         }
     },
@@ -63,7 +65,8 @@ export const LLM_MODULE_SCHEMAS = {
                 level: { type: 'integer', minimum: 1, maximum: 20 },
                 immediate_ghost_appearance: { type: 'string' },
                 influences: { type: 'array', items: { type: 'string' } },
-                narrative_bias: { type: 'string' }
+                narrative_bias: { type: 'string' },
+                reasoning: { type: 'string' }
             }
         }
     },
@@ -122,7 +125,8 @@ export const LLM_MODULE_SCHEMAS = {
                         direction: { type: 'string', enum: ['source_to_target', 'target_to_source', 'bi_directional'] }
                     }
                 }
-            }
+            },
+            reasoning: { type: 'string' }
         }
     },
 
@@ -145,7 +149,8 @@ export const LLM_MODULE_SCHEMAS = {
             character_interiority: { type: 'string' },
             choice_points: { type: 'array', items: { type: 'string' } },
             emotional_resonance: { type: 'string' },
-            clarity_score: { type: 'number' }
+            clarity_score: { type: 'number' },
+            reasoning: { type: 'string' }
         }
     },
 
@@ -168,7 +173,8 @@ export const LLM_MODULE_SCHEMAS = {
                     }
                 }
             },
-            discovered_secrets: { type: 'array', items: { type: 'string' } }
+            discovered_secrets: { type: 'array', items: { type: 'string' } },
+            reasoning: { type: 'string' }
         }
     },
 
@@ -195,7 +201,8 @@ export const LLM_MODULE_SCHEMAS = {
                         surfaceText: { type: 'string' }
                     }
                 }
-            }
+            },
+            reasoning: { type: 'string' }
         }
     },
 
@@ -213,7 +220,40 @@ export const LLM_MODULE_SCHEMAS = {
                 items: { type: 'object' }
             },
             userText: { type: 'string' },
-            gmNote: { type: 'string' }
+            gmNote: { type: 'string' },
+            reasoning: { type: 'string' }
+        }
+    },
+    derive_from_relationship: {
+        type: 'object',
+        required: ['sprout_entities'],
+        properties: {
+            sprout_entities: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    required: ['id', 'slug', 'name', 'type', 'description'],
+                    properties: {
+                        id: { type: 'string' },
+                        slug: { type: 'string' },
+                        name: { type: 'string' },
+                        type: { type: 'string' },
+                        description: { type: 'string' },
+                        sensory_profile: {
+                            type: 'object',
+                            properties: {
+                                sight: { type: 'string' },
+                                sound: { type: 'string' },
+                                smell: { type: 'string' },
+                                touch: { type: 'string' }
+                            }
+                        },
+                        narrative_weight: { type: 'number' },
+                        metadata: { type: 'object' }
+                    }
+                }
+            },
+            reasoning: { type: 'string' }
         }
     }
 };

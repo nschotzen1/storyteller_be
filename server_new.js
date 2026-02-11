@@ -6,8 +6,6 @@ import { BrewRoom } from './models/brewing_models.js';
 import { directExternalApiCall } from './ai/openai/apiService.js';
 import { Storyteller, SessionPlayer, Arena, World, WorldElement } from './models/models.js';
 import {
-  generateStoryTellerForFragmentPrompt,
-  generateSendStorytellerToEntityPrompt,
   createStoryTellerKey,
   createStorytellerIllustration
 } from './services/storytellerService.js';
@@ -26,6 +24,16 @@ import {
   syncEntityNode,
   buildClusterContext
 } from './services/neo4jService.js';
+import { buildOpenApiSpec } from './openapi.js';
+import {
+  listRouteConfigs,
+  getRouteConfig,
+  updateRoutePrompt,
+  updateRouteSchema,
+  resetRouteConfig,
+  renderPrompt,
+  validatePayloadForRoute
+} from './services/llmRouteConfigService.js';
 
 
 const app = express();
@@ -35,8 +43,51 @@ app.use(cors());
 const PORT = process.env.PORT || 5001;
 const ASSETS_ROOT = path.resolve(process.cwd(), 'assets');
 const MOCK_STORYTELLER_ILLUSTRATION_URL = '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png';
+const OPEN_API_SPEC = buildOpenApiSpec();
 
 app.use('/assets', express.static(ASSETS_ROOT));
+
+app.get('/api/openapi.json', (req, res) => {
+  return res.status(200).json(OPEN_API_SPEC);
+});
+
+app.get('/api/docs', (req, res) => {
+  const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Storyteller API Docs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+    <style>
+      html, body { margin: 0; padding: 0; background: #f3f5f8; }
+      #swagger-ui { max-width: 1200px; margin: 0 auto; }
+      .topbar { background: #ffffff; border-bottom: 1px solid #d9e0ea; }
+      .swagger-ui .scheme-container { background: #ffffff; box-shadow: none; border-bottom: 1px solid #e4e8ef; }
+      .swagger-ui .opblock.opblock-post { border-color: #5c8ef3; background: rgba(92, 142, 243, 0.06); }
+      .swagger-ui .opblock.opblock-get { border-color: #35a56a; background: rgba(53, 165, 106, 0.06); }
+      .swagger-ui .opblock.opblock-put,
+      .swagger-ui .opblock.opblock-patch { border-color: #d39a2f; background: rgba(211, 154, 47, 0.06); }
+      .swagger-ui .opblock.opblock-delete { border-color: #d9534f; background: rgba(217, 83, 79, 0.06); }
+      .swagger-ui .opblock-tag { border-bottom: 1px solid #e4e8ef; }
+    </style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: '/api/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: 'BaseLayout'
+      });
+    </script>
+  </body>
+</html>`;
+  return res.status(200).type('html').send(html);
+});
 
 const MOCK_STORYTELLER = {
   name: 'The Pass-Archivist of Yuradel',
@@ -96,6 +147,25 @@ function sanitizeRoomForPublic(room) {
 
 function getFragmentText(body) {
   return body?.text || body?.userText || body?.fragment || '';
+}
+
+function resolveSchemaErrorMessage(error, fallback) {
+  if (!error?.details || !Array.isArray(error.details) || error.details.length === 0) {
+    return fallback;
+  }
+  return `${fallback} ${error.details.join('; ')}`;
+}
+
+function requireAdmin(req, res, next) {
+  const requiredKey = process.env.ADMIN_API_KEY;
+  if (!requiredKey) {
+    return next();
+  }
+  const provided = req.get('x-admin-key');
+  if (!provided || provided !== requiredKey) {
+    return res.status(401).json({ message: 'Unauthorized admin access.' });
+  }
+  return next();
 }
 
 
@@ -243,26 +313,6 @@ function buildMockElements(type, count) {
   return results;
 }
 
-function buildWorldPrompt(seedText, name) {
-  return `You are a worldbuilding designer. Return JSON only.
-Create a setting for a cooperative narrative game.
-Seed: "${seedText}"
-${name ? `World name hint: "${name}"` : ''}
-Return JSON with keys:
-name, summary (1-2 sentences), tone (3-6 words), pillars (3-5), themes (3-5), palette (3-5 evocative color/texture phrases).`;
-}
-
-function buildWorldElementsPrompt(type, world, seedText, count) {
-  return `You are a worldbuilding designer. Return JSON only.
-World name: "${world.name}"
-World tone: "${world.tone || ''}"
-World summary: "${world.summary || ''}"
-Seed: "${seedText || world.seedText}"
-Create ${count} ${type} entries for this world.
-Return JSON as an array of objects with:
-name, description (1-2 sentences), tags (3-5), traits (2-4), hooks (1-2).`;
-}
-
 async function findWorldForPlayer(sessionId, playerId, worldId) {
   return World.findOne({ worldId, sessionId, playerId });
 }
@@ -292,6 +342,75 @@ async function findEntityById(sessionId, playerId, entityId) {
 
   return NarrativeEntity.findOne({ _id: entityId, session_id: sessionId, playerId });
 }
+
+// --- Admin LLM Route Config ---
+app.get('/api/admin/llm-config', requireAdmin, async (req, res) => {
+  try {
+    const configs = await listRouteConfigs();
+    return res.status(200).json(configs);
+  } catch (error) {
+    console.error('Error in GET /api/admin/llm-config:', error);
+    return res.status(500).json({ message: 'Server error while listing LLM route configs.' });
+  }
+});
+
+app.get('/api/admin/llm-config/:routeKey', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const config = await getRouteConfig(routeKey);
+    return res.status(200).json(config);
+  } catch (error) {
+    if (error.code === 'INVALID_ROUTE_KEY') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in GET /api/admin/llm-config/:routeKey:', error);
+    return res.status(500).json({ message: 'Server error while fetching LLM route config.' });
+  }
+});
+
+app.put('/api/admin/llm-config/:routeKey/prompt', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const { promptTemplate, updatedBy } = req.body || {};
+    const config = await updateRoutePrompt(routeKey, promptTemplate, updatedBy || 'admin');
+    return res.status(200).json(config);
+  } catch (error) {
+    if (error.code === 'INVALID_ROUTE_KEY' || error.code === 'INVALID_PROMPT_TEMPLATE') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in PUT /api/admin/llm-config/:routeKey/prompt:', error);
+    return res.status(500).json({ message: 'Server error while updating prompt template.' });
+  }
+});
+
+app.put('/api/admin/llm-config/:routeKey/schema', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const { responseSchema, updatedBy } = req.body || {};
+    const config = await updateRouteSchema(routeKey, responseSchema, updatedBy || 'admin');
+    return res.status(200).json(config);
+  } catch (error) {
+    if (error.code === 'INVALID_ROUTE_KEY' || error.code === 'INVALID_RESPONSE_SCHEMA') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in PUT /api/admin/llm-config/:routeKey/schema:', error);
+    return res.status(500).json({ message: 'Server error while updating response schema.' });
+  }
+});
+
+app.post('/api/admin/llm-config/:routeKey/reset', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const config = await resetRouteConfig(routeKey);
+    return res.status(200).json(config);
+  } catch (error) {
+    if (error.code === 'INVALID_ROUTE_KEY') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/admin/llm-config/:routeKey/reset:', error);
+    return res.status(500).json({ message: 'Server error while resetting route config.' });
+  }
+});
 
 // --- Routes ---
 
@@ -418,7 +537,11 @@ app.post('/api/worlds', async (req, res) => {
     if (shouldMock) {
       worldData = buildMockWorld(seedText, name);
     } else {
-      const prompt = buildWorldPrompt(seedText, name);
+      const routeConfig = await getRouteConfig('worlds_create');
+      const prompt = renderPrompt(routeConfig.promptTemplate, {
+        seedText,
+        name: name || ''
+      });
       worldData = await directExternalApiCall(
         [{ role: 'system', content: prompt }],
         1200,
@@ -432,6 +555,8 @@ app.post('/api/worlds', async (req, res) => {
     if (!worldData || typeof worldData !== 'object') {
       return res.status(502).json({ message: 'World generation failed.' });
     }
+
+    await validatePayloadForRoute('worlds_create', worldData);
 
     const world = await World.create({
       worldId: randomUUID(),
@@ -448,6 +573,11 @@ app.post('/api/worlds', async (req, res) => {
 
     return res.status(201).json({ world, mocked: shouldMock });
   } catch (error) {
+    if (error.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
+      return res.status(502).json({
+        message: resolveSchemaErrorMessage(error, 'World generation schema validation failed.')
+      });
+    }
     console.error('Error in /api/worlds:', error);
     return res.status(500).json({ message: 'Server error during world creation.' });
   }
@@ -536,7 +666,15 @@ async function handleWorldElements(req, res, type) {
     if (shouldMock) {
       elementsData = buildMockElements(type, requestedCount);
     } else {
-      const prompt = buildWorldElementsPrompt(type, world, seedText, requestedCount);
+      const routeConfig = await getRouteConfig('worlds_elements');
+      const prompt = renderPrompt(routeConfig.promptTemplate, {
+        worldName: world.name || '',
+        worldTone: world.tone || '',
+        worldSummary: world.summary || '',
+        seedText: seedText || world.seedText || '',
+        elementType: type,
+        count: requestedCount
+      });
       const result = await directExternalApiCall(
         [{ role: 'system', content: prompt }],
         1400,
@@ -551,6 +689,8 @@ async function handleWorldElements(req, res, type) {
     if (!Array.isArray(elementsData) || elementsData.length === 0) {
       return res.status(502).json({ message: 'World element generation failed.' });
     }
+
+    await validatePayloadForRoute('worlds_elements', { elements: elementsData });
 
     const payloads = elementsData.slice(0, requestedCount).map((element) => ({
       worldId,
@@ -568,6 +708,11 @@ async function handleWorldElements(req, res, type) {
 
     return res.status(201).json({ worldId, type, elements: saved, mocked: shouldMock });
   } catch (error) {
+    if (error.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
+      return res.status(502).json({
+        message: resolveSchemaErrorMessage(error, 'World elements schema validation failed.')
+      });
+    }
     console.error(`Error in /api/worlds/:worldId/${type}:`, error);
     return res.status(500).json({ message: 'Server error during world element generation.' });
   }
@@ -654,7 +799,8 @@ app.get('/api/entities', async (req, res) => {
 app.post('/api/entities/:id/refresh', async (req, res) => {
   try {
     const { id } = req.params;
-    const { sessionId, playerId, note, debug, mock, mock_api_calls, mocked_api_calls } = req.body;
+    const body = req.body || {};
+    const { sessionId, playerId, note, debug, mock, mock_api_calls, mocked_api_calls } = body;
 
     if (!sessionId || !playerId) {
       return res.status(400).json({ message: 'Missing required parameter: sessionId or playerId.' });
@@ -712,6 +858,7 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
 // Text to Entity
 app.post('/api/textToEntity', async (req, res) => {
   try {
+    const body = req.body || {};
     const {
       sessionId,
       playerId,
@@ -725,7 +872,7 @@ app.post('/api/textToEntity', async (req, res) => {
       mock,
       mock_api_calls,
       mocked_api_calls
-    } = req.body;
+    } = body;
 
     const fragmentText = text || userText || fragment;
 
@@ -770,6 +917,7 @@ app.post('/api/textToEntity', async (req, res) => {
 // Text to Storyteller
 app.post('/api/textToStoryteller', async (req, res) => {
   try {
+    const body = req.body || {};
     const {
       sessionId,
       playerId,
@@ -781,8 +929,8 @@ app.post('/api/textToStoryteller', async (req, res) => {
       mock,
       mock_api_calls,
       mocked_api_calls
-    } = req.body;
-    const fragmentText = getFragmentText(req.body);
+    } = body;
+    const fragmentText = getFragmentText(body);
 
     if (!sessionId || !playerId || !fragmentText) {
       return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or text.' });
@@ -795,7 +943,11 @@ app.post('/api/textToStoryteller', async (req, res) => {
     if (shouldMock) {
       storytellerDataArray = buildMockStorytellers(storytellerCount, fragmentText);
     } else {
-      const prompt = generateStoryTellerForFragmentPrompt(fragmentText, storytellerCount);
+      const routeConfig = await getRouteConfig('text_to_storyteller');
+      const prompt = renderPrompt(routeConfig.promptTemplate, {
+        fragmentText,
+        storytellerCount
+      });
       storytellerDataArray = await directExternalApiCall(
         [{ role: 'system', content: prompt }],
         2500,
@@ -806,9 +958,19 @@ app.post('/api/textToStoryteller', async (req, res) => {
       );
     }
 
-    if (!Array.isArray(storytellerDataArray) || storytellerDataArray.length === 0) {
+    const normalizedStorytellers = Array.isArray(storytellerDataArray)
+      ? storytellerDataArray
+      : Array.isArray(storytellerDataArray?.storytellers)
+        ? storytellerDataArray.storytellers
+        : [];
+
+    if (!Array.isArray(normalizedStorytellers) || normalizedStorytellers.length === 0) {
       return res.status(502).json({ message: 'Storyteller generation failed.' });
     }
+
+    await validatePayloadForRoute('text_to_storyteller', { storytellers: normalizedStorytellers });
+
+    storytellerDataArray = normalizedStorytellers;
 
     const savedStorytellers = [];
     const keyImages = [];
@@ -883,6 +1045,11 @@ app.post('/api/textToStoryteller', async (req, res) => {
       count: savedStorytellers.length
     });
   } catch (err) {
+    if (err.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
+      return res.status(502).json({
+        message: resolveSchemaErrorMessage(err, 'Storyteller generation schema validation failed.')
+      });
+    }
     console.error('Error in /api/textToStoryteller:', err);
     res.status(500).json({ message: 'Server error during storyteller generation.' });
   }
@@ -890,7 +1057,10 @@ app.post('/api/textToStoryteller', async (req, res) => {
 
 // Send Storyteller to Entity
 app.post('/api/sendStorytellerToEntity', async (req, res) => {
+  let storytellerDocIdForReset = null;
+  let missionActivated = false;
   try {
+    const body = req.body || {};
     const {
       sessionId,
       playerId,
@@ -903,7 +1073,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       mock,
       mock_api_calls,
       mocked_api_calls
-    } = req.body;
+    } = body;
 
     if (!sessionId || !playerId || !entityId || !storytellerId) {
       return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, entityId, storytellerId.' });
@@ -927,6 +1097,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
     if (!storyteller || storyteller.session_id !== sessionId || storyteller.playerId !== playerId) {
       return res.status(404).json({ message: 'Storyteller not found.' });
     }
+    storytellerDocIdForReset = storyteller._id;
 
     const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
     const durationDays = Number.isFinite(Number(duration)) ? Number(duration) : undefined;
@@ -935,6 +1106,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       storyteller._id,
       { $set: { status: 'in_mission' } }
     );
+    missionActivated = true;
 
     let missionResult;
     if (shouldMock) {
@@ -945,12 +1117,17 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
         subEntitySeed: `New sub-entities emerge around ${entity.name}: a revealing clue, a minor witness, and a tangible relic tied to the mission.`
       };
     } else {
-      const prompt = generateSendStorytellerToEntityPrompt({
-        storyteller,
-        entity,
+      const routeConfig = await getRouteConfig('storyteller_mission');
+      const prompt = renderPrompt(routeConfig.promptTemplate, {
+        storytellerName: storyteller?.name || '',
+        entityName: entity?.name || '',
+        entityType: entity?.type || entity?.ner_type || 'ENTITY',
+        entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
+        entityDescription: entity?.description || '',
+        entityLore: entity?.lore || '',
         storytellingPoints,
         message,
-        durationDays
+        durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
       });
       missionResult = await directExternalApiCall(
         [{ role: 'system', content: prompt }],
@@ -961,6 +1138,8 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
         true
       );
     }
+
+    await validatePayloadForRoute('storyteller_mission', missionResult);
 
     const outcome = missionResult?.outcome;
     const userText = missionResult?.userText || '';
@@ -1011,6 +1190,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       },
       { new: true }
     );
+    missionActivated = false;
 
     return res.status(200).json({
       sessionId,
@@ -1022,6 +1202,18 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       subEntities: savedSubEntities
     });
   } catch (err) {
+    if (missionActivated && storytellerDocIdForReset) {
+      try {
+        await Storyteller.findByIdAndUpdate(storytellerDocIdForReset, { $set: { status: 'active' } });
+      } catch (resetError) {
+        console.error('Failed to restore storyteller status after mission error:', resetError);
+      }
+    }
+    if (err.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
+      return res.status(502).json({
+        message: resolveSchemaErrorMessage(err, 'Storyteller mission schema validation failed.')
+      });
+    }
     console.error('Error in /api/sendStorytellerToEntity:', err);
     return res.status(500).json({ message: 'Server error during storyteller mission.' });
   }
@@ -1031,8 +1223,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
 
 // --- Arena Relationships Routes ---
 
-// Propose Relationship
-app.post('/api/arena/relationships/propose', async (req, res) => {
+async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
   try {
     const {
       sessionId,
@@ -1048,6 +1239,11 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
       mocked_api_calls
     } = req.body || {};
 
+    const relationshipPayload = {
+      ...(relationship || {}),
+      fastValidate: Boolean(relationship?.fastValidate || options?.fastValidate)
+    };
+
     // Validate required parameters
     if (!sessionId || !playerId) {
       return res.status(400).json({ message: 'Missing required parameters: sessionId or playerId.' });
@@ -1058,21 +1254,21 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
     if (!Array.isArray(targets) || targets.length === 0) {
       return res.status(400).json({ message: 'Missing required parameter: targets array.' });
     }
-    if (!relationship?.surfaceText) {
+    if (!relationshipPayload.surfaceText) {
       return res.status(400).json({ message: 'Missing required parameter: relationship.surfaceText.' });
     }
 
     const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
-    const dryRun = Boolean(options?.dryRun);
+    const dryRun = forceDryRun || Boolean(options?.dryRun);
 
     // Load Arena doc
     const arenaDoc = await Arena.findOne({ sessionId });
     const arena = arenaDoc?.arena || { entities: [], storytellers: [], edges: [], scores: {} };
 
     // Normalize predicate
-    const predicate = relationship.predicateHint
-      ? normalizePredicate(relationship.predicateHint)
-      : normalizePredicate(relationship.surfaceText);
+    const predicate = relationshipPayload.predicateHint
+      ? normalizePredicate(relationshipPayload.predicateHint)
+      : normalizePredicate(relationshipPayload.surfaceText);
 
     // Collect all entity IDs involved
     const involvedEntityIds = [
@@ -1110,7 +1306,7 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
     const evaluation = await evaluateRelationship(
       source,
       targets,
-      relationship,
+      relationshipPayload,
       existingEdges,
       shouldMock,
       clusterContext
@@ -1121,7 +1317,8 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
       return res.status(200).json({
         verdict: 'rejected',
         quality: evaluation.quality,
-        suggestions: evaluation.suggestions || []
+        suggestions: evaluation.suggestions || [],
+        fastValidate: evaluation.fastValidate
       });
     }
 
@@ -1132,7 +1329,8 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
         dryRun: true,
         quality: evaluation.quality,
         predicate,
-        message: 'Relationship would be accepted (dry run, not committed).'
+        message: 'Relationship would be accepted (dry run, not committed).',
+        fastValidate: evaluation.fastValidate
       });
     }
 
@@ -1145,9 +1343,9 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
         edgeId: `edge_${randomUUID().slice(0, 8)}`,
         fromCardId: source.cardId || source.entityId,
         toCardId: target.cardId || target.entityId,
-        surfaceText: relationship.surfaceText,
+        surfaceText: relationshipPayload.surfaceText,
         predicate,
-        direction: relationship.direction || 'source_to_target',
+        direction: relationshipPayload.direction || 'source_to_target',
         quality: evaluation.quality,
         createdBy: playerId,
         createdAt: new Date().toISOString()
@@ -1204,7 +1402,7 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
         affected: targets.map(t => ({
           cardId: t.cardId || t.entityId,
           delta: Math.ceil(evaluation.quality.score * 2),
-          changeSummary: `Connection established: "${relationship.surfaceText}"`
+          changeSummary: `Connection established: "${relationshipPayload.surfaceText}"`
         })),
         regenSuggested: []
       },
@@ -1213,7 +1411,8 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
         metrics: cluster ? [{ entitiesInCluster: cluster.entities?.length || 0, relationshipsInCluster: cluster.relationships?.length || 0 }] : []
       },
       existingEdgesCount: existingEdges.length,
-      mocked: shouldMock
+      mocked: shouldMock,
+      fastValidate: evaluation.fastValidate
     };
 
     return res.status(200).json(response);
@@ -1221,26 +1420,17 @@ app.post('/api/arena/relationships/propose', async (req, res) => {
     console.error('Error in /api/arena/relationships/propose:', error);
     return res.status(500).json({ message: 'Server error during relationship proposal.' });
   }
-});
+}
+
+// Propose Relationship
+app.post('/api/arena/relationships/propose', async (req, res) =>
+  handleArenaRelationship(req, res)
+);
 
 // Validate Relationship (dry run only)
-app.post('/api/arena/relationships/validate', async (req, res) => {
-  // Force dryRun mode
-  req.body = req.body || {};
-  req.body.options = req.body.options || {};
-  req.body.options.dryRun = true;
-
-  // Forward to propose handler by calling the same logic inline
-  const handler = app._router.stack.find(
-    layer => layer.route?.path === '/api/arena/relationships/propose' && layer.route?.methods?.post
-  );
-
-  if (handler) {
-    return handler.route.stack[0].handle(req, res);
-  }
-
-  return res.status(500).json({ message: 'Validate route configuration error.' });
-});
+app.post('/api/arena/relationships/validate', async (req, res) =>
+  handleArenaRelationship(req, res, { forceDryRun: true })
+);
 
 // Get Arena State (full graph snapshot)
 app.get('/api/arena/state', async (req, res) => {
@@ -1307,7 +1497,11 @@ app.get('/api/brewing/rooms/:roomId', async (req, res) => {
 // 3. Join Room
 app.post('/api/brewing/rooms/:roomId/join', async (req, res) => {
   const { roomId } = req.params;
-  const { maskId, displayName } = req.body;
+  const body = req.body || {};
+  const rawMaskId = typeof body.maskId === 'string' ? body.maskId.trim() : '';
+  const rawDisplayName = typeof body.displayName === 'string' ? body.displayName.trim() : '';
+  const maskId = rawMaskId || 'unknown';
+  const displayName = rawDisplayName || `Mask ${maskId}`;
 
   try {
     const room = await BrewRoom.findOne({ roomId });
@@ -1316,8 +1510,8 @@ app.post('/api/brewing/rooms/:roomId/join', async (req, res) => {
     const playerId = randomUUID();
     const newPlayer = {
       playerId,
-      maskId: maskId || 'unknown',
-      maskName: displayName || `Mask ${maskId}`,
+      maskId,
+      maskName: displayName,
       displayName,
       status: 'not_ready',
       isBot: false
@@ -1338,9 +1532,14 @@ app.post('/api/brewing/rooms/:roomId/join', async (req, res) => {
 // 4. Toggle Ready
 app.post('/api/brewing/rooms/:roomId/players/:playerId/ready', async (req, res) => {
   const { roomId, playerId } = req.params;
-  const { ready } = req.body;
+  const body = req.body || {};
+  const { ready } = body;
 
   try {
+    if (typeof ready !== 'boolean') {
+      return res.status(400).json({ error: 'ready must be a boolean' });
+    }
+
     const room = await BrewRoom.findOne({ roomId });
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
@@ -1397,11 +1596,20 @@ app.post('/api/brewing/rooms/:roomId/start', async (req, res) => {
 app.post('/api/brewing/rooms/:roomId/turn/submit', async (req, res) => {
   const { roomId } = req.params;
   const activePlayerId = req.header('x-player-id');
-  const { ingredient } = req.body;
+  const body = req.body || {};
+  const ingredient = typeof body.ingredient === 'string' ? body.ingredient.trim() : '';
 
   try {
+    if (!activePlayerId || typeof activePlayerId !== 'string') {
+      return res.status(400).json({ error: 'x-player-id header is required' });
+    }
+
     const room = await BrewRoom.findOne({ roomId });
     if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    if (!ingredient) {
+      return res.status(400).json({ error: 'Ingredient is required' });
+    }
 
     if (room.turn.activePlayerId !== activePlayerId) {
       return res.status(403).json({ error: 'Not your turn' });
@@ -1481,6 +1689,10 @@ async function handleBrewmasterTurn(roomId, playerId, ingredient) {
 // --- Real-time Events (SSE) ---
 app.get('/api/brewing/events', (req, res) => {
   const { roomId } = req.query;
+
+  if (!roomId || typeof roomId !== 'string') {
+    return res.status(400).json({ error: 'roomId is required' });
+  }
 
   // Note: We don't necessarily check DB *existence* strictly here on connection 
   // to save a read, but arguably we should.

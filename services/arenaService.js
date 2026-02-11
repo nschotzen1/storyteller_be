@@ -105,6 +105,28 @@ export async function evaluateRelationship(source, targets, relationship, existi
         return buildMockJudgment(source, targets, relationship, existingEdges);
     }
 
+    // Fast Mode: Heuristic only (no LLM)
+    if (relationship.fastValidate) {
+        const surfaceText = relationship.surfaceText || '';
+        const isDescriptive = surfaceText.length >= 3; // Minimal check for "live" feel
+        // We could add a "forbidden words" list here if needed
+
+        if (isDescriptive) {
+            return {
+                verdict: 'accepted',
+                quality: { score: 0.6, confidence: 0.5, reasons: ['Heuristic pass'] },
+                fastValidate: true
+            };
+        } else {
+            return {
+                verdict: 'rejected',
+                quality: { score: 0.2, confidence: 0.5, reasons: ['Too short'] },
+                suggestions: [],
+                fastValidate: true
+            };
+        }
+    }
+
     // Build cluster context section
     const clusterSection = clusterContext
         ? `\n- Cluster context (connected entities and relationships):\n${clusterContext}`

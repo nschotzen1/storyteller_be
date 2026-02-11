@@ -508,7 +508,11 @@ export async function exportGraphSnapshot(sessionId) {
         const relationships = record?.get('relationships') || [];
 
         return {
-            nodes: nodes.map(n => ({ labels: n.labels, properties: n.properties })),
+            nodes: nodes.map(n => ({
+                id: n.identity.toString(),
+                labels: n.labels,
+                properties: n.properties
+            })),
             relationships: relationships.filter(r => r.end !== null)
         };
     } finally {
