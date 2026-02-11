@@ -14,6 +14,29 @@ const queryParam = (name, required, description) => ({
   description
 });
 
+const STORYTELLER_PROMPT_EXAMPLE = `You are the keeper of the Storyteller Society.
+Summon {{storytellerCount}} distinct storytellers for this fragment:
+"{{fragmentText}}"`;
+
+const LLM_ROUTE_CONFIG_EXAMPLE = {
+  routeKey: 'text_to_storyteller',
+  routePath: '/api/textToStoryteller',
+  method: 'POST',
+  description: 'Generate storyteller personas from a fragment.',
+  promptTemplate: STORYTELLER_PROMPT_EXAMPLE,
+  responseSchema: {
+    type: 'object',
+    required: ['storytellers'],
+    properties: {
+      storytellers: { type: 'array' }
+    }
+  },
+  meta: {
+    updatedBy: 'admin',
+    updatedAt: '2026-02-11T12:00:00.000Z'
+  }
+};
+
 const op = ({ summary, importance, flow, ...rest }) => ({
   summary,
   description: `Importance: ${importance}. Used in flow: ${flow}.`,
@@ -84,15 +107,21 @@ export function buildOpenApiSpec() {
         },
         LlmRouteConfig: {
           type: 'object',
+          required: ['routeKey', 'routePath', 'method', 'description', 'promptTemplate', 'responseSchema'],
           properties: {
             routeKey: { type: 'string' },
             routePath: { type: 'string' },
             method: { type: 'string' },
             description: { type: 'string' },
-            promptTemplate: { type: 'string' },
+            promptTemplate: {
+              type: 'string',
+              description: 'Route-level LLM system prompt template with {{token}} placeholders.',
+              example: STORYTELLER_PROMPT_EXAMPLE
+            },
             responseSchema: { type: 'object', additionalProperties: true },
             meta: { type: 'object', additionalProperties: true }
-          }
+          },
+          example: LLM_ROUTE_CONFIG_EXAMPLE
         }
       }
     },
@@ -131,7 +160,10 @@ export function buildOpenApiSpec() {
               description: 'Route config map.',
               ...jsonResponse({
                 type: 'object',
-                additionalProperties: { $ref: '#/components/schemas/LlmRouteConfig' }
+                additionalProperties: { $ref: '#/components/schemas/LlmRouteConfig' },
+                example: {
+                  text_to_storyteller: LLM_ROUTE_CONFIG_EXAMPLE
+                }
               })
             },
             '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
@@ -147,7 +179,15 @@ export function buildOpenApiSpec() {
           security: [{ AdminApiKey: [] }],
           parameters: [pathParam('routeKey', 'Configured route key (for example worlds_create).')],
           responses: {
-            '200': { description: 'Route config returned.', ...jsonResponse({ $ref: '#/components/schemas/LlmRouteConfig' }) },
+            '200': {
+              description: 'Route config returned.',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/LlmRouteConfig' },
+                  example: LLM_ROUTE_CONFIG_EXAMPLE
+                }
+              }
+            },
             '400': { description: 'Unknown routeKey.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
@@ -168,7 +208,10 @@ export function buildOpenApiSpec() {
                   type: 'object',
                   required: ['promptTemplate'],
                   properties: {
-                    promptTemplate: { type: 'string' },
+                    promptTemplate: {
+                      type: 'string',
+                      example: STORYTELLER_PROMPT_EXAMPLE
+                    },
                     updatedBy: { type: 'string' }
                   }
                 }
