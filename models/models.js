@@ -86,6 +86,37 @@ const ArenaSchema = new mongoose.Schema({
 
 export const Arena = mongoose.model('Arena', ArenaSchema);
 
+const WorldSchema = new mongoose.Schema({
+  worldId: { type: String, required: true, index: true, unique: true },
+  sessionId: { type: String, required: true, index: true },
+  playerId: { type: String, required: true, index: true },
+  seedText: { type: String, required: true },
+  name: { type: String, required: true },
+  summary: { type: String },
+  tone: { type: String },
+  pillars: { type: [String], default: [] },
+  themes: { type: [String], default: [] },
+  palette: { type: [String], default: [] }
+}, { timestamps: true });
+
+export const World = mongoose.model('World', WorldSchema);
+
+const WorldElementSchema = new mongoose.Schema({
+  worldId: { type: String, required: true, index: true },
+  sessionId: { type: String, required: true, index: true },
+  playerId: { type: String, required: true, index: true },
+  type: { type: String, enum: ['faction', 'location', 'rumor', 'lore'], required: true, index: true },
+  name: { type: String, required: true },
+  description: { type: String },
+  tags: { type: [String], default: [] },
+  traits: { type: [String], default: [] },
+  hooks: { type: [String], default: [] }
+}, { timestamps: true });
+
+WorldElementSchema.index({ worldId: 1, type: 1 });
+
+export const WorldElement = mongoose.model('WorldElement', WorldElementSchema);
+
 const StorytellerSchema = new mongoose.Schema({
   session_id: { type: String, required: true, index: true },
   sessionId: { type: String, index: true },
@@ -98,7 +129,9 @@ const StorytellerSchema = new mongoose.Schema({
   },
   influences: { type: [String] },
   known_universes: { type: [String] },
-  level: { type: Number },
+  level: { type: Number, default: 1 },
+  experience: { type: Number, default: 0 },
+  totalStorytellingPoints: { type: Number, default: 0 },
   voice_creation: {
     voice: { type: String },
     age: { type: String },

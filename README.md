@@ -15,6 +15,40 @@ node server_new.js
 
 Default port: `5001`.
 
+## API Docs (Swagger)
+
+- Swagger UI: `GET /api/docs`
+- OpenAPI JSON: `GET /api/openapi.json`
+
+These focus on the important gameplay/worldbuilding/admin routes so the route surface is easier to audit.
+
+## Admin LLM Config
+
+The backend now supports editable prompt templates and response schemas (JSON Schema) for key LLM-backed routes.
+
+- List configs: `GET /api/admin/llm-config`
+- Get one route config: `GET /api/admin/llm-config/:routeKey`
+- Update prompt template: `PUT /api/admin/llm-config/:routeKey/prompt`
+- Update response schema: `PUT /api/admin/llm-config/:routeKey/schema`
+- Reset route config to defaults: `POST /api/admin/llm-config/:routeKey/reset`
+
+Route config keys currently available:
+
+- `worlds_create`
+- `worlds_elements`
+- `text_to_storyteller`
+- `storyteller_mission`
+
+Persistence:
+
+- Defaults are in code (`services/llmRouteConfigService.js`)
+- Overrides are stored in `config/llm_route_overrides.json`
+
+Optional admin auth:
+
+- Set `ADMIN_API_KEY` in env.
+- Send `x-admin-key: <your-key>` header for `/api/admin/*` routes.
+
 ## Request Conventions
 
 - Most routes require `sessionId` and `playerId`.
@@ -95,6 +129,84 @@ Response (cards included):
   }
 }
 ```
+
+### POST `/api/worlds`
+
+Creates a world from a seed fragment and stores it for the session/player.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "seedText": "A trade sea of salt glass, where storms rewrite maps each season.",
+  "name": "The Shale Meridian",
+  "debug": true
+}
+```
+
+Response:
+```json
+{
+  "world": {
+    "worldId": "e1a2b3c4-d5f6-7890-1234-56789abcdeff",
+    "sessionId": "demo-1",
+    "playerId": "player-1",
+    "seedText": "A trade sea of salt glass, where storms rewrite maps each season.",
+    "name": "The Shale Meridian",
+    "summary": "A salt-crusted inland sea holds the last trade routes...",
+    "tone": "weathered, luminous, quietly political",
+    "pillars": ["scarcity-driven diplomacy", "ancient machines waking with the tides"],
+    "themes": ["oaths and debt", "memory as currency"],
+    "palette": ["ash white", "oxidized copper", "glacier blue"]
+  },
+  "mocked": true
+}
+```
+
+### POST `/api/worlds/:worldId/factions|locations|rumors|lore`
+
+Generates world elements for a given world and stores them.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "count": 2,
+  "debug": true
+}
+```
+
+Response:
+```json
+{
+  "worldId": "e1a2b3c4-d5f6-7890-1234-56789abcdeff",
+  "type": "faction",
+  "elements": [
+    {
+      "name": "The Tide Ledger",
+      "description": "A merchant synod that writes contracts...",
+      "tags": ["trade", "ritual", "law"],
+      "traits": ["meticulous", "soft-spoken"],
+      "hooks": ["They need an oathbreaker retrieved..."]
+    }
+  ],
+  "mocked": true
+}
+```
+
+### GET `/api/worlds?sessionId=...&playerId=...`
+
+Lists worlds for the session/player.
+
+### GET `/api/worlds/:worldId?sessionId=...&playerId=...`
+
+Fetches a single world.
+
+### GET `/api/worlds/:worldId/state?sessionId=...&playerId=...`
+
+Returns the world plus grouped elements by type.
 
 ### POST `/api/textToStoryteller`
 
@@ -337,171 +449,58 @@ Request body:
 }
 ```
 
-### /api/brewing/*
+## 5 Pillar Architecture (v100)
 
-Multiplayer brewing room endpoints and SSE (room create/join/ready/start/turn submit/events).
+The system is designed for maximum maintainability and clarity, organized into 5 functional layers:
 
-### POST `/api/brewing/rooms`
+1.  **Engine** (`scenarioRunnerService.js`): Orchestrates session lifecycles and narrative steps.
+2.  **Brain** (`mockLLMService.js`): Simulates LLM responses with context-aware grounding logic.
+3.  **Contract** (`llmModuleSchemas.js`): Enforces strict JSON schemas (including mandatory **Slugs**).
+4.  **Voice** (`llmPromptService.js`): Translates context into human-readable LLM instructions.
+5.  **Memory** (`agentReflectionService.js`): Analyzes past sessions to evolve agent understanding.
 
-Creates a new room.
+---
 
-Response:
-```json
-{
-  "roomId": "ABCD"
-}
+## Technical Rigor: The Slug System
+
+Entities are identified by three layers of identity:
+- **UUID**: Primary database key (e.g., `ent_123_abc`).
+- **Slug**: Technical, human-readable reference (e.g., `the-obsidian-hound`). **Required in all scripts.**
+- **Name**: Human-readable display text (e.g., "The Obsidian Hound").
+
+The system automatically resolves references in the order: `UUID` -> `Slug` -> `Name`.
+
+---
+
+## Execution Pipeline
+
+We have consolidated all experimental logic into three core entry points:
+
+### 1. `scripts/master_runner.js`
+The primary tool for running world scenarios. Supports multiple "Lore Cycles" (e.g., Desert Watch, Threshold).
+```bash
+# Run the Desert Watch scenario
+NODE_ENV=test node scripts/master_runner.js desert_watch
 ```
 
-### GET `/api/brewing/rooms/:roomId`
-
-Fetches the current room state.
-
-Response (shape):
-```json
-{
-  "roomId": "ABCD",
-  "phase": "lobby",
-  "players": [
-    {
-      "playerId": "player-uuid",
-      "maskId": "mask-1",
-      "maskName": "Mask 1",
-      "displayName": "Ada",
-      "status": "not_ready",
-      "isBot": false
-    }
-  ],
-  "turn": {
-    "index": 0,
-    "activePlayerId": "player-uuid",
-    "round": 1,
-    "totalRounds": 6
-  },
-  "brew": {
-    "summaryLines": ["The cauldron bubbles quietly..."],
-    "vials": [
-      {
-        "id": "vial-uuid",
-        "title": "Essence of Rain",
-        "containerDescription": "A twisted glass bottle emitting faint smoke.",
-        "substanceDescription": "A glowing liquid derived from rain.",
-        "pourEffect": "The universe shudders slightly.",
-        "timestamp": 1700000000000,
-        "addedByMaskId": "mask-1"
-      }
-    ]
-  }
-}
+### 2. `scripts/seed_world.js`
+Rapidly seeds a world with initial entities and memories based on a fragment.
+```bash
+NODE_ENV=test node scripts/seed_world.js "A silent forest where the trees whisper secrets."
 ```
 
-Notes:
-- `privateIngredient` is never returned in public room state.
+### 3. `scripts/teach_agent.js`
+Injects new narrative principles or themes into the Agent's brain.
 
-### POST `/api/brewing/rooms/:roomId/join`
+---
 
-Adds a player to the room.
+## Development & Persistence
 
-Request body:
-```json
-{
-  "maskId": "mask-1",
-  "displayName": "Ada"
-}
+- **MongoDB**: Stores the rich state (Sensory Profiles, Dynamic States, Lore).
+- **Neo4j**: Stores the spatial graph (Entity relationships and clusters).
+- **Brain (Locus)**: The `.gemini/brain` directory contains the task list, achievement reports, and architecture plans.
+
+Running locally requires Docker for Neo4j:
+```bash
+docker-compose up -d
 ```
-
-Response:
-```json
-{
-  "playerId": "player-uuid",
-  "roomState": { "roomId": "ABCD" }
-}
-```
-
-### POST `/api/brewing/rooms/:roomId/players/:playerId/ready`
-
-Sets a player ready state.
-
-Request body:
-```json
-{
-  "ready": true
-}
-```
-
-Response:
-```json
-{
-  "roomId": "ABCD"
-}
-```
-
-### POST `/api/brewing/rooms/:roomId/start`
-
-Moves the room to brewing and starts the first turn.
-
-Response:
-```json
-{
-  "roomId": "ABCD"
-}
-```
-
-### POST `/api/brewing/rooms/:roomId/turn/submit`
-
-Submits an ingredient for the active player.
-
-Headers:
-- `x-player-id: player-uuid`
-
-Request body:
-```json
-{
-  "ingredient": "Rain"
-}
-```
-
-Response:
-```json
-{
-  "ok": true
-}
-```
-
-### GET `/api/brewing/events?roomId=...`
-
-SSE stream of room events. Each event is JSON with `type` and `payload`.
-
-Event examples:
-```json
-{ "type": "CONNECTED", "payload": { "roomId": "ABCD" } }
-{ "type": "PLAYER_JOINED", "payload": { "player": {}, "roomState": {} } }
-{ "type": "PLAYER_READY_CHANGED", "payload": { "playerId": "player-uuid", "status": "ready", "roomState": {} } }
-{ "type": "PHASE_CHANGED", "payload": { "phase": "brewing", "roomState": {} } }
-{ "type": "TURN_STARTED", "payload": { "turn": {} } }
-{ "type": "INGREDIENT_ACCEPTED", "payload": { "playerId": "player-uuid", "text": "Rain" } }
-{ "type": "VIAL_REVEALED", "payload": { "vial": {} } }
-{ "type": "BREW_SUMMARY_UPDATED", "payload": { "summaryLines": [] } }
-{ "type": "TURN_ENDED", "payload": {} }
-{ "type": "BREW_COMPLETED", "payload": { "brew": {} } }
-```
-
-## Test Flow (Mocked)
-
-`server_new.flow.test.js` exercises a mocked end-to-end flow that still persists data:
-
-- Start with a fragment.
-- Create entities via `/api/textToEntity` (`debug: true`).
-- Create a storyteller via `/api/textToStoryteller` (`debug: true`).
-- Send the storyteller on a mission via `/api/sendStorytellerToEntity` (`debug: true`).
-
-This verifies:
-- Entities get external IDs and are saved to Mongo.
-- Storytellers are saved with `status` and `missions`.
-- Missions create sub-entities linked by `mainEntityId`.
-
-Notes:
-- `entityId` should match the `id` returned from `/api/textToEntity`.
-- `storytellerId` is the Mongo `_id` from `/api/textToStoryteller` (name also works for lookup).
-- `storytellingPoints` and `message` are required.
-- `duration` is expected in days.
-- Use `debug` or `mock` to return a mocked outcome and mocked sub-entities.

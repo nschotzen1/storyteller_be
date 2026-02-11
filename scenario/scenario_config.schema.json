@@ -1,0 +1,152 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Scenario Configuration",
+    "description": "Configuration for running a game scenario with the Scenario Runner",
+    "type": "object",
+    "required": [
+        "fragment",
+        "players"
+    ],
+    "properties": {
+        "seed": {
+            "type": "integer",
+            "description": "Random seed for deterministic mocks"
+        },
+        "fragment": {
+            "type": "string",
+            "description": "Initial narrative fragment to seed the scenario"
+        },
+        "players": {
+            "type": "object",
+            "required": [
+                "count"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 6,
+                    "description": "Number of players in the scenario"
+                }
+            }
+        },
+        "universe": {
+            "type": "object",
+            "properties": {
+                "generate_storytellers": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether to generate storyteller pool"
+                },
+                "storyteller_count": {
+                    "type": "integer",
+                    "default": 3,
+                    "minimum": 1,
+                    "maximum": 10
+                },
+                "memory_count": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20
+                }
+            }
+        },
+        "mock_overrides": {
+            "type": "object",
+            "description": "Per-module mock flags. If not specified, defaults to mocked.",
+            "properties": {
+                "generate_memories": {
+                    "type": "boolean"
+                },
+                "generate_entities": {
+                    "type": "boolean"
+                },
+                "generate_storytellers": {
+                    "type": "boolean"
+                },
+                "validate_connection": {
+                    "type": "boolean"
+                },
+                "storyteller_investigate": {
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": false
+        },
+        "steps": {
+            "type": "array",
+            "description": "Sequence of game actions to execute",
+            "items": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "action"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Unique identifier for this step"
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "PLACE_AND_CONNECT",
+                            "CONNECT_ONLY",
+                            "ACQUIRE_STORYTELLER",
+                            "SEND_STORYTELLER"
+                        ],
+                        "description": "The action type to execute"
+                    },
+                    "player_seat": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Which player performs this action (0-indexed)"
+                    },
+                    "source_card_id": {
+                        "type": "string",
+                        "description": "Card ID to use as source. Use 'auto' for automatic selection."
+                    },
+                    "target_card_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Card IDs to connect to. Use ['auto'] for automatic selection."
+                    },
+                    "storyteller_id": {
+                        "type": "string",
+                        "description": "Storyteller ID for ACQUIRE_STORYTELLER or SEND_STORYTELLER"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Message for SEND_STORYTELLER action"
+                    },
+                    "relationship": {
+                        "type": "object",
+                        "properties": {
+                            "surfaceText": {
+                                "type": "string"
+                            },
+                            "direction": {
+                                "type": "string",
+                                "enum": [
+                                    "source_to_target",
+                                    "target_to_source",
+                                    "bidirectional"
+                                ]
+                            }
+                        }
+                    },
+                    "mock_overrides": {
+                        "type": "object",
+                        "description": "Step-level mock overrides (takes precedence over scenario-level)",
+                        "additionalProperties": {
+                            "type": "boolean"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -464,11 +464,13 @@ function createAIResponse(fullText, metadata, fadeSteps = 3) {
     delay: fadeDelay
   });
 
-  return {
+  const response = {
     writing_sequence,
     fade_sequence,
     metadata: normStyle       // <--- output normalized metadata keys
   };
+  response.sequence = [...writing_sequence, ...fade_sequence];
+  return response;
 }
 
 
@@ -618,7 +620,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
           clientResponse.writing_sequence = responseObject.writing_sequence.map(actionObj => {
             const newActionObj = { action: actionObj.action, delay: actionObj.delay };
             if (actionObj.action === 'type') {
-              newActionObj.text = actionObj.continuation;
+              newActionObj.text = actionObj.text ?? actionObj.continuation ?? actionObj.to_text ?? '';
               newActionObj.style = actionObj.style;
             } else if (actionObj.action === 'delete') {
               newActionObj.count = actionObj.count;
@@ -635,11 +637,16 @@ app.post('/api/send_typewriter_text', async (req, res) => {
               phase: actionObj.phase,
               delay: actionObj.delay
             };
-            newActionObj.to_text = actionObj.continuation;
+            newActionObj.to_text = actionObj.to_text ?? actionObj.continuation ?? actionObj.text ?? '';
             newActionObj.style = actionObj.style;
             return newActionObj;
           });
         }
+
+        clientResponse.sequence = [
+          ...(clientResponse.writing_sequence || []),
+          ...(clientResponse.fade_sequence || [])
+        ];
         return clientResponse;
       };
 
@@ -784,7 +791,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
             clientResponse.writing_sequence = responseObject.writing_sequence.map(actionObj => {
               const newActionObj = { action: actionObj.action, delay: actionObj.delay };
               if (actionObj.action === 'type') {
-                newActionObj.text = actionObj.continuation;
+                newActionObj.text = actionObj.text ?? actionObj.continuation ?? actionObj.to_text ?? '';
                 newActionObj.style = actionObj.style;
               } else if (actionObj.action === 'delete') {
                 newActionObj.count = actionObj.count;
@@ -801,11 +808,16 @@ app.post('/api/send_typewriter_text', async (req, res) => {
                 phase: actionObj.phase,
                 delay: actionObj.delay
               };
-              newActionObj.to_text = actionObj.continuation;
+              newActionObj.to_text = actionObj.to_text ?? actionObj.continuation ?? actionObj.text ?? '';
               newActionObj.style = actionObj.style;
               return newActionObj;
             });
           }
+
+          clientResponse.sequence = [
+            ...(clientResponse.writing_sequence || []),
+            ...(clientResponse.fade_sequence || [])
+          ];
           return clientResponse;
         };
 

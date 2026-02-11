@@ -22,6 +22,7 @@ const { GeneratedContent } = await import('./storyteller/utils.js');
 
 let mongoServer;
 let consoleErrorSpy;
+const DEFAULT_FLOW_DEBUG = process.env.FLOW_DEBUG !== 'false';
 
 beforeAll(async () => {
     mongoServer = await MongoMemoryServer.create();
@@ -69,7 +70,7 @@ describe('Arena Relationships Flow (End-to-End)', () => {
                 playerId,
                 text: 'Mocked request',
                 includeCards: true,
-                debug: true
+                debug: DEFAULT_FLOW_DEBUG
             });
 
         expect(res.status).toBe(200);
@@ -120,7 +121,7 @@ describe('Arena Relationships Flow (End-to-End)', () => {
             source: { entityId: card1.entityId },
             targets: [{ entityId: card2.entityId }],
             relationship: { surfaceText: "near" }, // Too short
-            debug: true // Use deterministic mock logic
+            debug: DEFAULT_FLOW_DEBUG // Use deterministic mock logic
         };
 
         const res = await request(app)
@@ -141,7 +142,7 @@ describe('Arena Relationships Flow (End-to-End)', () => {
             source: { entityId: card1.entityId },
             targets: [{ entityId: card2.entityId }],
             relationship: { surfaceText: "sometimes seen at the summit during storms" }, // >10 chars
-            debug: true
+            debug: DEFAULT_FLOW_DEBUG
         };
 
         const res = await request(app)
@@ -178,7 +179,7 @@ describe('Arena Relationships Flow (End-to-End)', () => {
             source: { entityId: card1.entityId },
             targets: [{ entityId: card2.entityId }],
             relationship: { surfaceText: "sometimes seen at the summit during storms" },
-            debug: true
+            debug: DEFAULT_FLOW_DEBUG
         };
 
         const res = await request(app)
