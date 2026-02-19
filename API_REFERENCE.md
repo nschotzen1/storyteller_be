@@ -192,6 +192,73 @@ Generates storyteller personas (NPCs/Narrators).
 }
 ```
 
+### POST `/api/fragmentToMemories`
+Generates memory flashes from a single fragment and saves them in MongoDB.
+
+**Request:**
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "fragment": "It was getting dark and the pass narrowed into wet stone.",
+  "count": 3
+}
+```
+
+**Response:**
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "batchId": "f14f11ee-4f41-4df1-9b31-2c351f2f0ee6",
+  "memories": [
+    {
+      "memory_strength": "vivid",
+      "action_name": "crossing unstable stone ledges above a flooded ravine",
+      "whose_eyes": "the courier gripping a frayed rope line",
+      "interior/exterior": "exterior",
+      "miseenscene": "The rope burns my palm..."
+    }
+  ],
+  "count": 1,
+  "mocked": false
+}
+```
+
+### GET `/api/memories`
+Fetches stored memory records by session.
+
+**Query:** `?sessionId=...&playerId=...&batchId=...`
+
+**Response:**
+```json
+{
+  "sessionId": "demo-1",
+  "count": 3,
+  "memories": [
+    {
+      "_id": "67ab6cb1f1f3dd4f005a0a55",
+      "batchId": "f14f11ee-4f41-4df1-9b31-2c351f2f0ee6",
+      "memory_strength": "vivid"
+    }
+  ]
+}
+```
+
+### DELETE `/api/memories`
+Deletes stored memory records by session.
+
+**Query:** `?sessionId=...&playerId=...&batchId=...`
+
+**Response:**
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "deletedCount": 3
+}
+```
+
 ### POST `/api/sendStorytellerToEntity`
 Sends a storyteller on a mission to an entity card.
 

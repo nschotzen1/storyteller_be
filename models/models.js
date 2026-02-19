@@ -53,11 +53,9 @@ const SessionVectorSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-if (process.env.NODE_ENV !== 'test') {
-  mongoose.connect('mongodb://localhost:27017/storytelling', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  }).then(() => {
+if (process.env.NODE_ENV !== 'test' && mongoose.connection.readyState === 0) {
+  const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/storytelling';
+  mongoose.connect(mongoUri).then(() => {
     console.log("Connected to MongoDB.");
   }).catch(err => {
     console.error("MongoDB connection error:", err);
@@ -163,3 +161,24 @@ const StorytellerSchema = new mongoose.Schema({
 StorytellerSchema.index({ session_id: 1, playerId: 1, name: 1 });
 
 export const Storyteller = mongoose.model('Storyteller', StorytellerSchema);
+
+const QuestTraversalEventSchema = new mongoose.Schema({
+  playerId: { type: String, default: '' },
+  fromScreenId: { type: String, default: '' },
+  toScreenId: { type: String, required: true },
+  direction: { type: String, default: '' },
+  promptText: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: false });
+
+const QuestScreenGraphSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, index: true },
+  questId: { type: String, required: true, default: 'ruined_rose_court', index: true },
+  startScreenId: { type: String, required: true },
+  screens: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  traversalLog: { type: [QuestTraversalEventSchema], default: [] }
+}, { timestamps: true });
+
+QuestScreenGraphSchema.index({ sessionId: 1, questId: 1 }, { unique: true });
+
+export const QuestScreenGraph = mongoose.model('QuestScreenGraph', QuestScreenGraphSchema);

@@ -53,6 +53,7 @@ console.log('asdf')
 import express from 'express';
 import cors from 'cors';
 import { promises as fs } from 'fs';
+import fsSync from 'fs';
 import path from 'path';
 import { generateInitialChatPrompt, generateInitialScenePrompt } from './ai/openai/personaChatPrompts.js';
 import { ChatMessage, NarrativeFragment, SessionVector, Storyteller } from './models/models.js'; // Consolidated and corrected ChatMessage import; Added SessionVector
@@ -107,10 +108,43 @@ const SHOULD_MOCK_GENERATE_TEXTURES = true;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const ASSETS_ROOT_CANDIDATES = [
+  path.resolve(process.cwd(), 'assets'),
+  path.resolve(process.cwd(), '../assets'),
+  path.resolve(__dirname, 'assets'),
+  path.resolve(__dirname, '../assets')
+];
+const ASSETS_ROOTS = Array.from(new Set(ASSETS_ROOT_CANDIDATES)).filter((candidatePath) =>
+  fsSync.existsSync(candidatePath)
+);
+if (ASSETS_ROOTS.length === 0) {
+  ASSETS_ROOTS.push(path.join(__dirname, 'assets'));
+}
 const app = express();
 app.use(express.json());
 app.use(cors());
 import { getOrGenerateSpread, chooseSpreadOption } from './services/story_deck_service.js';
+
+function parseBooleanFlag(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return null;
+}
+
+function resolveTypewriterMockMode(body = {}) {
+  const explicitFlags = [body.mock, body.debug, body.mock_api_calls, body.mocked_api_calls];
+  for (const flag of explicitFlags) {
+    const parsed = parseBooleanFlag(flag);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return TYPEWRITER_MOCK_MODE;
+}
 
 // --- Story Deck Routes ---
 
@@ -244,7 +278,9 @@ function chooseStorytellerMock(sessionId, currentText) {
 
 
 
-app.use('/assets', express.static(path.join(__dirname, 'assets')));
+for (const assetsRoot of ASSETS_ROOTS) {
+  app.use('/assets', express.static(assetsRoot));
+}
 const PORT = process.env.PORT || 5001;
 
 
@@ -484,7 +520,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     }
 
     console.log(`✍️ Typewriter API — Session: ${sessionId} — Message: ${message}`);
-    let should_mock = true
+    const should_mock = resolveTypewriterMockMode(req.body);
     if (should_mock) {
       const wordCount = message.trim().split(/\s+/).length;
       let mockAIResponse; // Renamed for clarity to avoid conflict with mockResponse variable if it's in a broader scope
@@ -975,9 +1011,6 @@ app.post('/api/getNarrationScript', async (req, res) => {
 });
 
 
-
-
-app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 
 // Helper function (can be placed in a shared utility file later)
@@ -1483,6 +1516,18 @@ app.post('/api/generateTextures', generateTexturesPostHandler);
 app.post('/api/prefixes', dynamicPrefixesPostHandler);
 
 
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+if (process.env.NODE_ENV !== 'test') {
+  const server = app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+
+  server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use. Stop the existing process or run with a different port (for example: PORT=5002 node server.js).`);
+      process.exit(1);
+    }
+
+    console.error('Server startup error:', err);
+    process.exit(1);
+  });
+}
 
 export { app };

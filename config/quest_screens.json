@@ -1,0 +1,82 @@
+{
+  "startScreenId": "cliff_path",
+  "screens": [
+    {
+      "id": "cliff_path",
+      "title": "Ivy Pass",
+      "prompt": "The cliff path narrows beside ruined masonry. Vines whisper in the evening wind.",
+      "imageUrl": "/ruin_south_a.png",
+      "textPromptPlaceholder": "What do you say into the dusk?",
+      "directions": [
+        {
+          "direction": "north",
+          "label": "Follow the path to the arch",
+          "targetScreenId": "broken_arch"
+        },
+        {
+          "direction": "down",
+          "label": "Peer into the well",
+          "targetScreenId": "well_edge"
+        }
+      ]
+    },
+    {
+      "id": "broken_arch",
+      "title": "Broken Arch",
+      "prompt": "A fractured arch frames a corridor of stone. Mist rises from the gorge below.",
+      "imageUrl": "/arenas/petal_hex_v1.png",
+      "textPromptPlaceholder": "What clue do you inspect?",
+      "directions": [
+        {
+          "direction": "south",
+          "label": "Return to the ivy pass",
+          "targetScreenId": "cliff_path"
+        },
+        {
+          "direction": "east",
+          "label": "Step toward the chamber",
+          "targetScreenId": "chamber_of_doors"
+        }
+      ]
+    },
+    {
+      "id": "well_edge",
+      "title": "The Well",
+      "prompt": "A deep stone throat descends into darkness. The air smells of metal and rain.",
+      "imageUrl": "/well/well_background.png",
+      "textPromptPlaceholder": "What do you drop into the well?",
+      "directions": [
+        {
+          "direction": "up",
+          "label": "Back to the path",
+          "targetScreenId": "cliff_path"
+        },
+        {
+          "direction": "inside",
+          "label": "Enter the chamber of doors",
+          "targetScreenId": "chamber_of_doors"
+        }
+      ]
+    },
+    {
+      "id": "chamber_of_doors",
+      "title": "Chamber of Doors",
+      "prompt": "Three doors stand under a shaft of light, each ring worn by countless hands.",
+      "imageUrl": "/textures/decor/film_frame_desert.png",
+      "textPromptPlaceholder": "Which door speaks to you?",
+      "directions": [
+        {
+          "direction": "west",
+          "label": "Back to the broken arch",
+          "targetScreenId": "broken_arch"
+        },
+        {
+          "direction": "outside",
+          "label": "Return to the well edge",
+          "targetScreenId": "well_edge"
+        }
+      ]
+    }
+  ],
+  "updatedAt": "2026-02-11T19:30:01.872Z"
+}

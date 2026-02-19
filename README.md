@@ -38,6 +38,7 @@ Route config keys currently available:
 - `worlds_elements`
 - `text_to_storyteller`
 - `storyteller_mission`
+- `fragment_to_memories`
 
 Persistence:
 
@@ -259,6 +260,104 @@ Response:
   "count": 1
 }
 ```
+
+### POST `/api/fragmentToMemories`
+
+Generates memory flashes from a fragment and persists each memory in MongoDB.
+
+Request body:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "fragment": "It was getting dark, and the pass had no rail, only wet stone and wind.",
+  "count": 3,
+  "includeCards": true,
+  "includeFront": true,
+  "includeBack": true,
+  "mocked_api_calls": false
+}
+```
+
+Notes:
+- `sessionId` is required.
+- Use `text`, `userText`, or `fragment` for source text.
+- `count` (or `numberOfMemories`) defaults to `3` and is clamped to 1–10.
+- `includeCards` defaults to `false`.
+- `includeFront` and `includeBack` default to `true` when cards are requested.
+- `debug`, `mock`, or `mocked_api_calls` returns mock memories.
+
+Response:
+```json
+{
+  "sessionId": "demo-1",
+  "playerId": "player-1",
+  "batchId": "f14f11ee-4f41-4df1-9b31-2c351f2f0ee6",
+  "memories": [
+    {
+      "_id": "67ab6cb1f1f3dd4f005a0a55",
+      "memory_strength": "vivid",
+      "emotional_sentiment": "tense resolve",
+      "action_name": "crossing unstable stone ledges above a flooded ravine",
+      "estimated_action_length": "20 minutes",
+      "time_within_action": "middle",
+      "actual_result": "a near-fall is avoided by instinct and luck",
+      "related_through_what": "shared location and immediate stakes echoing the fragment",
+      "geographical_relevance": "wet basalt and crosswinds make every step dangerous",
+      "temporal_relation": "this moment",
+      "organizational_affiliation": "none",
+      "consequences": "typical danger suddenly escalates into a critical choice",
+      "distance_from_fragment_location_km": 0,
+      "shot_type": "close-up",
+      "time_of_day": "twilight",
+      "whose_eyes": "the courier gripping a frayed rope line",
+      "interior/exterior": "exterior",
+      "what_is_being_watched": "boots slipping at the ravine edge",
+      "location": "Ravine shelf above the Yuradel run",
+      "estimated_duration_of_memory": 12,
+      "memory_distance": "meanwhile",
+      "entities_in_memory": ["ravine shelf", "rope line", "courier"],
+      "currently_assumed_turns_to_round": "10 minutes - 1 hour",
+      "relevant_rolls": ["Dexterity", "Perception", "Resolve"],
+      "action_level": "round",
+      "dramatic_definition": "Where Stone Gives Way",
+      "miseenscene": "The rope burns my palm...",
+      "front": {
+        "prompt": "Create a full-frame RPG collector card FRONT illustration...",
+        "imageUrl": "/assets/demo-1/memory_cards/f14f11ee-4f41-4df1-9b31-2c351f2f0ee6/01_where_stone_gives_way_front.png"
+      },
+      "back": {
+        "prompt": "Create a full-frame RPG collector card BACK texture...",
+        "imageUrl": "/assets/demo-1/memory_cards/f14f11ee-4f41-4df1-9b31-2c351f2f0ee6/01_where_stone_gives_way_back.png"
+      }
+    }
+  ],
+  "count": 1,
+  "mocked": false,
+  "cardOptions": {
+    "includeFront": true,
+    "includeBack": true
+  }
+}
+```
+
+### GET `/api/memories?sessionId=...&playerId=...&batchId=...`
+
+Returns persisted memories for a session from MongoDB.
+
+Notes:
+- `sessionId` is required.
+- `playerId` is optional (filters to one player).
+- `batchId` is optional (filters to one generation batch).
+
+### DELETE `/api/memories?sessionId=...&playerId=...&batchId=...`
+
+Deletes persisted memories for a session from MongoDB.
+
+Notes:
+- `sessionId` is required.
+- `playerId` is optional (deletes only one player's memories).
+- `batchId` is optional (deletes only one generation batch).
 
 ### POST `/api/sendStorytellerToEntity`
 

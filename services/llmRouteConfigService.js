@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Ajv from 'ajv';
+import { FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA } from '../contracts/fragmentMemoryContract.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -170,6 +171,50 @@ Output JSON only.`,
       },
       additionalProperties: true
     }
+  },
+  fragment_to_memories: {
+    routeKey: 'fragment_to_memories',
+    routePath: '/api/fragmentToMemories',
+    method: 'POST',
+    description: 'Generate memory flashes from a narrative fragment.',
+    promptTemplate: `You are the **Storyteller Seer**, the last guardian of a fragmented and almost-lost storytelling universe. Your task is to tap into moments in time and space, encapsulating the gritty reality of this world. Each memory represents a specific individual immersed in a moment of action, situated in a broader context that connects to the fragment or the universe at large. These moments are deeply physical, rooted in the rhythm of life, and seen through the stream of consciousness of their observer.
+
+You recover a surviving fragment—the only one left of this rich and vibrant world—and bring it to the **Storyteller’s Observatory**. This is the fragment: {{fragmentText}}
+
+As you read this fragment, **memories** begin to flash before your eyes. Some memories connect directly to the fragment's narrative, showing moments tied to its people, places, or events. Others offer secondary perspectives—seemingly unrelated happenings elsewhere in the universe—revealing its interconnected richness and untold stories. Both types immerse you in moments of this world through the eyes of its characters.
+
+Your task is to document these memories. Return them in a JSON array under key "memories", generating {{memoryCount}} memories (default is 3 when count is absent).
+
+Use this schema for each memory object:
+- memory_strength
+- emotional_sentiment
+- action_name
+- estimated_action_length
+- time_within_action
+- actual_result
+- related_through_what
+- geographical_relevance
+- temporal_relation
+- organizational_affiliation
+- consequences
+- distance_from_fragment_location_km
+- shot_type
+- time_of_day
+- whose_eyes
+- interior/exterior
+- what_is_being_watched
+- location
+- estimated_duration_of_memory
+- memory_distance
+- entities_in_memory
+- currently_assumed_turns_to_round
+- relevant_rolls
+- action_level
+- dramatic_definition
+- miseenscene
+
+Make the miseenscene first-person, sensory, specific, and paced to the memory itself (fast moments fragmented, slow moments reflective). Return only JSON.`,
+    responseSchema: FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA
   }
 };
 
