@@ -91,7 +91,7 @@ export async function textToImageOpenAi(prompt, samples = 1, localPath, shouldMo
 
   else {
 
-    for (let attempt = 1; attempt <= maxRetries; attempt + 1) {
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
       try {
         const response = await getOpenaiClient().images.generate({
           model: 'dall-e-3', // Corrected model name from 'gpt-image-1' to standard 'dall-e-3'

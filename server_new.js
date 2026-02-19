@@ -1,10 +1,12 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { BrewRoom } from './models/brewing_models.js';
 import { directExternalApiCall } from './ai/openai/apiService.js';
-import { Storyteller, SessionPlayer, Arena, World, WorldElement } from './models/models.js';
+import { Storyteller, SessionPlayer, Arena, World, WorldElement, QuestScreenGraph } from './models/models.js';
 import {
   createStoryTellerKey,
   createStorytellerIllustration
@@ -34,6 +36,8 @@ import {
   renderPrompt,
   validatePayloadForRoute
 } from './services/llmRouteConfigService.js';
+import memoriesRouter from './routes/memoriesRoutes.js';
+import { generateTypewriterPrompt } from './ai/openai/promptsUtils.js';
 
 
 const app = express();
@@ -41,11 +45,455 @@ app.use(express.json());
 app.use(cors());
 
 const PORT = process.env.PORT || 5001;
-const ASSETS_ROOT = path.resolve(process.cwd(), 'assets');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const ASSETS_ROOT_CANDIDATES = [
+  path.resolve(process.cwd(), 'assets'),
+  path.resolve(process.cwd(), '../assets'),
+  path.resolve(__dirname, 'assets'),
+  path.resolve(__dirname, '../assets')
+];
+const ASSETS_ROOTS = Array.from(new Set(ASSETS_ROOT_CANDIDATES)).filter((candidatePath) =>
+  fs.existsSync(candidatePath)
+);
+if (ASSETS_ROOTS.length === 0) {
+  ASSETS_ROOTS.push(path.resolve(process.cwd(), 'assets'));
+}
+const DEFAULT_QUEST_ID = 'ruined_rose_court';
+const DEFAULT_QUEST_SESSION_ID = 'rose-court-demo';
 const MOCK_STORYTELLER_ILLUSTRATION_URL = '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png';
 const OPEN_API_SPEC = buildOpenApiSpec();
+const TYPEWRITER_MOCK_MODE = process.env.TYPEWRITER_MOCK_MODE === 'true';
+const TYPEWRITER_FALLBACK_BACKGROUNDS = [
+  '/textures/decor/film_frame_desert.png',
+  '/well/well_background.png',
+  '/ruin_south_a.png',
+  '/arenas/petal_hex_v1.png'
+];
+const TYPEWRITER_DEFAULT_FONTS = [
+  { font: "'Uncial Antiqua', serif", font_size: '1.8rem', font_color: '#3b1d15' },
+  { font: "'IM Fell English SC', serif", font_size: '1.9rem', font_color: '#2a120f' },
+  { font: "'EB Garamond', serif", font_size: '2rem', font_color: '#1f0e08' }
+];
+const DEFAULT_QUEST_CONFIG = {
+  sessionId: DEFAULT_QUEST_SESSION_ID,
+  questId: DEFAULT_QUEST_ID,
+  startScreenId: 'outer_gate_murals',
+  screens: [
+    {
+      id: 'outer_gate_murals',
+      title: 'Outer Wall Murals',
+      prompt: 'You stand outside the ruined rose court as sunset stains the dust. Three shattered murals stare back from the wall, and beyond them the distant rosebud of pale obsidian catches the last light.',
+      imageUrl: '/ruin_south_a.png',
+      image_prompt: 'Wide cinematic view of the ruined rose court outer wall at sunset, three eroded murals, crumbling petal-like stonework, distant pale-obsidian rosebud tower, moody fantasy archaeology style.',
+      textPromptPlaceholder: 'Which mural do you inspect first?',
+      directions: [
+        { direction: 'west', label: 'Approach left mural panel', targetScreenId: 'mural_left_panel' },
+        { direction: 'north', label: 'Approach center mural panel', targetScreenId: 'mural_center_panel' },
+        { direction: 'east', label: 'Approach right mural panel', targetScreenId: 'mural_right_panel' },
+        { direction: 'south', label: 'Circle the western periphery', targetScreenId: 'west_periphery_path' }
+      ]
+    },
+    {
+      id: 'mural_left_panel',
+      title: 'Mural of the Drowned Citadel',
+      prompt: 'The left mural shows a drowned city under constellations that do not match the current sky.',
+      imageUrl: '/arenas/petal_hex_v1.png',
+      image_prompt: 'Ruined stone mural depicting a drowned citadel under alien stars, mosaic fragments missing, warm sunset light and dust in the air.',
+      textPromptPlaceholder: 'What detail from the drowned city stands out?',
+      directions: [
+        { direction: 'east', label: 'Return to mural forecourt', targetScreenId: 'outer_gate_murals' },
+        { direction: 'inside', label: 'Slip through cracked arch nearby', targetScreenId: 'west_breach_b2' }
+      ]
+    },
+    {
+      id: 'mural_center_panel',
+      title: 'Mural of the Solitary Walker',
+      prompt: 'The center mural shows a lone figure with a staff, walking toward a rosebud-shaped shrine.',
+      imageUrl: '/ruin_south_a.png',
+      image_prompt: 'Ancient mural of a solitary traveler with staff heading toward rosebud shrine, heavy weathering, cracked plaster, melancholic sunset tones.',
+      textPromptPlaceholder: 'What do you whisper to the solitary walker?',
+      directions: [
+        { direction: 'west', label: 'Return to mural forecourt', targetScreenId: 'outer_gate_murals' },
+        { direction: 'north', label: 'Follow the path hinted in mural', targetScreenId: 'north_periphery_walk' }
+      ]
+    },
+    {
+      id: 'mural_right_panel',
+      title: 'Mural of the Procession',
+      prompt: 'The right mural depicts a masked procession carrying lanterns toward an underground door.',
+      imageUrl: '/textures/decor/film_frame_desert.png',
+      image_prompt: 'Fragmented mural of masked lantern procession moving toward subterranean doorway, ceremonial atmosphere, worn fresco textures.',
+      textPromptPlaceholder: 'What omen do you draw from the procession?',
+      directions: [
+        { direction: 'west', label: 'Return to mural forecourt', targetScreenId: 'outer_gate_murals' },
+        { direction: 'east', label: 'Walk the eastern wall trail', targetScreenId: 'east_periphery_walk' }
+      ]
+    },
+    {
+      id: 'west_periphery_path',
+      title: 'Western Periphery',
+      prompt: 'You follow the wall where stones peel like dead petals. The wind carries a damp echo, as if water hides nearby.',
+      imageUrl: '/ruin_south_a.png',
+      image_prompt: 'Periphery path along crumbling rose-petal wall stones, twilight wind, hints of hidden water source, sparse ruined columns.',
+      textPromptPlaceholder: 'How cautiously do you move along the wall?',
+      directions: [
+        { direction: 'north', label: 'Inspect low breach marked B2', targetScreenId: 'west_breach_b2' },
+        { direction: 'east', label: 'Continue toward south wall', targetScreenId: 'south_periphery_walk' },
+        { direction: 'back', label: 'Return to outer mural gate', targetScreenId: 'outer_gate_murals' }
+      ]
+    },
+    {
+      id: 'west_breach_b2',
+      title: 'Breach B2',
+      prompt: 'A narrow fracture in the wall opens into a ring of fallen pillars just inside the court.',
+      imageUrl: '/arenas/petal_hex_v1.png',
+      image_prompt: 'Close ruined breach in circular wall opening to interior fallen pillar ring, dusty ancient stone textures, late sunset glow.',
+      textPromptPlaceholder: 'Do you squeeze through or hold position?',
+      directions: [
+        { direction: 'inside', label: 'Enter through the breach', targetScreenId: 'inner_west_ambulatory' },
+        { direction: 'outside', label: 'Return to western periphery', targetScreenId: 'west_periphery_path' }
+      ]
+    },
+    {
+      id: 'north_periphery_walk',
+      title: 'Northern Periphery',
+      prompt: 'At the northern arc, the wall curves around collapsed niches. The rosebud is clearer from here, cracked but upright.',
+      imageUrl: '/ruin_south_a.png',
+      image_prompt: 'Northern arc of ruined rose court wall with collapsed niches, distant cracked rosebud structure, cinematic dusk lighting.',
+      textPromptPlaceholder: 'What catches your attention along the northern wall?',
+      directions: [
+        { direction: 'east', label: 'Continue toward eastern slope', targetScreenId: 'east_periphery_walk' },
+        { direction: 'inside', label: 'Use narrow gap into inner ring', targetScreenId: 'inner_north_ambulatory' },
+        { direction: 'back', label: 'Return to center mural panel', targetScreenId: 'mural_center_panel' }
+      ]
+    },
+    {
+      id: 'east_periphery_walk',
+      title: 'Eastern Periphery',
+      prompt: 'The eastern wall is jagged and half-collapsed. Traces of footprints lead toward a cracked stair descending beneath rubble.',
+      imageUrl: '/ruin_south_a.png',
+      image_prompt: 'Eastern ruined wall with broken stair descending under rubble, faint footprints in dust, dramatic fantasy ruins at dusk.',
+      textPromptPlaceholder: 'Do you follow the footprints?',
+      directions: [
+        { direction: 'down', label: 'Descend cracked stair', targetScreenId: 'well_approach_gallery' },
+        { direction: 'south', label: 'Continue to southern wall', targetScreenId: 'south_periphery_walk' },
+        { direction: 'back', label: 'Return to right mural panel', targetScreenId: 'mural_right_panel' }
+      ]
+    },
+    {
+      id: 'well_approach_gallery',
+      title: 'Well Approach Gallery',
+      prompt: 'A gallery of broken arches opens to a circular shaft: the rumored well along the periphery.',
+      imageUrl: '/well/well_background.png',
+      image_prompt: 'Subterranean gallery near ruined wall with broken arches opening to ancient deep well shaft, dim amber sunset spill, ominous atmosphere.',
+      textPromptPlaceholder: 'What do you test near the well rim?',
+      directions: [
+        { direction: 'down', label: 'Peer into the well', targetScreenId: 'periphery_well_rim' },
+        { direction: 'up', label: 'Climb back to eastern periphery', targetScreenId: 'east_periphery_walk' }
+      ]
+    },
+    {
+      id: 'periphery_well_rim',
+      title: 'Well of Rings',
+      prompt: 'Iron rings hang beside the shaft. Far below, water reflects a faint script: almost words.',
+      imageUrl: '/well/well_background.png',
+      image_prompt: 'Ancient stone well with hanging iron rings, dark water reflecting ghostly script, high detail fantasy ruin close-up.',
+      textPromptPlaceholder: 'What message do you think the water is trying to speak?',
+      directions: [
+        { direction: 'inside', label: 'Follow hidden side tunnel', targetScreenId: 'well_side_tunnel' },
+        { direction: 'up', label: 'Back to well approach gallery', targetScreenId: 'well_approach_gallery' }
+      ]
+    },
+    {
+      id: 'well_side_tunnel',
+      title: 'Well Side Tunnel',
+      prompt: 'A cramped tunnel curves beneath the wall and rises toward the inner court, bypassing the open breaches.',
+      imageUrl: '/well/well_background.png',
+      image_prompt: 'Narrow tunnel branching from ancient well beneath ruined wall, damp stones, faint bioluminescent marks guiding inward.',
+      textPromptPlaceholder: 'How do you keep your bearings in the tunnel?',
+      directions: [
+        { direction: 'forward', label: 'Climb toward inner ring', targetScreenId: 'inner_south_ambulatory' },
+        { direction: 'back', label: 'Return to well rim', targetScreenId: 'periphery_well_rim' }
+      ]
+    },
+    {
+      id: 'south_periphery_walk',
+      title: 'Southern Periphery',
+      prompt: 'The southern wall holds deep scars and collapsed reliefs. A larger breach marked B3 opens inward.',
+      imageUrl: '/ruin_south_a.png',
+      image_prompt: 'Southern wall of ruined rose court with heavy scarring and large breach marker, rubble and long shadows in sunset.',
+      textPromptPlaceholder: 'Do you risk the larger breach?',
+      directions: [
+        { direction: 'inside', label: 'Enter through breach B3', targetScreenId: 'south_breach_b3' },
+        { direction: 'west', label: 'Return to western periphery', targetScreenId: 'west_periphery_path' },
+        { direction: 'north', label: 'Return to eastern periphery', targetScreenId: 'east_periphery_walk' }
+      ]
+    },
+    {
+      id: 'south_breach_b3',
+      title: 'Breach B3',
+      prompt: 'Past B3 the ground dips into an inner ambulatory lined with toppled columns and pale stone petals.',
+      imageUrl: '/arenas/petal_hex_v1.png',
+      image_prompt: 'Large breach opening to inner ambulatory with toppled columns and petal-like pale stone fragments, dramatic fantasy ruins.',
+      textPromptPlaceholder: 'What do you examine first inside B3?',
+      directions: [
+        { direction: 'north', label: 'Move along inner southern ring', targetScreenId: 'inner_south_ambulatory' },
+        { direction: 'outside', label: 'Exit to southern periphery', targetScreenId: 'south_periphery_walk' }
+      ]
+    },
+    {
+      id: 'inner_west_ambulatory',
+      title: 'Inner West Ambulatory',
+      prompt: 'Inside the court, the wall murals are only ghosts of pigment. The rosebud looms larger, petals split by time.',
+      imageUrl: '/arenas/petal_hex_v1.png',
+      image_prompt: 'Interior west ambulatory of ruined circular court, faded mural traces, looming cracked rosebud center, atmospheric dust.',
+      textPromptPlaceholder: 'How do you mark your route inside the court?',
+      directions: [
+        { direction: 'east', label: 'Circle toward inner north', targetScreenId: 'inner_north_ambulatory' },
+        { direction: 'south', label: 'Circle toward inner south', targetScreenId: 'inner_south_ambulatory' },
+        { direction: 'outside', label: 'Retreat through B2', targetScreenId: 'west_breach_b2' }
+      ]
+    },
+    {
+      id: 'inner_north_ambulatory',
+      title: 'Inner North Ambulatory',
+      prompt: 'A ring of cracked paving stones encircles the rosebud. Here, tiny obsidian flakes sparkle like frost.',
+      imageUrl: '/arenas/petal_hex_v1.png',
+      image_prompt: 'Inner north ring with cracked paving and sparkling obsidian flakes around central rosebud ruin, twilight fantasy realism.',
+      textPromptPlaceholder: 'What do the obsidian flakes suggest to you?',
+      directions: [
+        { direction: 'south', label: 'Continue to inner south ring', targetScreenId: 'inner_south_ambulatory' },
+        { direction: 'center', label: 'Approach rosebud base', targetScreenId: 'rosebud_outer_threshold' },
+        { direction: 'outside', label: 'Slip back to north periphery', targetScreenId: 'north_periphery_walk' }
+      ]
+    },
+    {
+      id: 'inner_south_ambulatory',
+      title: 'Inner South Ambulatory',
+      prompt: 'The ambulatory floor is fractured by radial seams leading directly into the rosebud foundation.',
+      imageUrl: '/arenas/petal_hex_v1.png',
+      image_prompt: 'Inner south ring of ruined court with radial seams converging toward central rosebud foundation, eerie golden dusk.',
+      textPromptPlaceholder: 'Which seam do you choose to follow?',
+      directions: [
+        { direction: 'center', label: 'Follow seam to rosebud threshold', targetScreenId: 'rosebud_outer_threshold' },
+        { direction: 'west', label: 'Cross to inner west ring', targetScreenId: 'inner_west_ambulatory' },
+        { direction: 'outside', label: 'Exit through B3', targetScreenId: 'south_breach_b3' }
+      ]
+    },
+    {
+      id: 'rosebud_outer_threshold',
+      title: 'Rosebud Threshold',
+      prompt: 'At the base of the rosebud, petals of pale obsidian form a jagged crown around a sealed iris seam.',
+      imageUrl: '/textures/decor/film_frame_desert.png',
+      image_prompt: 'Close view of central rosebud ruin built from pale obsidian-like petals, jagged crown, sealed iris seam entrance, mystical ruin lighting.',
+      textPromptPlaceholder: 'How do you test the seam between stone petals?',
+      directions: [
+        { direction: 'down', label: 'Search lower fissure for entry', targetScreenId: 'rosebud_lower_fissure' },
+        { direction: 'back', label: 'Return to inner north ring', targetScreenId: 'inner_north_ambulatory' },
+        { direction: 'south', label: 'Return to inner south ring', targetScreenId: 'inner_south_ambulatory' }
+      ]
+    },
+    {
+      id: 'rosebud_lower_fissure',
+      title: 'Lower Fissure',
+      prompt: 'A narrow fissure opens between petals. The air inside smells of wet stone and old incense.',
+      imageUrl: '/textures/decor/film_frame_desert.png',
+      image_prompt: 'Narrow fissure between giant rosebud stone petals, faint interior glow, damp ancient air, cinematic fantasy close-up.',
+      textPromptPlaceholder: 'Do you force the fissure or listen first?',
+      directions: [
+        { direction: 'inside', label: 'Enter the fissure passage', targetScreenId: 'rosebud_entry_passage' },
+        { direction: 'back', label: 'Back to rosebud threshold', targetScreenId: 'rosebud_outer_threshold' }
+      ]
+    },
+    {
+      id: 'rosebud_entry_passage',
+      title: 'Rosebud Entry Passage',
+      prompt: 'You crawl into a petal-shaped corridor of fragile obsidian stone. This is the first true entrance.',
+      imageUrl: '/textures/decor/film_frame_desert.png',
+      image_prompt: 'Interior passage inside rosebud-shaped ruin, petal-like obsidian walls, dim amber guidance light, sacred ruin atmosphere.',
+      textPromptPlaceholder: 'What do you leave as a marker at the entrance?',
+      directions: [
+        { direction: 'forward', label: 'Descend to inner antechamber', targetScreenId: 'rosebud_inner_antechamber' },
+        { direction: 'back', label: 'Retreat to lower fissure', targetScreenId: 'rosebud_lower_fissure' }
+      ]
+    },
+    {
+      id: 'rosebud_inner_antechamber',
+      title: 'Inner Antechamber',
+      prompt: 'An antechamber opens beneath the rosebud. Four carved rings encircle a final sealed iris gate.',
+      imageUrl: '/textures/decor/film_frame_desert.png',
+      image_prompt: 'Hidden antechamber beneath ruined rosebud, four carved rings around a sealed iris gate, sacred subterranean fantasy architecture.',
+      textPromptPlaceholder: 'What do you do before touching the iris gate?',
+      directions: [
+        { direction: 'back', label: 'Return to entry passage', targetScreenId: 'rosebud_entry_passage' }
+      ]
+    }
+  ]
+};
 
-app.use('/assets', express.static(ASSETS_ROOT));
+for (const assetsRoot of ASSETS_ROOTS) {
+  app.use('/assets', express.static(assetsRoot));
+}
+
+function parseBooleanFlag(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return null;
+}
+
+function resolveTypewriterMockMode(body = {}) {
+  const explicitFlags = [body.mock, body.debug, body.mock_api_calls, body.mocked_api_calls];
+  for (const flag of explicitFlags) {
+    const parsed = parseBooleanFlag(flag);
+    if (parsed !== null) return parsed;
+  }
+  return TYPEWRITER_MOCK_MODE;
+}
+
+function pickRandomItem(items) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function normalizeTypewriterMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const font = metadata.font || metadata.fontName || metadata.font_family || metadata.fontFamily;
+  const fontSize = metadata.font_size || metadata.fontSize || metadata.size;
+  const fontColor = metadata.font_color || metadata.fontColor || metadata.color;
+  if (!font && !fontSize && !fontColor) return null;
+  return {
+    font: font || pickRandomItem(TYPEWRITER_DEFAULT_FONTS).font,
+    font_size: typeof fontSize === 'number' ? `${fontSize}px` : (fontSize || '1.9rem'),
+    font_color: fontColor || '#2a120f'
+  };
+}
+
+function createTypewriterResponse(fullText, metadata, fadeSteps = 3) {
+  const style = normalizeTypewriterMetadata(metadata) || pickRandomItem(TYPEWRITER_DEFAULT_FONTS);
+  const narrative = typeof fullText === 'string' ? fullText.trim() : '';
+  const safeNarrative = narrative || 'The wind caught the page and held its breath.';
+
+  const writing_sequence = [
+    { action: 'type', text: safeNarrative, style, delay: 0 },
+    { action: 'pause', delay: 1200 }
+  ];
+
+  const fade_sequence = [];
+  const fadeDelay = Math.floor(14000 / (fadeSteps + 1));
+  for (let i = 0; i < fadeSteps; i += 1) {
+    const cutoff = Math.round(safeNarrative.length * (1 - (i + 1) / (fadeSteps + 1)));
+    fade_sequence.push({ action: 'pause', delay: i === 0 ? 2200 : 1000 });
+    fade_sequence.push({
+      action: 'fade',
+      phase: i + 1,
+      to_text: safeNarrative.slice(0, cutoff).trim(),
+      style,
+      delay: fadeDelay
+    });
+  }
+  fade_sequence.push({ action: 'pause', delay: 900 });
+  fade_sequence.push({ action: 'fade', phase: fadeSteps + 1, to_text: '', style, delay: fadeDelay });
+
+  return {
+    metadata: style,
+    writing_sequence,
+    fade_sequence,
+    sequence: [...writing_sequence, ...fade_sequence]
+  };
+}
+
+function buildMockContinuation(message) {
+  const words = String(message || '').trim().split(/\s+/).filter(Boolean).length;
+  if (words <= 5) return 'while a lantern blinked once in the ravine wind.';
+  if (words <= 12) return 'and the trail answered with bells buried under ash.';
+  return 'as the pass fell quiet and every footstep sounded borrowed.';
+}
+
+app.post('/api/next_film_image', async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Missing sessionId' });
+    }
+
+    const background = pickRandomItem(TYPEWRITER_FALLBACK_BACKGROUNDS) || TYPEWRITER_FALLBACK_BACKGROUNDS[0];
+    const fontStyle = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
+    return res.status(200).json({ image_url: background, ...fontStyle });
+  } catch (error) {
+    console.error('Error in /api/next_film_image:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/shouldGenerateContinuation', async (req, res) => {
+  try {
+    const goldenRatio = 1.61;
+    const minWords = 3;
+    const { currentText, latestAddition, latestPauseSeconds, lastGhostwriterWordCount } = req.body || {};
+
+    if (!currentText || !latestAddition || typeof latestPauseSeconds !== 'number') {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const wordCount = latestAddition.trim().split(/\s+/).filter(Boolean).length;
+    const goldenThreshold = Math.max(minWords, Math.floor((lastGhostwriterWordCount || 1) / goldenRatio));
+    if (wordCount < goldenThreshold) {
+      return res.status(200).json({ shouldGenerate: false });
+    }
+
+    const totalLength = currentText.trim().split(/\s+/).filter(Boolean).length;
+    const basePause = 1.8;
+    const scaleFactor = Math.min(3, totalLength * 0.05);
+    const additionFactor = Math.min(1.5, wordCount * 0.2);
+    const randomness = Math.random() * 0.7 - 0.3;
+    const requiredPause = basePause + scaleFactor + additionFactor + randomness;
+
+    return res.status(200).json({ shouldGenerate: latestPauseSeconds > requiredPause });
+  } catch (error) {
+    console.error('Error in /api/shouldGenerateContinuation:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/send_typewriter_text', async (req, res) => {
+  try {
+    const { sessionId, message } = req.body || {};
+    if (!sessionId || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ error: 'Missing sessionId or message' });
+    }
+
+    const shouldMock = resolveTypewriterMockMode(req.body);
+    if (shouldMock) {
+      const mockMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
+      return res.status(200).json(createTypewriterResponse(buildMockContinuation(message), mockMetadata, 3));
+    }
+
+    try {
+      const prompt = generateTypewriterPrompt(message);
+      const aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true);
+      const continuation = typeof aiResponse?.continuation === 'string' && aiResponse.continuation.trim()
+        ? aiResponse.continuation.trim()
+        : buildMockContinuation(message);
+      const metadata = normalizeTypewriterMetadata(aiResponse?.style || aiResponse?.metadata)
+        || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
+        || TYPEWRITER_DEFAULT_FONTS[0];
+
+      return res.status(200).json(createTypewriterResponse(continuation, metadata, 3));
+    } catch (aiError) {
+      console.error('Error in non-mock /api/send_typewriter_text call. Falling back to mock response:', aiError);
+      const fallbackMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
+      return res.status(200).json(createTypewriterResponse(buildMockContinuation(message), fallbackMetadata, 3));
+    }
+  } catch (error) {
+    console.error('Error in /api/send_typewriter_text:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 app.get('/api/openapi.json', (req, res) => {
   return res.status(200).json(OPEN_API_SPEC);
@@ -166,6 +614,339 @@ function requireAdmin(req, res, next) {
     return res.status(401).json({ message: 'Unauthorized admin access.' });
   }
   return next();
+}
+
+function cloneDefaultQuestConfig() {
+  return JSON.parse(JSON.stringify(DEFAULT_QUEST_CONFIG));
+}
+
+function normalizeQuestScope(payload = {}, fallback = {}) {
+  const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim()
+    ? payload.sessionId.trim()
+    : (typeof fallback.sessionId === 'string' && fallback.sessionId.trim()
+      ? fallback.sessionId.trim()
+      : DEFAULT_QUEST_SESSION_ID);
+  const questId = typeof payload.questId === 'string' && payload.questId.trim()
+    ? payload.questId.trim()
+    : (typeof fallback.questId === 'string' && fallback.questId.trim()
+      ? fallback.questId.trim()
+      : DEFAULT_QUEST_ID);
+  return { sessionId, questId };
+}
+
+function normalizeQuestDirection(direction) {
+  if (!direction || typeof direction !== 'object') {
+    return null;
+  }
+  const normalizedDirection = typeof direction.direction === 'string'
+    ? direction.direction.trim().toLowerCase()
+    : '';
+  const targetScreenId = typeof direction.targetScreenId === 'string'
+    ? direction.targetScreenId.trim()
+    : '';
+  if (!normalizedDirection || !targetScreenId) {
+    return null;
+  }
+  const label = typeof direction.label === 'string' && direction.label.trim()
+    ? direction.label.trim()
+    : normalizedDirection;
+  return {
+    direction: normalizedDirection,
+    label,
+    targetScreenId
+  };
+}
+
+function normalizeQuestScreen(screen) {
+  if (!screen || typeof screen !== 'object') {
+    return null;
+  }
+  const id = typeof screen.id === 'string' ? screen.id.trim() : '';
+  if (!id) {
+    return null;
+  }
+  const title = typeof screen.title === 'string' && screen.title.trim()
+    ? screen.title.trim()
+    : id;
+  const prompt = typeof screen.prompt === 'string' ? screen.prompt : '';
+  const imageUrl = typeof screen.imageUrl === 'string' ? screen.imageUrl.trim() : '';
+  const image_prompt = typeof screen.image_prompt === 'string' ? screen.image_prompt.trim() : '';
+  const textPromptPlaceholder = typeof screen.textPromptPlaceholder === 'string' && screen.textPromptPlaceholder.trim()
+    ? screen.textPromptPlaceholder.trim()
+    : 'What do you do?';
+  const directions = Array.isArray(screen.directions)
+    ? screen.directions.map(normalizeQuestDirection).filter(Boolean)
+    : [];
+  return {
+    id,
+    title,
+    prompt,
+    imageUrl,
+    image_prompt,
+    textPromptPlaceholder,
+    directions
+  };
+}
+
+function sanitizeQuestConfig(payload, { preserveUpdatedAt = false, fallbackScope = {} } = {}) {
+  const source = payload && typeof payload === 'object' ? payload : {};
+  const scope = normalizeQuestScope(source, fallbackScope);
+  const normalizedScreens = Array.isArray(source.screens)
+    ? source.screens.map(normalizeQuestScreen).filter(Boolean)
+    : [];
+
+  if (!normalizedScreens.length) {
+    const fallback = cloneDefaultQuestConfig();
+    return {
+      ...fallback,
+      sessionId: scope.sessionId,
+      questId: scope.questId,
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  const dedupedScreens = [];
+  const seenIds = new Set();
+  for (const screen of normalizedScreens) {
+    if (seenIds.has(screen.id)) {
+      continue;
+    }
+    seenIds.add(screen.id);
+    dedupedScreens.push(screen);
+  }
+
+  const validIds = new Set(dedupedScreens.map((screen) => screen.id));
+  const screens = dedupedScreens.map((screen) => ({
+    ...screen,
+    directions: screen.directions.filter((direction) => validIds.has(direction.targetScreenId))
+  }));
+
+  const requestedStartScreenId = typeof source.startScreenId === 'string'
+    ? source.startScreenId.trim()
+    : '';
+  const startScreenId = validIds.has(requestedStartScreenId)
+    ? requestedStartScreenId
+    : screens[0].id;
+
+  const updatedAt = preserveUpdatedAt && typeof source.updatedAt === 'string'
+    ? source.updatedAt
+    : new Date().toISOString();
+
+  return {
+    sessionId: scope.sessionId,
+    questId: scope.questId,
+    startScreenId,
+    screens,
+    updatedAt
+  };
+}
+
+function validateQuestConfigPayload(payload) {
+  const errors = [];
+  if (!payload || typeof payload !== 'object') {
+    return ['Payload must be an object.'];
+  }
+
+  if (!Array.isArray(payload.screens) || payload.screens.length === 0) {
+    errors.push('screens must be a non-empty array.');
+    return errors;
+  }
+
+  const screenIds = new Set();
+  payload.screens.forEach((screen, index) => {
+    const id = typeof screen?.id === 'string' ? screen.id.trim() : '';
+    if (!id) {
+      errors.push(`screens[${index}].id is required.`);
+      return;
+    }
+    if (screenIds.has(id)) {
+      errors.push(`Duplicate screen id "${id}".`);
+      return;
+    }
+    screenIds.add(id);
+
+    const imagePrompt = typeof screen?.image_prompt === 'string' ? screen.image_prompt.trim() : '';
+    if (!imagePrompt) {
+      errors.push(`screens[${index}].image_prompt is required.`);
+    }
+  });
+
+  payload.screens.forEach((screen, index) => {
+    if (!Array.isArray(screen?.directions)) {
+      return;
+    }
+    screen.directions.forEach((direction, directionIndex) => {
+      const targetScreenId = typeof direction?.targetScreenId === 'string'
+        ? direction.targetScreenId.trim()
+        : '';
+      if (!targetScreenId) {
+        errors.push(`screens[${index}].directions[${directionIndex}].targetScreenId is required.`);
+        return;
+      }
+      if (!screenIds.has(targetScreenId)) {
+        errors.push(`screens[${index}].directions[${directionIndex}] points to unknown screen "${targetScreenId}".`);
+      }
+    });
+  });
+
+  const startScreenId = typeof payload.startScreenId === 'string' ? payload.startScreenId.trim() : '';
+  if (!startScreenId) {
+    errors.push('startScreenId is required.');
+  } else if (!screenIds.has(startScreenId)) {
+    errors.push(`startScreenId "${startScreenId}" must match one of the screen ids.`);
+  }
+
+  return errors;
+}
+
+function normalizeTraversalEvent(payload = {}) {
+  const toScreenId = typeof payload.toScreenId === 'string' ? payload.toScreenId.trim() : '';
+  if (!toScreenId) {
+    return null;
+  }
+  return {
+    playerId: typeof payload.playerId === 'string' ? payload.playerId.trim() : '',
+    fromScreenId: typeof payload.fromScreenId === 'string' ? payload.fromScreenId.trim() : '',
+    toScreenId,
+    direction: typeof payload.direction === 'string' ? payload.direction.trim().toLowerCase() : '',
+    promptText: typeof payload.promptText === 'string' ? payload.promptText.trim() : '',
+    createdAt: new Date()
+  };
+}
+
+function toQuestResponse(doc, fallbackScope = {}) {
+  return sanitizeQuestConfig(
+    {
+      sessionId: doc?.sessionId,
+      questId: doc?.questId,
+      startScreenId: doc?.startScreenId,
+      screens: doc?.screens || [],
+      updatedAt: doc?.updatedAt ? new Date(doc.updatedAt).toISOString() : undefined
+    },
+    { preserveUpdatedAt: true, fallbackScope }
+  );
+}
+
+async function ensureQuestConfig(scopePayload = {}) {
+  const scope = normalizeQuestScope(scopePayload);
+  const existing = await QuestScreenGraph.findOne({
+    sessionId: scope.sessionId,
+    questId: scope.questId
+  }).lean();
+
+  if (existing) {
+    return toQuestResponse(existing, scope);
+  }
+
+  const seedSource = {
+    ...cloneDefaultQuestConfig(),
+    sessionId: scope.sessionId,
+    questId: scope.questId
+  };
+  const seed = sanitizeQuestConfig(seedSource, { fallbackScope: scope });
+  await QuestScreenGraph.findOneAndUpdate(
+    { sessionId: scope.sessionId, questId: scope.questId },
+    {
+      $set: {
+        sessionId: scope.sessionId,
+        questId: scope.questId,
+        startScreenId: seed.startScreenId,
+        screens: seed.screens
+      },
+      $setOnInsert: { traversalLog: [] }
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  return seed;
+}
+
+async function saveQuestConfig(payload = {}, scopePayload = {}) {
+  const scope = normalizeQuestScope(payload, scopePayload);
+  const nextConfig = sanitizeQuestConfig(payload, { fallbackScope: scope });
+
+  const saved = await QuestScreenGraph.findOneAndUpdate(
+    { sessionId: scope.sessionId, questId: scope.questId },
+    {
+      $set: {
+        sessionId: scope.sessionId,
+        questId: scope.questId,
+        startScreenId: nextConfig.startScreenId,
+        screens: nextConfig.screens
+      },
+      $setOnInsert: { traversalLog: [] }
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  return toQuestResponse(saved, scope);
+}
+
+async function resetQuestConfig(scopePayload = {}) {
+  const scope = normalizeQuestScope(scopePayload);
+  const resetSource = {
+    ...cloneDefaultQuestConfig(),
+    sessionId: scope.sessionId,
+    questId: scope.questId
+  };
+  const resetConfig = sanitizeQuestConfig(resetSource, { fallbackScope: scope });
+  const saved = await QuestScreenGraph.findOneAndUpdate(
+    { sessionId: scope.sessionId, questId: scope.questId },
+    {
+      $set: {
+        sessionId: scope.sessionId,
+        questId: scope.questId,
+        startScreenId: resetConfig.startScreenId,
+        screens: resetConfig.screens,
+        traversalLog: []
+      }
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  return toQuestResponse(saved, scope);
+}
+
+async function appendQuestTraversalEvent(payload = {}) {
+  const scope = normalizeQuestScope(payload);
+  await ensureQuestConfig(scope);
+  const event = normalizeTraversalEvent(payload);
+  if (!event) {
+    return null;
+  }
+
+  const updated = await QuestScreenGraph.findOneAndUpdate(
+    { sessionId: scope.sessionId, questId: scope.questId },
+    {
+      $push: {
+        traversalLog: {
+          $each: [event],
+          $slice: -400
+        }
+      }
+    },
+    { new: true }
+  ).lean();
+
+  return {
+    sessionId: scope.sessionId,
+    questId: scope.questId,
+    event,
+    traversalCount: Array.isArray(updated?.traversalLog) ? updated.traversalLog.length : 0
+  };
+}
+
+async function getQuestTraversal(scopePayload = {}) {
+  const scope = normalizeQuestScope(scopePayload);
+  const doc = await QuestScreenGraph.findOne({
+    sessionId: scope.sessionId,
+    questId: scope.questId
+  }).lean();
+
+  return {
+    sessionId: scope.sessionId,
+    questId: scope.questId,
+    traversal: Array.isArray(doc?.traversalLog) ? doc.traversalLog : []
+  };
 }
 
 
@@ -411,6 +1192,97 @@ app.post('/api/admin/llm-config/:routeKey/reset', requireAdmin, async (req, res)
     return res.status(500).json({ message: 'Server error while resetting route config.' });
   }
 });
+
+// --- Quest Screen Routes ---
+app.get('/api/quest/screens', async (req, res) => {
+  try {
+    const scope = normalizeQuestScope(req.query || {});
+    const config = await ensureQuestConfig(scope);
+    return res.status(200).json(config);
+  } catch (error) {
+    console.error('Error in GET /api/quest/screens:', error);
+    return res.status(500).json({ message: 'Server error while loading quest screens.' });
+  }
+});
+
+app.get('/api/quest/screens/:screenId', async (req, res) => {
+  try {
+    const { screenId } = req.params;
+    const scope = normalizeQuestScope(req.query || {});
+    const config = await ensureQuestConfig(scope);
+    const screen = config.screens.find((item) => item.id === screenId);
+    if (!screen) {
+      return res.status(404).json({ message: 'Quest screen not found.' });
+    }
+    return res.status(200).json({
+      sessionId: config.sessionId,
+      questId: config.questId,
+      screen,
+      startScreenId: config.startScreenId,
+      updatedAt: config.updatedAt
+    });
+  } catch (error) {
+    console.error('Error in GET /api/quest/screens/:screenId:', error);
+    return res.status(500).json({ message: 'Server error while loading quest screen.' });
+  }
+});
+
+app.put('/api/admin/quest/screens', requireAdmin, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const validationErrors = validateQuestConfigPayload(payload);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        message: 'Invalid quest screen payload.',
+        errors: validationErrors
+      });
+    }
+
+    const saved = await saveQuestConfig(payload, payload);
+    return res.status(200).json(saved);
+  } catch (error) {
+    console.error('Error in PUT /api/admin/quest/screens:', error);
+    return res.status(500).json({ message: 'Server error while saving quest screens.' });
+  }
+});
+
+app.post('/api/admin/quest/screens/reset', requireAdmin, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const saved = await resetQuestConfig(payload);
+    return res.status(200).json(saved);
+  } catch (error) {
+    console.error('Error in POST /api/admin/quest/screens/reset:', error);
+    return res.status(500).json({ message: 'Server error while resetting quest screens.' });
+  }
+});
+
+app.post('/api/quest/traversal', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const eventResult = await appendQuestTraversalEvent(payload);
+    if (!eventResult) {
+      return res.status(400).json({ message: 'Missing required parameter: toScreenId.' });
+    }
+    return res.status(201).json(eventResult);
+  } catch (error) {
+    console.error('Error in POST /api/quest/traversal:', error);
+    return res.status(500).json({ message: 'Server error while saving traversal event.' });
+  }
+});
+
+app.get('/api/quest/traversal', async (req, res) => {
+  try {
+    const traversalPayload = await getQuestTraversal(req.query || {});
+    return res.status(200).json(traversalPayload);
+  } catch (error) {
+    console.error('Error in GET /api/quest/traversal:', error);
+    return res.status(500).json({ message: 'Server error while loading traversal events.' });
+  }
+});
+
+// Memory generation/persistence routes are split into a dedicated router.
+app.use('/api', memoriesRouter);
 
 // --- Routes ---
 
@@ -1727,8 +2599,18 @@ app.get('/api/brewing/events', (req, res) => {
 
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`Multiplayer Universe Brewing Server running on port ${PORT}`);
+  });
+
+  server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use. Stop the existing process or run with a different port (for example: PORT=5002 node server_new.js).`);
+      process.exit(1);
+    }
+
+    console.error('Server startup error:', err);
+    process.exit(1);
   });
 }
 

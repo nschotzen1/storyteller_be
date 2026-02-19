@@ -227,15 +227,15 @@ const GeneratedContentSchema = new mongoose.Schema({
 export const GeneratedContent = mongoose.model('GeneratedContent', GeneratedContentSchema);
 
 
-// Connect to MongoDB (adjust connection string as needed)
-mongoose.connect('mongodb://localhost:27017/storytelling', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
-  console.log("Connected to MongoDB.");
-}).catch(err => {
-  console.error("MongoDB connection error:", err);
-});
+// Connect to MongoDB in non-test runtimes only.
+if (process.env.NODE_ENV !== 'test' && mongoose.connection.readyState === 0) {
+  const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/storytelling';
+  mongoose.connect(mongoUri).then(() => {
+    console.log("Connected to MongoDB.");
+  }).catch(err => {
+    console.error("MongoDB connection error:", err);
+  });
+}
 
 export async function getSessionTextures(sessionId) {
   // Refactored to use MongoDB

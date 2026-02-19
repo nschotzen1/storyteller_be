@@ -18,6 +18,18 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = pathNode.dirname(__filename);
+const ASSETS_ROOT_CANDIDATES = [
+    pathNode.resolve(process.cwd(), 'assets'),
+    pathNode.resolve(process.cwd(), '../assets'),
+    pathNode.resolve(__dirname, 'assets'),
+    pathNode.resolve(__dirname, '../assets')
+];
+const ASSETS_ROOTS = Array.from(new Set(ASSETS_ROOT_CANDIDATES)).filter((candidatePath) =>
+    existsSync(candidatePath)
+);
+if (ASSETS_ROOTS.length === 0) {
+    ASSETS_ROOTS.push(pathNode.join(__dirname, 'assets'));
+}
 
 
 
@@ -575,7 +587,21 @@ app.get('/api/cards', async (req, res) => {
     }
 });
 
-app.use('/assets', express.static(pathNode.join(__dirname, 'assets'))); // path changed to pathNode
+for (const assetsRoot of ASSETS_ROOTS) {
+    app.use('/assets', express.static(assetsRoot));
+}
 const PORT = process.env.PORT || 5001;
 
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+if (process.env.NODE_ENV !== 'test') {
+    const server = app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+
+    server.on('error', (err) => {
+        if (err && err.code === 'EADDRINUSE') {
+            console.error(`Port ${PORT} is already in use. Stop the existing process or run with a different port (for example: PORT=5002 node serverold.js).`);
+            process.exit(1);
+        }
+
+        console.error('Server startup error:', err);
+        process.exit(1);
+    });
+}

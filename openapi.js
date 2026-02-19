@@ -1,3 +1,8 @@
+import {
+  FRAGMENT_MEMORY_JSON_SCHEMA,
+  FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA
+} from './contracts/fragmentMemoryContract.js';
+
 const pathParam = (name, description) => ({
   name,
   in: 'path',
@@ -67,6 +72,7 @@ export function buildOpenApiSpec() {
       { name: 'Docs', description: 'API documentation endpoints.' },
       { name: 'Admin', description: 'LLM prompt/schema management for important generation routes.' },
       { name: 'Sessions', description: 'Session lifecycle and shared arena persistence.' },
+      { name: 'Quest', description: 'Quest scene graph and directional screen editing APIs.' },
       { name: 'Worldbuilding', description: 'World creation and element generation.' },
       { name: 'Generation', description: 'Entity/storyteller generation and missions.' },
       { name: 'Arena', description: 'Relationship graph and arena state.' },
@@ -122,6 +128,104 @@ export function buildOpenApiSpec() {
             meta: { type: 'object', additionalProperties: true }
           },
           example: LLM_ROUTE_CONFIG_EXAMPLE
+        },
+        FragmentMemory: FRAGMENT_MEMORY_JSON_SCHEMA,
+        QuestDirection: {
+          type: 'object',
+          required: ['direction', 'label', 'targetScreenId'],
+          properties: {
+            direction: { type: 'string', example: 'north' },
+            label: { type: 'string', example: 'Follow the path to the arch' },
+            targetScreenId: { type: 'string', example: 'broken_arch' }
+          }
+        },
+        QuestScreen: {
+          type: 'object',
+          required: ['id', 'title', 'prompt', 'imageUrl', 'image_prompt', 'textPromptPlaceholder', 'directions'],
+          properties: {
+            id: { type: 'string', example: 'cliff_path' },
+            title: { type: 'string', example: 'Ivy Pass' },
+            prompt: { type: 'string', example: 'The cliff path narrows beside ruined masonry.' },
+            imageUrl: { type: 'string', example: '/ruin_south_a.png' },
+            image_prompt: {
+              type: 'string',
+              example: 'Cinematic fantasy cliff path along ruined rose-court wall at sunset, weathered stones and moody atmosphere.'
+            },
+            textPromptPlaceholder: { type: 'string', example: 'What do you say into the dusk?' },
+            directions: { type: 'array', items: { $ref: '#/components/schemas/QuestDirection' } }
+          }
+        },
+        QuestScreensConfig: {
+          type: 'object',
+          required: ['sessionId', 'questId', 'startScreenId', 'screens', 'updatedAt'],
+          properties: {
+            sessionId: { type: 'string', example: 'rose-court-demo' },
+            questId: { type: 'string', example: 'ruined_rose_court' },
+            startScreenId: { type: 'string', example: 'cliff_path' },
+            screens: { type: 'array', items: { $ref: '#/components/schemas/QuestScreen' } },
+            updatedAt: { type: 'string', format: 'date-time' }
+          }
+        },
+        QuestScreenLookupResponse: {
+          type: 'object',
+          required: ['sessionId', 'questId', 'screen', 'startScreenId', 'updatedAt'],
+          properties: {
+            sessionId: { type: 'string' },
+            questId: { type: 'string' },
+            screen: { $ref: '#/components/schemas/QuestScreen' },
+            startScreenId: { type: 'string' },
+            updatedAt: { type: 'string', format: 'date-time' }
+          }
+        },
+        QuestTraversalEvent: {
+          type: 'object',
+          required: ['toScreenId', 'createdAt'],
+          properties: {
+            playerId: { type: 'string', example: 'wanderer-01' },
+            fromScreenId: { type: 'string', example: 'outer_gate_murals' },
+            toScreenId: { type: 'string', example: 'mural_center_panel' },
+            direction: { type: 'string', example: 'north' },
+            promptText: { type: 'string', example: 'I trace the lone traveler with my fingertips.' },
+            createdAt: { type: 'string', format: 'date-time' }
+          }
+        },
+        QuestTraversalLogResponse: {
+          type: 'object',
+          required: ['sessionId', 'questId', 'traversal'],
+          properties: {
+            sessionId: { type: 'string' },
+            questId: { type: 'string' },
+            traversal: { type: 'array', items: { $ref: '#/components/schemas/QuestTraversalEvent' } }
+          }
+        },
+        QuestTraversalWriteResponse: {
+          type: 'object',
+          required: ['sessionId', 'questId', 'event', 'traversalCount'],
+          properties: {
+            sessionId: { type: 'string' },
+            questId: { type: 'string' },
+            event: { $ref: '#/components/schemas/QuestTraversalEvent' },
+            traversalCount: { type: 'integer', minimum: 0 }
+          }
+        },
+        FragmentToMemoriesResponse: {
+          ...FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA,
+          required: ['sessionId', 'memories', 'count', 'mocked'],
+          properties: {
+            sessionId: { type: 'string' },
+            playerId: { type: 'string' },
+            batchId: { type: 'string' },
+            memories: { type: 'array', items: { $ref: '#/components/schemas/FragmentMemory' } },
+            count: { type: 'integer' },
+            mocked: { type: 'boolean' },
+            cardOptions: {
+              type: 'object',
+              properties: {
+                includeFront: { type: 'boolean' },
+                includeBack: { type: 'boolean' }
+              }
+            }
+          }
         }
       }
     },
@@ -369,6 +473,165 @@ export function buildOpenApiSpec() {
           responses: {
             '200': { description: 'Arena updated.' },
             '400': { description: 'Bad request.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/quest/screens': {
+        get: op({
+          tags: ['Quest'],
+          summary: 'Get full quest screen graph',
+          importance: 'Critical',
+          flow: 'Primary quest UI hydration route for loading all screens, directions, and start screen.',
+          parameters: [
+            queryParam('sessionId', false, 'Quest session scope. Defaults to rose-court demo session.'),
+            queryParam('questId', false, 'Quest graph identifier. Defaults to ruined_rose_court.')
+          ],
+          responses: {
+            '200': {
+              description: 'Quest screens config returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/QuestScreensConfig' })
+            },
+            '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/quest/screens/{screenId}': {
+        get: op({
+          tags: ['Quest'],
+          summary: 'Get one quest screen',
+          importance: 'High',
+          flow: 'Used for direct screen lookups, debugging, and editor-specific checks.',
+          parameters: [
+            pathParam('screenId', 'Quest screen identifier.'),
+            queryParam('sessionId', false, 'Quest session scope. Defaults to rose-court demo session.'),
+            queryParam('questId', false, 'Quest graph identifier. Defaults to ruined_rose_court.')
+          ],
+          responses: {
+            '200': {
+              description: 'Quest screen returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/QuestScreenLookupResponse' })
+            },
+            '404': { description: 'Quest screen not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/quest/screens': {
+        put: op({
+          tags: ['Quest', 'Admin'],
+          summary: 'Save full quest screen graph',
+          importance: 'Critical',
+          flow: 'Primary admin authoring route to persist the complete quest screen + direction graph.',
+          security: [{ AdminApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['startScreenId', 'screens'],
+                  properties: {
+                    sessionId: { type: 'string', example: 'rose-court-demo' },
+                    questId: { type: 'string', example: 'ruined_rose_court' },
+                    startScreenId: { type: 'string' },
+                    screens: { type: 'array', items: { $ref: '#/components/schemas/QuestScreen' } }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Quest screens saved.',
+              ...jsonResponse({ $ref: '#/components/schemas/QuestScreensConfig' })
+            },
+            '400': { description: 'Invalid quest graph payload.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/quest/screens/reset': {
+        post: op({
+          tags: ['Quest', 'Admin'],
+          summary: 'Reset quest graph to defaults',
+          importance: 'High',
+          flow: 'Admin rollback path to recover a broken or experimental quest graph.',
+          security: [{ AdminApiKey: [] }],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    sessionId: { type: 'string', example: 'rose-court-demo' },
+                    questId: { type: 'string', example: 'ruined_rose_court' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Quest screens reset.',
+              ...jsonResponse({ $ref: '#/components/schemas/QuestScreensConfig' })
+            },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/quest/traversal': {
+        get: op({
+          tags: ['Quest'],
+          summary: 'List quest traversal events',
+          importance: 'High',
+          flow: 'Used by quest UI to render player traversal history for the active session + quest scope.',
+          parameters: [
+            queryParam('sessionId', false, 'Quest session scope. Defaults to rose-court demo session.'),
+            queryParam('questId', false, 'Quest graph identifier. Defaults to ruined_rose_court.')
+          ],
+          responses: {
+            '200': {
+              description: 'Traversal log returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/QuestTraversalLogResponse' })
+            },
+            '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        }),
+        post: op({
+          tags: ['Quest'],
+          summary: 'Append quest traversal event',
+          importance: 'High',
+          flow: 'Called whenever a player moves between screens or submits a prompt to persist run history.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['toScreenId'],
+                  properties: {
+                    sessionId: { type: 'string', example: 'rose-court-demo' },
+                    questId: { type: 'string', example: 'ruined_rose_court' },
+                    playerId: { type: 'string', example: 'wanderer-01' },
+                    fromScreenId: { type: 'string', example: 'outer_gate_murals' },
+                    toScreenId: { type: 'string', example: 'mural_center_panel' },
+                    direction: { type: 'string', example: 'north' },
+                    promptText: { type: 'string', example: 'I run my hand across the faded mural.' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '201': {
+              description: 'Traversal event stored.',
+              ...jsonResponse({ $ref: '#/components/schemas/QuestTraversalWriteResponse' })
+            },
+            '400': { description: 'Invalid traversal event payload.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
@@ -720,6 +983,78 @@ export function buildOpenApiSpec() {
           responses: {
             '200': { description: 'Storytellers returned.' },
             '502': { description: 'LLM/schema mismatch.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/fragmentToMemories': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Generate memories from a fragment',
+          importance: 'Critical',
+          flow: 'Memory-generation route that expands a single fragment into moment-focused memory flashes.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    playerId: { type: 'string' },
+                    text: { type: 'string' },
+                    userText: { type: 'string' },
+                    fragment: { type: 'string' },
+                    count: { type: 'number' },
+                    numberOfMemories: { type: 'number' },
+                    includeCards: { type: 'boolean' },
+                    includeFront: { type: 'boolean' },
+                    includeBack: { type: 'boolean' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Memories returned.', ...jsonResponse({ $ref: '#/components/schemas/FragmentToMemoriesResponse' }) },
+            '400': { description: 'Missing required payload fields.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '502': { description: 'LLM/schema mismatch.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/memories': {
+        get: op({
+          tags: ['Generation'],
+          summary: 'List memories by session',
+          importance: 'High',
+          flow: 'Load previously generated memories for a session (optionally filtered by player or batch).',
+          parameters: [
+            queryParam('sessionId', true, 'Session identifier.'),
+            queryParam('playerId', false, 'Optional player identifier.'),
+            queryParam('batchId', false, 'Optional generation batch identifier.')
+          ],
+          responses: {
+            '200': { description: 'Memories returned.' },
+            '400': { description: 'Missing required query params.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        }),
+        delete: op({
+          tags: ['Generation'],
+          summary: 'Delete memories by session',
+          importance: 'High',
+          flow: 'Delete previously generated memories for a session (optionally filtered by player or batch).',
+          parameters: [
+            queryParam('sessionId', true, 'Session identifier.'),
+            queryParam('playerId', false, 'Optional player identifier.'),
+            queryParam('batchId', false, 'Optional generation batch identifier.')
+          ],
+          responses: {
+            '200': { description: 'Memories deleted.' },
+            '400': { description: 'Missing required query params.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
