@@ -228,6 +228,7 @@ describe('Arena Relationships Comprehensive Flow', () => {
             expect(res.body.edge.toCardId).toBe(cards[1].entityId);
             expect(res.body.edge.surfaceText).toBe('was trained in the ancient arts by');
             expect(res.body.edge.predicate).toBe('was_trained_in_the_ancient_arts_by');
+            expect(res.body.edge.strength).toBe(4);
 
             // Verify points awarded
             expect(res.body.points).toBeDefined();
@@ -270,6 +271,7 @@ describe('Arena Relationships Comprehensive Flow', () => {
             const targetIds = res.body.edge.map(e => e.toCardId);
             expect(targetIds).toContain(cards[0].entityId);
             expect(targetIds).toContain(cards[1].entityId);
+            expect(res.body.edge.every(e => e.strength === 4)).toBe(true);
         });
     });
 
@@ -287,6 +289,7 @@ describe('Arena Relationships Comprehensive Flow', () => {
             const predicates = res.body.edges.map(e => e.predicate);
             expect(predicates).toContain('was_trained_in_the_ancient_arts_by');
             expect(predicates).toContain('possesses_ancient_knowledge_sought_by');
+            expect(res.body.edges.every(e => e.strength >= 1 && e.strength <= 5)).toBe(true);
 
             // Verify player score accumulated
             expect(res.body.scores[playerId]).toBeGreaterThan(0);
@@ -370,6 +373,7 @@ describe('Arena Relationships Comprehensive Flow', () => {
             expect(res.status).toBe(200);
             expect(res.body.verdict).toBe('accepted');
             expect(res.body.dryRun).toBe(true);
+            expect(res.body.strength).toBe(4);
 
             // Verify NO new edge was created
             const afterState = await request(app)

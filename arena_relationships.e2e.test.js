@@ -155,6 +155,7 @@ describe('Arena Relationships Flow (End-to-End)', () => {
         // The edge might use the ID we passed, so checking against that
         expect(res.body.edge.fromCardId).toBe(card1.entityId);
         expect(res.body.edge.toCardId).toBe(card2.entityId);
+        expect(res.body.edge.strength).toBe(4);
         expect(res.body.points.awarded).toBeGreaterThan(0);
         expect(res.body.evolution.affected[0].cardId).toBe(card2.entityId); // Or entityId
     });
@@ -167,6 +168,7 @@ describe('Arena Relationships Flow (End-to-End)', () => {
         expect(res.status).toBe(200);
         expect(res.body.edges).toHaveLength(1);
         expect(res.body.edges[0].surfaceText).toBe("sometimes seen at the summit during storms");
+        expect(res.body.edges[0].strength).toBe(4);
         expect(res.body.scores[playerId]).toBeGreaterThan(0);
         expect(res.body.arena.entities).toHaveLength(2);
     });

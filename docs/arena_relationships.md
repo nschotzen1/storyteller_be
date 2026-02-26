@@ -41,6 +41,7 @@ interface Edge {
   surfaceText: string;
   predicate: string;           // Normalized slug
   direction: string;
+  strength: number;            // 1..5 (derived from quality.score)
   quality: Quality;
   createdBy: string;           // playerId
   createdAt: string;           // ISO timestamp
@@ -178,6 +179,7 @@ interface AcceptedResponse {
     "surfaceText": "sometimes seen at the summit during storms",
     "predicate": "sometimes_seen_at_the_summit_during_storms",
     "direction": "source_to_target",
+    "strength": 4,
     "quality": {
       "score": 0.75,
       "confidence": 0.8,

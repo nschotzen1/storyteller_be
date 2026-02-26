@@ -97,6 +97,15 @@ export async function syncEntityNode(sessionId, entity) {
 export async function createRelationship(sessionId, edge) {
     const session = getSession();
     try {
+        const qualityScoreRaw = Number(edge.quality?.score);
+        const normalizedQualityScore = Number.isFinite(qualityScoreRaw)
+            ? Math.min(Math.max(qualityScoreRaw, 0), 1)
+            : 0;
+        const strengthRaw = Number(edge.strength);
+        const normalizedStrength = Number.isFinite(strengthRaw)
+            ? Math.min(Math.max(Math.round(strengthRaw), 1), 5)
+            : Math.round(1 + normalizedQualityScore * 4);
+
         const result = await session.run(
             `MATCH (from:Entity {entityId: $fromCardId, sessionId: $sessionId})
        MATCH (to:Entity {entityId: $toCardId, sessionId: $sessionId})
@@ -105,6 +114,7 @@ export async function createRelationship(sessionId, edge) {
            r.surfaceText = $surfaceText,
            r.direction = $direction,
            r.qualityScore = $qualityScore,
+           r.strength = $strength,
            r.createdBy = $createdBy,
            r.createdAt = $createdAt
        RETURN r`,
@@ -116,13 +126,55 @@ export async function createRelationship(sessionId, edge) {
                 predicate: edge.predicate || 'relates_to',
                 surfaceText: edge.surfaceText || '',
                 direction: edge.direction || 'source_to_target',
-                qualityScore: edge.quality?.score || 0,
+                qualityScore: normalizedQualityScore,
+                strength: normalizedStrength,
                 createdBy: edge.createdBy || 'unknown',
                 createdAt: edge.createdAt || new Date().toISOString()
             }
         );
 
         return result.records[0]?.get('r')?.properties || null;
+    } finally {
+        await session.close();
+    }
+}
+
+/**
+ * Deletes relationships by edge IDs for a specific session.
+ * Used for compensating rollback when MongoDB persistence fails
+ * after Neo4j relationship creation succeeded.
+ * @param {string} sessionId
+ * @param {string[]} edgeIds
+ * @returns {Promise<number>}
+ */
+export async function deleteRelationshipsByEdgeIds(sessionId, edgeIds) {
+    const session = getSession();
+    try {
+        if (!Array.isArray(edgeIds) || edgeIds.length === 0) {
+            return 0;
+        }
+
+        const normalizedIds = edgeIds.filter(Boolean).map(String);
+        if (normalizedIds.length === 0) {
+            return 0;
+        }
+
+        const result = await session.run(
+            `MATCH (:Entity {sessionId: $sessionId})-[r:RELATES_TO]->(:Entity {sessionId: $sessionId})
+       WHERE r.edgeId IN $edgeIds
+       WITH count(r) AS relationshipCount, collect(r) AS rels
+       FOREACH (rel IN rels | DELETE rel)
+       RETURN relationshipCount`,
+            {
+                sessionId: String(sessionId),
+                edgeIds: normalizedIds
+            }
+        );
+
+        const countValue = result.records[0]?.get('relationshipCount');
+        if (!countValue) return 0;
+        if (typeof countValue.toNumber === 'function') return countValue.toNumber();
+        return Number(countValue) || 0;
     } finally {
         await session.close();
     }

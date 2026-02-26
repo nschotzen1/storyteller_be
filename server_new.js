@@ -18,13 +18,15 @@ import {
   getExistingEdgesForEntities,
   checkDuplicateEdge,
   evaluateRelationship,
-  calculatePoints
+  calculatePoints,
+  deriveRelationshipStrength
 } from './services/arenaService.js';
 import {
   getClusterForEntities,
   createRelationship,
   syncEntityNode,
-  buildClusterContext
+  buildClusterContext,
+  deleteRelationshipsByEdgeIds
 } from './services/neo4jService.js';
 import { buildOpenApiSpec } from './openapi.js';
 import {
@@ -59,16 +61,45 @@ const ASSETS_ROOTS = Array.from(new Set(ASSETS_ROOT_CANDIDATES)).filter((candida
 if (ASSETS_ROOTS.length === 0) {
   ASSETS_ROOTS.push(path.resolve(process.cwd(), 'assets'));
 }
+
+function collectTypewriterPageImages(assetRoots, subDirectory, allowedExtensions) {
+  const routePrefix = `/assets/${subDirectory}`;
+  const imageUrls = [];
+
+  for (const assetsRoot of assetRoots) {
+    const folderPath = path.join(assetsRoot, subDirectory);
+    if (!fs.existsSync(folderPath)) continue;
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(folderPath, { withFileTypes: true });
+    } catch (error) {
+      console.warn(`Failed to read typewriter page image folder at ${folderPath}:`, error);
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const extension = path.extname(entry.name).toLowerCase();
+      if (!allowedExtensions.has(extension)) continue;
+      imageUrls.push(`${routePrefix}/${entry.name}`);
+    }
+  }
+
+  return Array.from(new Set(imageUrls));
+}
+
 const DEFAULT_QUEST_ID = 'ruined_rose_court';
 const DEFAULT_QUEST_SESSION_ID = 'rose-court-demo';
 const MOCK_STORYTELLER_ILLUSTRATION_URL = '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png';
 const OPEN_API_SPEC = buildOpenApiSpec();
 const TYPEWRITER_MOCK_MODE = process.env.TYPEWRITER_MOCK_MODE === 'true';
-const TYPEWRITER_FALLBACK_BACKGROUNDS = [
-  '/textures/decor/film_frame_desert.png',
-  '/well/well_background.png',
-  '/ruin_south_a.png',
-  '/arenas/petal_hex_v1.png'
+const TYPEWRITER_PAGE_IMAGES_SUBDIR = 'typewriter_page_images';
+const TYPEWRITER_ALLOWED_PAGE_IMAGE_EXTENSIONS = new Set(['.png']);
+const TYPEWRITER_DEFAULT_SERVER_BACKGROUNDS = [
+  '/assets/mocks/memory_cards/memory_front_01.png',
+  '/assets/mocks/memory_cards/memory_front_02.png',
+  '/assets/mocks/memory_cards/memory_front_03.png'
 ];
 const TYPEWRITER_DEFAULT_FONTS = [
   { font: "'Uncial Antiqua', serif", font_size: '1.8rem', font_color: '#3b1d15' },
@@ -360,6 +391,13 @@ function pickRandomItem(items) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
+function buildAbsoluteAssetUrl(req, assetPath) {
+  if (typeof assetPath !== 'string' || !assetPath.trim()) return null;
+  if (/^https?:\/\//i.test(assetPath)) return assetPath;
+  const normalized = assetPath.startsWith('/') ? assetPath : `/${assetPath}`;
+  return `${req.protocol}://${req.get('host')}${normalized}`;
+}
+
 function normalizeTypewriterMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return null;
   const font = metadata.font || metadata.fontName || metadata.font_family || metadata.fontFamily;
@@ -421,9 +459,22 @@ app.post('/api/next_film_image', async (req, res) => {
       return res.status(400).json({ error: 'Missing sessionId' });
     }
 
-    const background = pickRandomItem(TYPEWRITER_FALLBACK_BACKGROUNDS) || TYPEWRITER_FALLBACK_BACKGROUNDS[0];
+    const discoveredBackgrounds = collectTypewriterPageImages(
+      ASSETS_ROOTS,
+      TYPEWRITER_PAGE_IMAGES_SUBDIR,
+      TYPEWRITER_ALLOWED_PAGE_IMAGE_EXTENSIONS
+    );
+    const availableBackgrounds = discoveredBackgrounds.length
+      ? discoveredBackgrounds
+      : TYPEWRITER_DEFAULT_SERVER_BACKGROUNDS;
+    const backgroundPath = pickRandomItem(availableBackgrounds) || availableBackgrounds[0];
+    const backgroundUrl = buildAbsoluteAssetUrl(req, backgroundPath);
+    if (!backgroundUrl) {
+      return res.status(500).json({ error: 'No typewriter page image available' });
+    }
+
     const fontStyle = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
-    return res.status(200).json({ image_url: background, ...fontStyle });
+    return res.status(200).json({ image_url: backgroundUrl, image_path: backgroundPath, ...fontStyle });
   } catch (error) {
     console.error('Error in /api/next_film_image:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -2196,11 +2247,13 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
 
     // If dryRun, return without committing
     if (dryRun) {
+      const strength = deriveRelationshipStrength(evaluation?.quality?.score);
       return res.status(200).json({
         verdict: 'accepted',
         dryRun: true,
         quality: evaluation.quality,
         predicate,
+        strength,
         message: 'Relationship would be accepted (dry run, not committed).',
         fastValidate: evaluation.fastValidate
       });
@@ -2209,6 +2262,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
     // Commit edges
     const createdEdges = [];
     const edgesArray = Array.isArray(arena.edges) ? arena.edges : [];
+    const relationshipStrength = deriveRelationshipStrength(evaluation?.quality?.score);
 
     for (const target of targets) {
       const edge = {
@@ -2218,6 +2272,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
         surfaceText: relationshipPayload.surfaceText,
         predicate,
         direction: relationshipPayload.direction || 'source_to_target',
+        strength: relationshipStrength,
         quality: evaluation.quality,
         createdBy: playerId,
         createdAt: new Date().toISOString()
@@ -2228,37 +2283,66 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
 
     // Calculate and update points
     const pointsAwarded = calculatePoints(evaluation.quality.score);
-    const scores = arena.scores || {};
+    const scores = { ...(arena.scores || {}) };
     const previousTotal = scores[playerId] || 0;
     scores[playerId] = previousTotal + pointsAwarded;
 
-    // Save Arena to MongoDB
-    await Arena.findOneAndUpdate(
-      { sessionId },
-      {
-        $set: {
-          'arena.edges': edgesArray,
-          'arena.scores': scores,
-          lastUpdatedBy: playerId
-        }
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+    const edgeIds = createdEdges.map((edge) => edge.edgeId);
+    const enforceDualWrite = !shouldMock;
 
-    // Sync to Neo4j (graceful fallback if unavailable)
+    if (enforceDualWrite) {
+      try {
+        await syncEntityNode(sessionId, source);
+        for (const target of targets) {
+          await syncEntityNode(sessionId, target);
+        }
+        for (const edge of createdEdges) {
+          await createRelationship(sessionId, edge);
+        }
+      } catch (neo4jError) {
+        console.error('Neo4j sync failed before Mongo commit, aborting relationship proposal:', neo4jError);
+        return res.status(503).json({
+          message: 'Relationship persistence failed: Neo4j unavailable. No changes were committed.'
+        });
+      }
+    }
+
     try {
-      // Sync source entity node
-      await syncEntityNode(sessionId, source);
-      // Sync target entity nodes
-      for (const target of targets) {
-        await syncEntityNode(sessionId, target);
+      await Arena.findOneAndUpdate(
+        { sessionId },
+        {
+          $set: {
+            'arena.edges': edgesArray,
+            'arena.scores': scores,
+            lastUpdatedBy: playerId
+          }
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+    } catch (mongoError) {
+      if (enforceDualWrite) {
+        try {
+          await deleteRelationshipsByEdgeIds(sessionId, edgeIds);
+        } catch (rollbackError) {
+          console.error('Neo4j rollback failed after MongoDB persistence error:', rollbackError);
+        }
       }
-      // Create relationships in Neo4j
-      for (const edge of createdEdges) {
-        await createRelationship(sessionId, edge);
+      throw mongoError;
+    }
+
+    // In mock mode, keep Neo4j synchronization best-effort for local testing.
+    if (!enforceDualWrite) {
+      try {
+        await syncEntityNode(sessionId, source);
+        for (const target of targets) {
+          await syncEntityNode(sessionId, target);
+        }
+        for (const edge of createdEdges) {
+          await createRelationship(sessionId, edge);
+        }
+      } catch (neo4jError) {
+        console.warn('Neo4j sync failed in mock mode (MongoDB updated successfully):', neo4jError.message);
       }
-    } catch (neo4jError) {
-      console.warn('Neo4j sync failed (MongoDB updated successfully):', neo4jError.message);
     }
 
     // Build response

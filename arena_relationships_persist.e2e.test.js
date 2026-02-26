@@ -28,7 +28,8 @@ await jest.unstable_mockModule('./ai/textToImage/api.js', () => ({
 
 // Dynamic import after mocks
 const { app } = await import('./server_new.js');
-const { closeNeo4j } = await import('./services/neo4jService.js');
+const { Arena } = await import('./models/models.js');
+const { closeNeo4j, getSession } = await import('./services/neo4jService.js');
 
 const EXTERNAL_MONGO_URI = process.env.MONGO_URI
   || process.env.MONGODB_URI
@@ -66,6 +67,7 @@ afterAll(async () => {
 describe('Arena Relationships Persistent Flow', () => {
   let cards = [];
   let entities = [];
+  let edgeIds = [];
 
   it('creates entities and cards', async () => {
     const res = await request(app)
@@ -138,6 +140,8 @@ describe('Arena Relationships Persistent Flow', () => {
     expect(res.status).toBe(200);
     expect(res.body.verdict).toBe('accepted');
     expect(res.body.edge).toBeDefined();
+    expect(res.body.edge.strength).toBe(4);
+    edgeIds.push(res.body.edge.edgeId);
   });
 
   it('adds additional connections between existing entities', async () => {
@@ -180,5 +184,49 @@ describe('Arena Relationships Persistent Flow', () => {
     expect(res.body.verdict).toBe('accepted');
     expect(Array.isArray(res.body.edge)).toBe(true);
     expect(res.body.edge.length).toBe(2);
+    expect(res.body.edge.every((edge) => edge.strength === 4)).toBe(true);
+    edgeIds.push(...res.body.edge.map((edge) => edge.edgeId));
+  });
+
+  it('persists strength in MongoDB and Neo4j', async () => {
+    const arenaDoc = await Arena.findOne({ sessionId }).lean();
+    expect(arenaDoc).toBeTruthy();
+    const persistedEdges = Array.isArray(arenaDoc?.arena?.edges) ? arenaDoc.arena.edges : [];
+    expect(persistedEdges.length).toBeGreaterThanOrEqual(3);
+    for (const edgeId of edgeIds) {
+      const edge = persistedEdges.find((entry) => entry.edgeId === edgeId);
+      expect(edge).toBeTruthy();
+      expect(edge.strength).toBe(4);
+    }
+
+    const neo4jSession = getSession();
+    try {
+      const neoResult = await neo4jSession.run(
+        `MATCH (:Entity {sessionId: $sessionId})-[r:RELATES_TO]->(:Entity {sessionId: $sessionId})
+         WHERE r.edgeId IN $edgeIds
+         RETURN r.edgeId AS edgeId, r.strength AS strength`,
+        { sessionId, edgeIds }
+      );
+
+      const toNum = (value) => {
+        if (!value) return 0;
+        if (typeof value.toNumber === 'function') return value.toNumber();
+        return Number(value);
+      };
+
+      const neoEdgeMap = new Map(
+        neoResult.records.map((record) => [
+          record.get('edgeId'),
+          toNum(record.get('strength'))
+        ])
+      );
+
+      for (const edgeId of edgeIds) {
+        expect(neoEdgeMap.has(edgeId)).toBe(true);
+        expect(neoEdgeMap.get(edgeId)).toBe(4);
+      }
+    } finally {
+      await neo4jSession.close();
+    }
   });
 });
