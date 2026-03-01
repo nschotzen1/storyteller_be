@@ -182,3 +182,17 @@ const QuestScreenGraphSchema = new mongoose.Schema({
 QuestScreenGraphSchema.index({ sessionId: 1, questId: 1 }, { unique: true });
 
 export const QuestScreenGraph = mongoose.model('QuestScreenGraph', QuestScreenGraphSchema);
+
+const TypewriterPromptTemplateSchema = new mongoose.Schema({
+  pipelineKey: { type: String, required: true, index: true },
+  version: { type: Number, required: true },
+  promptTemplate: { type: String, required: true },
+  isLatest: { type: Boolean, default: true, index: true },
+  createdBy: { type: String, default: 'admin' },
+  meta: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { timestamps: true });
+
+TypewriterPromptTemplateSchema.index({ pipelineKey: 1, version: 1 }, { unique: true });
+TypewriterPromptTemplateSchema.index({ pipelineKey: 1, isLatest: 1 });
+
+export const TypewriterPromptTemplate = mongoose.model('TypewriterPromptTemplate', TypewriterPromptTemplateSchema);

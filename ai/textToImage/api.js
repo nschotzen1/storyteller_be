@@ -80,7 +80,14 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-export async function textToImageOpenAi(prompt, samples = 1, localPath, shouldMock = false, maxRetries = 3) {
+export async function textToImageOpenAi(
+  prompt,
+  samples = 1,
+  localPath,
+  shouldMock = false,
+  maxRetries = 3,
+  modelOverride = ''
+) {
   if (shouldMock) {
     return {
       url: `https://oaidalleapiprodscus.blob.core.windows.net/private/org-QEgcgJZRR8O5I4TU81OtIzQr/user-x8YFabEYMtNouC3KDRNrvqNt/img-DyFU8k9br5ifd27AbfL65YlI.png?st=2023-11-23T23%3A06%3A28Z&se=2023-11-24T01%3A06%3A28Z&sp=r&sv=2021-08-06&sr=b&rscd=inline&rsct=image/png&skoid=6aaadede-4fb3-4698-a8f6-684d7786b067&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2023-11-23T20%3A18%3A16Z&ske=2023-11-24T20%3A18%3A16Z&sks=b&skv=2021-08-06&sig=ePHJceNpabp6Sb8CH5try7uAN3QdzapO6YSAPTkHJ9U%3D`,
@@ -90,11 +97,14 @@ export async function textToImageOpenAi(prompt, samples = 1, localPath, shouldMo
   }
 
   else {
+    const selectedModel = typeof modelOverride === 'string' && modelOverride.trim()
+      ? modelOverride.trim()
+      : process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
       try {
         const response = await getOpenaiClient().images.generate({
-          model: 'dall-e-3', // Corrected model name from 'gpt-image-1' to standard 'dall-e-3'
+          model: selectedModel,
           prompt,
           n: 1,
           size: '1024x1024', // Explicit size standard for DALL-E 3

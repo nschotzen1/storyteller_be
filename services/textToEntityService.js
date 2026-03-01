@@ -5,8 +5,10 @@ const __dirname = path.dirname(__filename);
 
 import { directExternalApiCall } from '../ai/openai/apiService.js';
 import { generate_texture_by_fragment_and_conversation } from '../ai/openai/texturePrompts.js';
+import { getNArchetypes } from '../ai/openai/promptsUtils.js';
 import { generateEntitiesFromFragment, setEntitiesForSession, ensureDirectoryExists } from '../storyteller/utils.js';
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
+import { renderPromptTemplateString } from './typewriterPromptConfigService.js';
 
 function normalizeConnections(connections) {
   if (!connections) {
@@ -52,6 +54,24 @@ Full-frame, cinematic quality, detailed, immersive, and cohesive. Include tastef
 No visible text besides the title: "${entity.name}".`;
 }
 
+function buildFrontPromptWithTemplate(entity, texturePrompt, fragmentText, promptTemplate = '') {
+  if (!promptTemplate || !promptTemplate.trim()) {
+    return buildFrontPrompt(entity, texturePrompt, fragmentText);
+  }
+
+  return renderPromptTemplateString(promptTemplate, {
+    entity_name: entity?.name || 'Unnamed entity',
+    ner_type: entity?.ner_type || 'ENTITY',
+    ner_subtype: entity?.ner_subtype || 'General',
+    description: entity?.description || 'No description provided.',
+    relevance: entity?.relevance || 'No narrative context provided.',
+    evolution_notes: entity?.evolution_notes || '',
+    connections: normalizeConnections(entity?.connections),
+    texture_prompt: texturePrompt || '',
+    fragmentText: fragmentText || ''
+  });
+}
+
 function selectTextureForEntity(textures, entity, idx) {
   if (!Array.isArray(textures) || textures.length === 0) {
     return null;
@@ -75,24 +95,34 @@ function buildFallbackTexture(fragmentText, entityName) {
   };
 }
 
-async function generateTexturesForEntities(fragmentText, entities) {
+async function generateTexturesForEntities(fragmentText, entities, llmModel = '', promptTemplate = '') {
   if (!Array.isArray(entities) || entities.length === 0) {
     return [];
   }
 
-  const prompts = generate_texture_by_fragment_and_conversation(
-    fragmentText,
-    '',
-    entities,
-    entities.length
-  );
+  const prompts = typeof promptTemplate === 'string' && promptTemplate.trim()
+    ? [{
+      role: 'system',
+      content: renderPromptTemplateString(promptTemplate, {
+        fragmentText,
+        entityCount: entities.length,
+        entityNames: entities.map((entity) => entity.name).join('\n'),
+        archetypes_json: JSON.stringify(getNArchetypes(entities.length || 4))
+      })
+    }]
+    : generate_texture_by_fragment_and_conversation(
+      fragmentText,
+      '',
+      entities,
+      entities.length
+    );
 
-  if (prompts?.[0]?.content) {
+  if (!(typeof promptTemplate === 'string' && promptTemplate.trim()) && prompts?.[0]?.content) {
     const entityNames = entities.map((entity) => `- ${entity.name}`).join('\n');
     prompts[0].content += `\n\nEntity names (use exactly for text_for_entity, one per texture):\n${entityNames}`;
   }
 
-  const response = await directExternalApiCall(prompts, 2500, 1.03, undefined, true, true);
+  const response = await directExternalApiCall(prompts, 2500, 1.03, undefined, true, true, llmModel);
   const textures = response?.textures ?? response;
   if (!Array.isArray(textures)) {
     return [];
@@ -107,7 +137,9 @@ async function buildCardsForEntities({
   fragmentText,
   includeFront,
   includeBack,
-  mocked
+  mocked,
+  imageModel,
+  frontPromptTemplate
 }) {
   const cards = [];
 
@@ -139,7 +171,7 @@ async function buildCardsForEntities({
         const localPath = path.join(cardsDirAbs, filename);
 
         // Call generation
-        const result = await textToImageOpenAi(prompt, 1, localPath);
+        const result = await textToImageOpenAi(prompt, 1, localPath, false, 3, imageModel);
         if (result && result.localPath) {
           // Convert to web path: /assets/sessionId/cards/filename
           backUrl = `/assets/${sessionId}/cards/${filename}`;
@@ -155,7 +187,7 @@ async function buildCardsForEntities({
 
     if (includeFront) {
       let frontUrl = null;
-      const prompt = buildFrontPrompt(entity, texture?.prompt, fragmentText);
+      const prompt = buildFrontPromptWithTemplate(entity, texture?.prompt, fragmentText, frontPromptTemplate);
 
       if (mocked) {
         // Mock asset
@@ -165,7 +197,7 @@ async function buildCardsForEntities({
         const localPath = path.join(cardsDirAbs, filename);
 
         // Call generation
-        const result = await textToImageOpenAi(prompt, 1, localPath);
+        const result = await textToImageOpenAi(prompt, 1, localPath, false, 3, imageModel);
         if (result && result.localPath) {
           frontUrl = `/assets/${sessionId}/cards/${filename}`;
         }
@@ -223,8 +255,16 @@ export async function textToEntityFromText({
   includeBack = true,
   debug = false,
   mainEntityId,
-  isSubEntity = false
+  isSubEntity = false,
+  llmModel = '',
+  textureModel = '',
+  mockTextures = false,
+  entityPromptTemplate = '',
+  texturePromptTemplate = '',
+  frontPromptTemplate = ''
 }) {
+  const shouldMockTextures = Boolean(debug || mockTextures);
+
   if (debug) {
     const entities = buildMockEntities();
     if (mainEntityId) {
@@ -249,10 +289,18 @@ export async function textToEntityFromText({
         fragmentText: text,
         includeFront,
         includeBack,
-        mocked: true
+        mocked: true,
+        imageModel: textureModel,
+        frontPromptTemplate
       });
     }
-    return { entities, cards, mocked: true };
+    return {
+      entities,
+      cards,
+      mocked: true,
+      mockedEntities: true,
+      mockedTextures: true
+    };
   }
 
   const entities = await generateEntitiesFromFragment(
@@ -260,12 +308,20 @@ export async function textToEntityFromText({
     text,
     1,
     undefined,
-    { mainEntityId, isSubEntity, playerId }
+    {
+      mainEntityId,
+      isSubEntity,
+      playerId,
+      llmModel,
+      entityPromptTemplate
+    }
   );
   let cards;
 
   if (includeCards) {
-    const textures = includeBack ? await generateTexturesForEntities(text, entities) : [];
+    const textures = includeBack && !shouldMockTextures
+      ? await generateTexturesForEntities(text, entities, llmModel, texturePromptTemplate)
+      : [];
     cards = await buildCardsForEntities({
       sessionId,
       entities,
@@ -273,9 +329,17 @@ export async function textToEntityFromText({
       fragmentText: text,
       includeFront,
       includeBack,
-      mocked: false
+      mocked: shouldMockTextures,
+      imageModel: textureModel,
+      frontPromptTemplate
     });
   }
 
-  return { entities, cards, mocked: false };
+  return {
+    entities,
+    cards,
+    mocked: shouldMockTextures,
+    mockedEntities: false,
+    mockedTextures: shouldMockTextures
+  };
 }
