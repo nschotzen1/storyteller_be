@@ -9,18 +9,19 @@ import { fileURLToPath } from 'url';
 import { generateStorytellerGuidance, generate_cards, generate_seer_response } from "../ai/openai/cardReadingPrompts.js";
 import {directExternalApiCall} from '../ai/openai/apiService.js';
 import {  generate_texture_by_fragment_and_conversation, } from "../ai/openai/texturePrompts.js"
+import { generate_entities_by_fragment } from "../ai/openai/promptsUtils.js";
 import { 
 
   generateMasterStorytellerConclusionChat, 
   generateStorytellerSummaryPropt, 
   generateStorytellerDetectiveFirstParagraphSession, 
   generateStorytellerDetectiveFirstParagraphLetter, 
-  generate_entities_by_fragment 
 } from "../ai/openai/promptUtilsMore.js";
 
 import { generateMasterStorytellerChat, } from '../ai/openai/personaChatPrompts.js'
 import { askForBooksGeneration } from "../ai/openai/bookPrompts.js";
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
+import { renderPromptTemplateString } from '../services/typewriterPromptConfigService.js';
 
 // Setup __dirname and __filename for ES6 modules
 const __filename = fileURLToPath(import.meta.url);
@@ -925,10 +926,23 @@ export async function chatWithStoryteller(sessionId, fragmentText, userInput = '
 export async function generateEntitiesFromFragment(sessionId, fragmentText, turn = 1, existinEntities, options = {}) {
   const maxEntities = 8
   let commonEntities = []
+  const llmModel = typeof options.llmModel === 'string' ? options.llmModel.trim() : '';
+  const entityPromptTemplate = typeof options.entityPromptTemplate === 'string'
+    ? options.entityPromptTemplate.trim()
+    : '';
   if(process.env["MOCK_ENTIITIES"] == 'true')
     commonEntities = [{"id":"ru6k9uuw","turn":4,"familiarity_level":4,"reusability_level":"High fantasy setting","ner_type":"LOCATION","ner_subtype":"Volcanic Crater","description":"An immense volcanic crater shrouded in dense fog, with glimpses of a lush jungle within its depths.","name":"Fogbound Crater","relevance":"The crater is the central location of the narrative fragment, representing both a destination and a mystery.","impact":"Potentially hiding ancient secrets or dangers, it presents exploration opportunities and environmental challenges.","skills_and_rolls":["Survival","Perception","Nature Lore"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":18,"urgency":"Immediate","connections":["Kimia","Elivirio","Ancient stone markers"],"tile_distance":0,"evolution_state":"New","evolution_notes":"Introduced as a major narrative location."},{"id":"t00uky8x","turn":4,"familiarity_level":3,"reusability_level":"Jungle exploration","ner_type":"FLORA","ner_subtype":"Exotic Jungle","description":"A lush jungle teeming with vibrant plant life, hidden within the crater.","name":"Crater Jungle","relevance":"The jungle is a potential source of resources or clues within the crater.","impact":"Offers opportunities for foraging and discovery, but may also hide dangers.","skills_and_rolls":["Botany","Stealth","Tracking"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":15,"urgency":"Near Future","connections":["Fogbound Crater"],"tile_distance":1,"evolution_state":"New","evolution_notes":"Revealed as part of the crater's interior."},{"id":"myxshov9","turn":4,"familiarity_level":5,"reusability_level":"Fantasy characters","ner_type":"PERSON","ner_subtype":"Guide","description":"A character with long black braided hair, knowledgeable about the crater's secrets.","name":"Elivirio","relevance":"Elivirio is a guide and key figure in navigating the crater, holding knowledge about its hidden paths.","impact":"His knowledge is crucial for progress, potentially unlocking new paths or lore.","skills_and_rolls":["Navigation","Lore","Persuasion"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":8,"urgency":"Immediate","connections":["Kimia","Fogbound Crater"],"tile_distance":0,"evolution_state":"Expanded","evolution_notes":"Further developed as a knowledgeable guide character."},{"id":"310xnsfn","turn":4,"familiarity_level":4,"reusability_level":"Archaeological sites","ner_type":"ITEM","ner_subtype":"Ancient Marker","description":"Half-buried stone markers with worn symbols, hinting at ancient civilizations.","name":"Volcanic Markers","relevance":"These markers potentially reveal the history of the crater and guide adventurers.","impact":"Could lead to new discoveries or unlock hidden areas within the crater.","skills_and_rolls":["Archaeology","History","Decipher Script"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":12,"urgency":"Near Future","connections":["Fogbound Crater","Elivirio"],"tile_distance":1,"evolution_state":"New","evolution_notes":"Introduced as elements of historical significance."},{"id":"1k4jsfkh","turn":4,"familiarity_level":3,"reusability_level":"Geological features","ner_type":"CONCEPT","ner_subtype":"Natural Phenomenon","description":"Thick fog that blankets the crater, obscuring visibility and adding mystery.","name":"Fog Blanket","relevance":"The fog adds an element of mystery and challenge to the exploration of the crater.","impact":"Limits visibility, creating navigation challenges and atmospheric tension.","skills_and_rolls":["Survival","Navigation","Perception"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":10,"urgency":"Immediate","connections":["Fogbound Crater","Crater Jungle"],"tile_distance":0,"evolution_state":"New","evolution_notes":"Introduced as an environmental condition affecting exploration."}]
   else {
-    const prompts = generate_entities_by_fragment(fragmentText, maxEntities);
+    const prompts = entityPromptTemplate
+      ? [{
+        role: 'system',
+        content: renderPromptTemplateString(entityPromptTemplate, {
+          fragmentText,
+          maxEntities,
+          existingEntities: JSON.stringify(existinEntities || [])
+        })
+      }]
+      : generate_entities_by_fragment(fragmentText, maxEntities);
     if(! existinEntities)
       existinEntities = []
     const response = await directExternalApiCall(prompts.concat(existinEntities), {
@@ -937,6 +951,7 @@ export async function generateEntitiesFromFragment(sessionId, fragmentText, turn
       mockedResponse: null,
       explicitJsonObjectFormat: true,
       isOpenAi: true,
+      model: llmModel || undefined,
     });
     let { clusters, entities} = response
     if(entities.card_backs){

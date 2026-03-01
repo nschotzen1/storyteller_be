@@ -15,6 +15,11 @@ import {
   FRAGMENT_MEMORY_REQUIRED_FIELDS,
   FRAGMENT_MEMORY_PROPERTIES_JSON_SCHEMA
 } from '../contracts/fragmentMemoryContract.js';
+import { getPipelineSettings } from '../services/typewriterAiSettingsService.js';
+import {
+  getLatestPromptTemplate,
+  renderPromptTemplateString
+} from '../services/typewriterPromptConfigService.js';
 
 const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -42,6 +47,31 @@ function normalizeMemoryCount(value) {
     return 3;
   }
   return Math.min(Math.max(1, Math.floor(count)), 10);
+}
+
+function parseBooleanFlag(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return null;
+}
+
+function resolveExplicitMockOverride(body = {}) {
+  const flags = [body.mock, body.debug, body.mock_api_calls, body.mocked_api_calls];
+  for (const flag of flags) {
+    const parsed = parseBooleanFlag(flag);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function resolveMockMode(body = {}, fallback = false) {
+  const explicit = resolveExplicitMockOverride(body);
+  if (explicit !== null) return explicit;
+  return Boolean(fallback);
 }
 
 function resolveSchemaErrorMessage(error, fallback) {
@@ -126,6 +156,23 @@ Visual style: cinematic, tactile, grainy, with collector-card embellishments and
 No visible text except the title "${title}".`;
 }
 
+function buildMemoryFrontPromptWithTemplate(memory, fragmentText, promptTemplate = '') {
+  if (!promptTemplate || !promptTemplate.trim()) {
+    return buildMemoryFrontPrompt(memory, fragmentText);
+  }
+  return renderPromptTemplateString(promptTemplate, {
+    dramatic_definition: memory?.dramatic_definition || memory?.action_name || 'Untitled memory',
+    action_name: memory?.action_name || '',
+    miseenscene: memory?.miseenscene || '',
+    actual_result: memory?.actual_result || '',
+    watched: memory?.what_is_being_watched || '',
+    location: memory?.location || 'unknown location',
+    emotional_sentiment: memory?.emotional_sentiment || 'tense silence',
+    viewpoint: memory?.whose_eyes || 'an involved witness',
+    fragmentText: fragmentText || ''
+  });
+}
+
 function buildMemoryBackPrompt(memory, fragmentText) {
   const title = memory?.dramatic_definition || memory?.action_name || 'Untitled memory';
   const temporal = memory?.memory_distance || memory?.temporal_relation || 'echoing in uncertain time';
@@ -139,6 +186,21 @@ Environmental cue: "${environment}".
 Emotional undertone: "${sentiment}".
 Visual style: abstract-symbolic, worn, cinematic, grainy, richly textured with card-back motifs and ornate flourishes.
 No readable text.`;
+}
+
+function buildMemoryBackPromptWithTemplate(memory, fragmentText, promptTemplate = '') {
+  if (!promptTemplate || !promptTemplate.trim()) {
+    return buildMemoryBackPrompt(memory, fragmentText);
+  }
+  return renderPromptTemplateString(promptTemplate, {
+    dramatic_definition: memory?.dramatic_definition || memory?.action_name || 'Untitled memory',
+    action_name: memory?.action_name || '',
+    memory_distance: memory?.memory_distance || '',
+    temporal_relation: memory?.temporal_relation || '',
+    geographical_relevance: memory?.geographical_relevance || '',
+    emotional_sentiment: memory?.emotional_sentiment || 'ambiguous',
+    fragmentText: fragmentText || ''
+  });
 }
 
 function pickMockMemoryImageUrl(index, side) {
@@ -156,7 +218,10 @@ async function buildMemoryCardPayload({
   includeFront,
   includeBack,
   shouldMock,
-  fragmentText
+  fragmentText,
+  imageModel,
+  frontPromptTemplate,
+  backPromptTemplate
 }) {
   const card = {};
   const baseName = sanitizeFileSegment(
@@ -165,14 +230,14 @@ async function buildMemoryCardPayload({
   );
 
   if (includeFront) {
-    const prompt = buildMemoryFrontPrompt(memory, fragmentText);
+    const prompt = buildMemoryFrontPromptWithTemplate(memory, fragmentText, frontPromptTemplate);
     let imageUrl = '';
     if (shouldMock) {
       imageUrl = pickMockMemoryImageUrl(index, 'front');
     } else {
       const filename = `${String(index + 1).padStart(2, '0')}_${baseName}_front.png`;
       const localPath = path.join(cardsDirAbs, filename);
-      const result = await textToImageOpenAi(prompt, 1, localPath, false);
+      const result = await textToImageOpenAi(prompt, 1, localPath, false, 3, imageModel);
       if (result?.localPath) {
         imageUrl = `/assets/${sessionId}/memory_cards/${batchId}/${filename}`;
       }
@@ -181,14 +246,14 @@ async function buildMemoryCardPayload({
   }
 
   if (includeBack) {
-    const prompt = buildMemoryBackPrompt(memory, fragmentText);
+    const prompt = buildMemoryBackPromptWithTemplate(memory, fragmentText, backPromptTemplate);
     let imageUrl = '';
     if (shouldMock) {
       imageUrl = pickMockMemoryImageUrl(index, 'back');
     } else {
       const filename = `${String(index + 1).padStart(2, '0')}_${baseName}_back.png`;
       const localPath = path.join(cardsDirAbs, filename);
-      const result = await textToImageOpenAi(prompt, 1, localPath, false);
+      const result = await textToImageOpenAi(prompt, 1, localPath, false, 3, imageModel);
       if (result?.localPath) {
         imageUrl = `/assets/${sessionId}/memory_cards/${batchId}/${filename}`;
       }
@@ -247,7 +312,12 @@ router.post('/fragmentToMemories', async (req, res) => {
     }
 
     const memoryCount = normalizeMemoryCount(count ?? numberOfMemories);
-    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
+    const memorySettings = await getPipelineSettings('memory_creation');
+    const textureSettings = await getPipelineSettings('texture_creation');
+    const shouldMock = resolveMockMode(body, memorySettings.useMock);
+    const shouldMockTextures = resolveMockMode(body, textureSettings.useMock);
+    const memoryFrontPrompt = await getLatestPromptTemplate('memory_card_front');
+    const memoryBackPrompt = await getLatestPromptTemplate('memory_card_back');
     const shouldIncludeCards = includeCards === undefined ? false : Boolean(includeCards);
     const shouldIncludeFront = includeFront === undefined ? true : Boolean(includeFront);
     const shouldIncludeBack = includeBack === undefined ? true : Boolean(includeBack);
@@ -256,18 +326,28 @@ router.post('/fragmentToMemories', async (req, res) => {
     if (shouldMock) {
       memoriesPayload = { memories: buildMockMemories(memoryCount) };
     } else {
-      const routeConfig = await getRouteConfig('fragment_to_memories');
-      const prompt = renderPrompt(routeConfig.promptTemplate, {
-        fragmentText,
-        memoryCount
-      });
+      const latestPrompt = await getLatestPromptTemplate('memory_creation');
+      let prompt = '';
+      if (latestPrompt?.promptTemplate) {
+        prompt = renderPromptTemplateString(latestPrompt.promptTemplate, {
+          fragmentText,
+          memoryCount
+        });
+      } else {
+        const routeConfig = await getRouteConfig('fragment_to_memories');
+        prompt = renderPrompt(routeConfig.promptTemplate, {
+          fragmentText,
+          memoryCount
+        });
+      }
       const llmResult = await directExternalApiCall(
         [{ role: 'system', content: prompt }],
         3000,
         undefined,
         undefined,
         true,
-        true
+        true,
+        memorySettings.model
       );
       memoriesPayload = Array.isArray(llmResult) ? { memories: llmResult } : llmResult;
     }
@@ -276,7 +356,7 @@ router.post('/fragmentToMemories', async (req, res) => {
 
     const batchId = randomUUID();
     const cardsDirAbs = path.resolve(process.cwd(), 'assets', sessionId, 'memory_cards', batchId);
-    if (shouldIncludeCards && !shouldMock && (shouldIncludeFront || shouldIncludeBack)) {
+    if (shouldIncludeCards && !shouldMockTextures && (shouldIncludeFront || shouldIncludeBack)) {
       await ensureDirectoryExists(cardsDirAbs);
     }
 
@@ -301,8 +381,11 @@ router.post('/fragmentToMemories', async (req, res) => {
           cardsDirAbs,
           includeFront: shouldIncludeFront,
           includeBack: shouldIncludeBack,
-          shouldMock,
-          fragmentText
+          shouldMock: shouldMockTextures,
+          fragmentText,
+          imageModel: textureSettings.model,
+          frontPromptTemplate: memoryFrontPrompt?.promptTemplate || '',
+          backPromptTemplate: memoryBackPrompt?.promptTemplate || ''
         });
         if (card.front) doc.front = card.front;
         if (card.back) doc.back = card.back;
@@ -321,7 +404,9 @@ router.post('/fragmentToMemories', async (req, res) => {
       batchId,
       memories: saved,
       count: saved.length,
-      mocked: shouldMock
+      mocked: shouldMock || shouldMockTextures,
+      mockedMemories: shouldMock,
+      mockedTextures: shouldMockTextures
     };
 
     if (shouldIncludeCards) {

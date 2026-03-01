@@ -90,6 +90,7 @@ Rules:
 import path from 'path';
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
 import { ensureDirectoryExists } from '../storyteller/utils.js';
+import { renderPromptTemplateString } from './typewriterPromptConfigService.js';
 // Assuming sanitizeName is either exported from api.js or we define a local version.
 // If not exported, let's define a simple one here for now.
 function sanitizeName(name) {
@@ -108,14 +109,21 @@ function sanitizeName(name) {
  * @param {boolean} [shouldMockImage=false] - Whether to use a mock image response.
  * @returns {Promise<object|null>} An object with imageUrl and localPath, or null if image generation fails.
  */
-export async function createStoryTellerKey(typewriterKey, sessionId, storytellerName, shouldMockImage = false) {
+export async function createStoryTellerKey(
+  typewriterKey,
+  sessionId,
+  storytellerName,
+  shouldMockImage = false,
+  imageModelOverride = '',
+  promptTemplate = ''
+) {
   if (!typewriterKey || !typewriterKey.symbol || !typewriterKey.description) {
     console.error('Invalid typewriterKey provided to createStoryTellerKey');
     return null;
   }
 
   const { symbol, description } = typewriterKey;
-  const prompt = `A rugged, aged typewriter key rendered as a masked PNG on transparent background. The key has a unique silhouette tailored to the symbol: a form echoing the essence of "${symbol}". The base material reflects the description: ${description.toLowerCase().replace('.', '')}, marked by time and purpose.
+  const defaultPrompt = `A rugged, aged typewriter key rendered as a masked PNG on transparent background. The key has a unique silhouette tailored to the symbol: a form echoing the essence of "${symbol}". The base material reflects the description: ${description.toLowerCase().replace('.', '')}, marked by time and purpose.
 
 At its center is a symbolic feature: a representation of the "${symbol}" — whether carved, inlaid, or raised — reflecting the key's specific lore. The symbol is worn, oxidized, or subtly glowing, depending on its material origin and thematic tone.
 
@@ -133,7 +141,14 @@ Storyteller Society Infusion:
 - A mark or scar that shows the key’s bond to narrative authority.
 
 Lighting should emphasize realism: catching brass tarnish, glass shimmer, or obsidian fractures. Shadows help isolate the symbol, while the overall look is that of a physical, analog artifact — part of a magical typewriter from a secret order of storytellers.
-  `.trim()
+  `.trim();
+  const prompt = typeof promptTemplate === 'string' && promptTemplate.trim()
+    ? renderPromptTemplateString(promptTemplate, {
+      symbol,
+      description,
+      storyteller_name: storytellerName || ''
+    })
+    : defaultPrompt;
   // Sanitize storytellerName for use in file path
   const saneName = sanitizeName(storytellerName);
 
@@ -156,7 +171,7 @@ Lighting should emphasize realism: catching brass tarnish, glass shimmer, or obs
 
     // textToImageOpenAi expects samples, localPath, shouldMock
     // textToImageOpenAi(prompt, samples, localPath, shouldMock, maxRetries)
-    const imageResult = await textToImageOpenAi(prompt, 1, localImagePath, shouldMockImage);
+    const imageResult = await textToImageOpenAi(prompt, 1, localImagePath, shouldMockImage, 3, imageModelOverride);
 
     return {
       imageUrl: imageResult.url, // This could be the public URL from OpenAI
@@ -175,7 +190,13 @@ Lighting should emphasize realism: catching brass tarnish, glass shimmer, or obs
  * @param {boolean} [shouldMockImage=false] - Whether to use a mock image response.
  * @returns {Promise<object|null>} An object with imageUrl and localPath, or null if image generation fails.
  */
-export async function createStorytellerIllustration(storyteller, sessionId, shouldMockImage = false) {
+export async function createStorytellerIllustration(
+  storyteller,
+  sessionId,
+  shouldMockImage = false,
+  imageModelOverride = '',
+  promptTemplate = ''
+) {
   if (!storyteller || !storyteller.name) {
     console.error('Invalid storyteller provided to createStorytellerIllustration');
     return null;
@@ -192,7 +213,7 @@ const influencesDesc =
     ? `Influence labels: ${influences.join(", ")}. Translate these into concrete visuals (palette, materials, lighting, era cues) instead of vague fantasy tropes.`
     : "";
 
-const prompt = `
+const defaultPrompt = `
 A highly detailed, cinematic portrait of a Storyteller named "${name}" — a spectral chronicler who *belongs to the exact world* described in the fragment below.
 This is not a generic ghost portrait. The portrait must feel like a real inhabitant of that specific place, climate, and myth.
 
@@ -237,6 +258,20 @@ AVOID:
 wizard hat, hood, skull face, vampire tropes, neon glow, sci-fi UI overlays, readable text, logos, watermark, extra limbs, exaggerated anime features.
 `.trim();
 
+  const prompt = typeof promptTemplate === 'string' && promptTemplate.trim()
+    ? renderPromptTemplateString(promptTemplate, {
+      name,
+      fragment_text: fragmentText || '',
+      immediate_ghost_appearance: immediate_ghost_appearance || '',
+      voice_style: voice_creation?.style || '',
+      voice_tone: voice_creation?.voice || '',
+      voice_age: voice_creation?.age || '',
+      voice_description: voiceDesc,
+      influences_csv: Array.isArray(influences) ? influences.join(', ') : '',
+      influences_guidance: influencesDesc || 'Translate the fragment into concrete palette, materials, lighting, and era cues instead of vague fantasy tropes.'
+    })
+    : defaultPrompt;
+
 
   const saneName = sanitizeName(name);
   const baseAssetPath = path.resolve(process.cwd(), 'assets');
@@ -249,7 +284,7 @@ wizard hat, hood, skull face, vampire tropes, neon glow, sci-fi UI overlays, rea
 
     console.log(`Generating illustration for ${name} at ${localImagePath} with prompt: ${prompt}`);
 
-    const imageResult = await textToImageOpenAi(prompt, 1, localImagePath, shouldMockImage);
+    const imageResult = await textToImageOpenAi(prompt, 1, localImagePath, shouldMockImage, 3, imageModelOverride);
 
     return {
       imageUrl: imageResult.url,

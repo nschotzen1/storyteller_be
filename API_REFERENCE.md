@@ -128,6 +128,7 @@ Proposes a connection between two cards. The system acts as a "judge" to accept 
     "fromCardId": "ent_1",
     "toCardId": "ent_2",
     "surfaceText": "sometimes seen at the summit during storms",
+    "strength": 4,
     "quality": { "score": 0.75, "reasons": ["Specific and evocative"] }
   },
   "points": { "awarded": 16, "playerTotal": 32 }
@@ -157,7 +158,7 @@ Returns the full graph state: entities, existing edges, and scores.
   "sessionId": "...,"
   "arena": { "entities": [...] },
   "edges": [
-    { "edgeId": "...", "fromCardId": "...", "toCardId": "...", "surfaceText": "..." }
+    { "edgeId": "...", "fromCardId": "...", "toCardId": "...", "surfaceText": "...", "strength": 4 }
   ],
   "scores": { "player-1": 32 }
 }

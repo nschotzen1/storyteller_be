@@ -88,6 +88,10 @@ const mockRenderPrompt = jest.fn((template, vars) =>
   template.replace('{{fragmentText}}', vars.fragmentText).replace('{{memoryCount}}', String(vars.memoryCount))
 );
 const mockValidatePayloadForRoute = jest.fn(async () => {});
+const mockGetLatestPromptTemplate = jest.fn(async () => null);
+const mockRenderPromptTemplateString = jest.fn((template, vars) =>
+  template.replace('{{fragmentText}}', vars.fragmentText).replace('{{memoryCount}}', String(vars.memoryCount))
+);
 
 jest.unstable_mockModule('./models/memory_models.js', () => ({
   FragmentMemory: {
@@ -113,6 +117,11 @@ jest.unstable_mockModule('./services/llmRouteConfigService.js', () => ({
   getRouteConfig: mockGetRouteConfig,
   renderPrompt: mockRenderPrompt,
   validatePayloadForRoute: mockValidatePayloadForRoute
+}));
+
+jest.unstable_mockModule('./services/typewriterPromptConfigService.js', () => ({
+  getLatestPromptTemplate: mockGetLatestPromptTemplate,
+  renderPromptTemplateString: mockRenderPromptTemplateString
 }));
 
 function getRouteHandler(router, method, routePath) {

@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { BrewRoom } from './models/brewing_models.js';
-import { directExternalApiCall } from './ai/openai/apiService.js';
+import { directExternalApiCall, listAvailableOpenAiModels } from './ai/openai/apiService.js';
 import { Storyteller, SessionPlayer, Arena, World, WorldElement, QuestScreenGraph } from './models/models.js';
 import {
   createStoryTellerKey,
@@ -18,13 +18,15 @@ import {
   getExistingEdgesForEntities,
   checkDuplicateEdge,
   evaluateRelationship,
-  calculatePoints
+  calculatePoints,
+  deriveRelationshipStrength
 } from './services/arenaService.js';
 import {
   getClusterForEntities,
   createRelationship,
   syncEntityNode,
-  buildClusterContext
+  buildClusterContext,
+  deleteRelationshipsByEdgeIds
 } from './services/neo4jService.js';
 import { buildOpenApiSpec } from './openapi.js';
 import {
@@ -38,6 +40,22 @@ import {
 } from './services/llmRouteConfigService.js';
 import memoriesRouter from './routes/memoriesRoutes.js';
 import { generateTypewriterPrompt } from './ai/openai/promptsUtils.js';
+import {
+  getTypewriterAiSettings,
+  getPipelineSettingsSnapshot,
+  getTypewriterPipelineDefinitions,
+  updateTypewriterAiSettings,
+  resetTypewriterAiSettings
+} from './services/typewriterAiSettingsService.js';
+import {
+  getLatestPromptTemplate,
+  listLatestPromptTemplates,
+  listPromptTemplateVersions,
+  savePromptTemplateVersion,
+  setLatestPromptTemplate,
+  renderPromptTemplateString
+} from './services/typewriterPromptConfigService.js';
+import { seedCurrentTypewriterPromptTemplates } from './services/typewriterDefaultPromptSeedService.js';
 
 
 const app = express();
@@ -59,16 +77,44 @@ const ASSETS_ROOTS = Array.from(new Set(ASSETS_ROOT_CANDIDATES)).filter((candida
 if (ASSETS_ROOTS.length === 0) {
   ASSETS_ROOTS.push(path.resolve(process.cwd(), 'assets'));
 }
+
+function collectTypewriterPageImages(assetRoots, subDirectory, allowedExtensions) {
+  const routePrefix = `/assets/${subDirectory}`;
+  const imageUrls = [];
+
+  for (const assetsRoot of assetRoots) {
+    const folderPath = path.join(assetsRoot, subDirectory);
+    if (!fs.existsSync(folderPath)) continue;
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(folderPath, { withFileTypes: true });
+    } catch (error) {
+      console.warn(`Failed to read typewriter page image folder at ${folderPath}:`, error);
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const extension = path.extname(entry.name).toLowerCase();
+      if (!allowedExtensions.has(extension)) continue;
+      imageUrls.push(`${routePrefix}/${entry.name}`);
+    }
+  }
+
+  return Array.from(new Set(imageUrls));
+}
+
 const DEFAULT_QUEST_ID = 'ruined_rose_court';
 const DEFAULT_QUEST_SESSION_ID = 'rose-court-demo';
 const MOCK_STORYTELLER_ILLUSTRATION_URL = '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png';
 const OPEN_API_SPEC = buildOpenApiSpec();
-const TYPEWRITER_MOCK_MODE = process.env.TYPEWRITER_MOCK_MODE === 'true';
-const TYPEWRITER_FALLBACK_BACKGROUNDS = [
-  '/textures/decor/film_frame_desert.png',
-  '/well/well_background.png',
-  '/ruin_south_a.png',
-  '/arenas/petal_hex_v1.png'
+const TYPEWRITER_PAGE_IMAGES_SUBDIR = 'typewriter_page_images';
+const TYPEWRITER_ALLOWED_PAGE_IMAGE_EXTENSIONS = new Set(['.png']);
+const TYPEWRITER_DEFAULT_SERVER_BACKGROUNDS = [
+  '/assets/mocks/memory_cards/memory_front_01.png',
+  '/assets/mocks/memory_cards/memory_front_02.png',
+  '/assets/mocks/memory_cards/memory_front_03.png'
 ];
 const TYPEWRITER_DEFAULT_FONTS = [
   { font: "'Uncial Antiqua', serif", font_size: '1.8rem', font_color: '#3b1d15' },
@@ -346,18 +392,70 @@ function parseBooleanFlag(value) {
   return null;
 }
 
-function resolveTypewriterMockMode(body = {}) {
+function resolveExplicitMockOverride(body = {}) {
   const explicitFlags = [body.mock, body.debug, body.mock_api_calls, body.mocked_api_calls];
   for (const flag of explicitFlags) {
     const parsed = parseBooleanFlag(flag);
-    if (parsed !== null) return parsed;
+    if (parsed !== null) {
+      return parsed;
+    }
   }
-  return TYPEWRITER_MOCK_MODE;
+  return null;
+}
+
+function resolveMockMode(body = {}, fallback = false) {
+  const explicit = resolveExplicitMockOverride(body);
+  if (explicit !== null) {
+    return explicit;
+  }
+  return Boolean(fallback);
+}
+
+async function getAiPipelineSettings(pipelineKey) {
+  const settings = await getTypewriterAiSettings();
+  return getPipelineSettingsSnapshot(settings, pipelineKey);
+}
+
+function buildTypewriterPromptPayload(existingText = '') {
+  const wordCount = existingText ? existingText.trim().split(/\s+/).filter(Boolean).length : 0;
+  const desired_length_min = parseInt(Math.max(3, wordCount / (1.61 * 1.61)), 10);
+  const desiredlength_max = parseInt(Math.max(80, wordCount / 1.61), 10);
+  return {
+    existing_text: existingText,
+    desired_length_min,
+    desiredlength_max
+  };
+}
+
+function buildTypewriterPromptMessages(existingText, promptTemplate) {
+  if (!promptTemplate || !promptTemplate.trim()) {
+    return generateTypewriterPrompt(existingText);
+  }
+
+  const payload = buildTypewriterPromptPayload(existingText);
+  const renderedPrompt = renderPromptTemplateString(promptTemplate, {
+    existing_text: existingText,
+    desired_length_min: payload.desired_length_min,
+    desiredlength_max: payload.desiredlength_max,
+    word_count: existingText ? existingText.trim().split(/\s+/).filter(Boolean).length : 0
+  });
+
+  return [
+    { role: 'system', content: renderedPrompt },
+    { role: 'user', content: JSON.stringify(payload) }
+  ];
 }
 
 function pickRandomItem(items) {
   if (!Array.isArray(items) || items.length === 0) return null;
   return items[Math.floor(Math.random() * items.length)];
+}
+
+function buildAbsoluteAssetUrl(req, assetPath) {
+  if (typeof assetPath !== 'string' || !assetPath.trim()) return null;
+  if (/^https?:\/\//i.test(assetPath)) return assetPath;
+  const normalized = assetPath.startsWith('/') ? assetPath : `/${assetPath}`;
+  return `${req.protocol}://${req.get('host')}${normalized}`;
 }
 
 function normalizeTypewriterMetadata(metadata) {
@@ -421,9 +519,22 @@ app.post('/api/next_film_image', async (req, res) => {
       return res.status(400).json({ error: 'Missing sessionId' });
     }
 
-    const background = pickRandomItem(TYPEWRITER_FALLBACK_BACKGROUNDS) || TYPEWRITER_FALLBACK_BACKGROUNDS[0];
+    const discoveredBackgrounds = collectTypewriterPageImages(
+      ASSETS_ROOTS,
+      TYPEWRITER_PAGE_IMAGES_SUBDIR,
+      TYPEWRITER_ALLOWED_PAGE_IMAGE_EXTENSIONS
+    );
+    const availableBackgrounds = discoveredBackgrounds.length
+      ? discoveredBackgrounds
+      : TYPEWRITER_DEFAULT_SERVER_BACKGROUNDS;
+    const backgroundPath = pickRandomItem(availableBackgrounds) || availableBackgrounds[0];
+    const backgroundUrl = buildAbsoluteAssetUrl(req, backgroundPath);
+    if (!backgroundUrl) {
+      return res.status(500).json({ error: 'No typewriter page image available' });
+    }
+
     const fontStyle = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
-    return res.status(200).json({ image_url: background, ...fontStyle });
+    return res.status(200).json({ image_url: backgroundUrl, image_path: backgroundPath, ...fontStyle });
   } catch (error) {
     console.error('Error in /api/next_film_image:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -467,15 +578,25 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       return res.status(400).json({ error: 'Missing sessionId or message' });
     }
 
-    const shouldMock = resolveTypewriterMockMode(req.body);
+    const continuationPipeline = await getAiPipelineSettings('story_continuation');
+    const shouldMock = resolveMockMode(req.body, continuationPipeline.useMock);
     if (shouldMock) {
       const mockMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
       return res.status(200).json(createTypewriterResponse(buildMockContinuation(message), mockMetadata, 3));
     }
 
     try {
-      const prompt = generateTypewriterPrompt(message);
-      const aiResponse = await directExternalApiCall(prompt, 2500, undefined, undefined, true, true);
+      const continuationPromptDoc = await getLatestPromptTemplate('story_continuation');
+      const prompt = buildTypewriterPromptMessages(message, continuationPromptDoc?.promptTemplate || '');
+      const aiResponse = await directExternalApiCall(
+        prompt,
+        2500,
+        undefined,
+        undefined,
+        true,
+        true,
+        continuationPipeline.model
+      );
       const continuation = typeof aiResponse?.continuation === 'string' && aiResponse.continuation.trim()
         ? aiResponse.continuation.trim()
         : buildMockContinuation(message);
@@ -1125,6 +1246,146 @@ async function findEntityById(sessionId, playerId, entityId) {
 }
 
 // --- Admin LLM Route Config ---
+app.get('/api/admin/typewriter/ai-settings', requireAdmin, async (req, res) => {
+  try {
+    const settings = await getTypewriterAiSettings();
+    return res.status(200).json({
+      ...settings,
+      pipelinesMeta: getTypewriterPipelineDefinitions()
+    });
+  } catch (error) {
+    console.error('Error in GET /api/admin/typewriter/ai-settings:', error);
+    return res.status(500).json({ message: 'Server error while loading typewriter AI settings.' });
+  }
+});
+
+app.put('/api/admin/typewriter/ai-settings', requireAdmin, async (req, res) => {
+  try {
+    const updatedBy = typeof req.body?.updatedBy === 'string' && req.body.updatedBy.trim()
+      ? req.body.updatedBy.trim()
+      : 'admin';
+    const updated = await updateTypewriterAiSettings(req.body || {}, updatedBy);
+    return res.status(200).json({
+      ...updated,
+      pipelinesMeta: getTypewriterPipelineDefinitions()
+    });
+  } catch (error) {
+    if (error.code === 'INVALID_PIPELINE_KEY') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in PUT /api/admin/typewriter/ai-settings:', error);
+    return res.status(500).json({ message: 'Server error while updating typewriter AI settings.' });
+  }
+});
+
+app.post('/api/admin/typewriter/ai-settings/reset', requireAdmin, async (req, res) => {
+  try {
+    const updatedBy = typeof req.body?.updatedBy === 'string' && req.body.updatedBy.trim()
+      ? req.body.updatedBy.trim()
+      : 'admin';
+    const resetSettings = await resetTypewriterAiSettings(updatedBy);
+    return res.status(200).json({
+      ...resetSettings,
+      pipelinesMeta: getTypewriterPipelineDefinitions()
+    });
+  } catch (error) {
+    console.error('Error in POST /api/admin/typewriter/ai-settings/reset:', error);
+    return res.status(500).json({ message: 'Server error while resetting typewriter AI settings.' });
+  }
+});
+
+app.get('/api/admin/openai/models', requireAdmin, async (req, res) => {
+  try {
+    const forceRefresh = parseBooleanFlag(req.query?.forceRefresh) === true
+      || parseBooleanFlag(req.query?.refresh) === true;
+    const modelsPayload = await listAvailableOpenAiModels({ forceRefresh });
+    return res.status(200).json(modelsPayload);
+  } catch (error) {
+    console.error('Error in GET /api/admin/openai/models:', error);
+    return res.status(500).json({ message: 'Server error while loading OpenAI models.' });
+  }
+});
+
+app.get('/api/admin/typewriter/prompts', requireAdmin, async (req, res) => {
+  try {
+    const latest = await listLatestPromptTemplates();
+    return res.status(200).json(latest);
+  } catch (error) {
+    console.error('Error in GET /api/admin/typewriter/prompts:', error);
+    return res.status(500).json({ message: 'Server error while loading typewriter prompts.' });
+  }
+});
+
+app.post('/api/admin/typewriter/prompts/seed-current', requireAdmin, async (req, res) => {
+  try {
+    const updatedBy = typeof req.body?.updatedBy === 'string' && req.body.updatedBy.trim()
+      ? req.body.updatedBy.trim()
+      : 'admin';
+    const overwrite = parseBooleanFlag(req.body?.overwrite) === true;
+    const seeded = await seedCurrentTypewriterPromptTemplates({ updatedBy, overwrite });
+    return res.status(200).json(seeded);
+  } catch (error) {
+    console.error('Error in POST /api/admin/typewriter/prompts/seed-current:', error);
+    return res.status(500).json({ message: 'Server error while seeding current prompt templates.' });
+  }
+});
+
+app.get('/api/admin/typewriter/prompts/:pipelineKey/versions', requireAdmin, async (req, res) => {
+  try {
+    const { pipelineKey } = req.params;
+    const versions = await listPromptTemplateVersions(pipelineKey, req.query?.limit);
+    return res.status(200).json({ pipelineKey, versions });
+  } catch (error) {
+    if (error.code === 'INVALID_PIPELINE_KEY') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in GET /api/admin/typewriter/prompts/:pipelineKey/versions:', error);
+    return res.status(500).json({ message: 'Server error while listing prompt versions.' });
+  }
+});
+
+app.post('/api/admin/typewriter/prompts/:pipelineKey', requireAdmin, async (req, res) => {
+  try {
+    const { pipelineKey } = req.params;
+    const promptTemplate = req.body?.promptTemplate;
+    const createdBy = typeof req.body?.updatedBy === 'string' && req.body.updatedBy.trim()
+      ? req.body.updatedBy.trim()
+      : 'admin';
+    const saved = await savePromptTemplateVersion(pipelineKey, promptTemplate, createdBy, {
+      markLatest: parseBooleanFlag(req.body?.markLatest) !== false,
+      meta: req.body?.meta
+    });
+    return res.status(201).json(saved);
+  } catch (error) {
+    if (error.code === 'INVALID_PIPELINE_KEY' || error.code === 'INVALID_PROMPT_TEMPLATE') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/admin/typewriter/prompts/:pipelineKey:', error);
+    return res.status(500).json({ message: 'Server error while saving prompt template.' });
+  }
+});
+
+app.post('/api/admin/typewriter/prompts/:pipelineKey/latest', requireAdmin, async (req, res) => {
+  try {
+    const { pipelineKey } = req.params;
+    const latest = await setLatestPromptTemplate(pipelineKey, {
+      id: req.body?.id,
+      version: req.body?.version
+    });
+    return res.status(200).json(latest);
+  } catch (error) {
+    if (
+      error.code === 'INVALID_PIPELINE_KEY'
+      || error.code === 'INVALID_PROMPT_SELECTION'
+      || error.code === 'PROMPT_VERSION_NOT_FOUND'
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/admin/typewriter/prompts/:pipelineKey/latest:', error);
+    return res.status(500).json({ message: 'Server error while selecting latest prompt template.' });
+  }
+});
+
 app.get('/api/admin/llm-config', requireAdmin, async (req, res) => {
   try {
     const configs = await listRouteConfigs();
@@ -1690,13 +1951,17 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
       note ? `GM note: ${note}` : ''
     ].filter(Boolean).join('\n');
 
-    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
+    const entityPipeline = await getAiPipelineSettings('entity_creation');
+    const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
+    const shouldMock = resolveMockMode(body, entityPipeline.useMock);
     const subEntityResult = await textToEntityFromText({
       sessionId,
       playerId,
       text: promptText,
       includeCards: false,
       debug: shouldMock,
+      llmModel: entityPipeline.model,
+      entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
       mainEntityId: entity.externalId || String(entity._id),
       isSubEntity: true
     });
@@ -1752,7 +2017,13 @@ app.post('/api/textToEntity', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or text.' });
     }
 
-    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
+    const entityPipeline = await getAiPipelineSettings('entity_creation');
+    const texturePipeline = await getAiPipelineSettings('texture_creation');
+    const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
+    const entityFrontPromptDoc = await getLatestPromptTemplate('entity_card_front');
+    const texturePromptDoc = await getLatestPromptTemplate('texture_creation');
+    const shouldMockEntities = resolveMockMode(body, entityPipeline.useMock);
+    const shouldMockTextures = resolveMockMode(body, texturePipeline.useMock);
     const options = {
       sessionId,
       playerId,
@@ -1760,7 +2031,13 @@ app.post('/api/textToEntity', async (req, res) => {
       includeCards: includeCards === undefined ? false : Boolean(includeCards),
       includeFront: includeFront === undefined ? true : Boolean(includeFront),
       includeBack: includeBack === undefined ? true : Boolean(includeBack),
-      debug: shouldMock
+      debug: shouldMockEntities,
+      llmModel: entityPipeline.model,
+      textureModel: texturePipeline.model,
+      mockTextures: shouldMockTextures,
+      entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
+      frontPromptTemplate: entityFrontPromptDoc?.promptTemplate || '',
+      texturePromptTemplate: texturePromptDoc?.promptTemplate || ''
     };
 
     const result = await textToEntityFromText(options);
@@ -1768,7 +2045,9 @@ app.post('/api/textToEntity', async (req, res) => {
     const response = {
       sessionId,
       entities: result.entities,
-      mocked: result.mocked
+      mocked: result.mocked,
+      mockedEntities: result.mockedEntities,
+      mockedTextures: result.mockedTextures
     };
 
     if (options.includeCards) {
@@ -1809,24 +2088,39 @@ app.post('/api/textToStoryteller', async (req, res) => {
     }
 
     const storytellerCount = normalizeStorytellerCount(count ?? numberOfStorytellers);
-    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
+    const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
+    const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
+    const storytellerPromptDoc = await getLatestPromptTemplate('storyteller_creation');
+    const storytellerKeyPromptDoc = await getLatestPromptTemplate('storyteller_key_creation');
+    const illustrationPromptDoc = await getLatestPromptTemplate('illustration_creation');
+    const shouldMockStorytellers = resolveMockMode(body, storytellerPipeline.useMock);
+    const shouldMockIllustrations = resolveMockMode(body, illustrationPipeline.useMock);
     let storytellerDataArray;
 
-    if (shouldMock) {
+    if (shouldMockStorytellers) {
       storytellerDataArray = buildMockStorytellers(storytellerCount, fragmentText);
     } else {
-      const routeConfig = await getRouteConfig('text_to_storyteller');
-      const prompt = renderPrompt(routeConfig.promptTemplate, {
-        fragmentText,
-        storytellerCount
-      });
+      let prompt = '';
+      if (storytellerPromptDoc?.promptTemplate) {
+        prompt = renderPromptTemplateString(storytellerPromptDoc.promptTemplate, {
+          fragmentText,
+          storytellerCount
+        });
+      } else {
+        const routeConfig = await getRouteConfig('text_to_storyteller');
+        prompt = renderPrompt(routeConfig.promptTemplate, {
+          fragmentText,
+          storytellerCount
+        });
+      }
       storytellerDataArray = await directExternalApiCall(
         [{ role: 'system', content: prompt }],
         2500,
         undefined,
         undefined,
         true,
-        true
+        true,
+        storytellerPipeline.model
       );
     }
 
@@ -1859,7 +2153,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
         fragmentText,
         ...storytellerData
       };
-      if (shouldMock && !payload.illustration) {
+      if (shouldMockIllustrations && !payload.illustration) {
         payload.illustration = MOCK_STORYTELLER_ILLUSTRATION_URL;
       }
 
@@ -1870,35 +2164,45 @@ app.post('/api/textToStoryteller', async (req, res) => {
       );
       savedStorytellers.push(savedStoryteller);
 
-      if (!shouldMock && generateKeyImages && payload.typewriter_key?.symbol) {
+      if (!shouldMockIllustrations && generateKeyImages && payload.typewriter_key?.symbol) {
         const keyImageResult = await createStoryTellerKey(
           payload.typewriter_key,
           sessionId,
           payload.name,
-          Boolean(mockImage)
+          Boolean(mockImage),
+          illustrationPipeline.model,
+          storytellerKeyPromptDoc?.promptTemplate || ''
         );
-        if (keyImageResult?.localPath) {
-          const localUrl = `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_keys/${path.basename(keyImageResult.localPath)}`;
+        if (keyImageResult?.imageUrl || keyImageResult?.localPath) {
+          const localUrl = keyImageResult?.localPath
+            ? `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_keys/${path.basename(keyImageResult.localPath)}`
+            : null;
+          const imageUrl = keyImageResult?.imageUrl || localUrl;
           keyImages.push({
             storytellerId: savedStoryteller._id,
             name: savedStoryteller.name,
-            imageUrl: keyImageResult.imageUrl || localUrl,
+            imageUrl,
             localUrl,
             localPath: keyImageResult.localPath
           });
         }
       }
 
-      if (!shouldMock) {
+      if (!shouldMockIllustrations) {
         // Generate Illustration
         const illustrationResult = await createStorytellerIllustration(
           payload,
           sessionId,
-          Boolean(mockImage)
+          Boolean(mockImage),
+          illustrationPipeline.model,
+          illustrationPromptDoc?.promptTemplate || ''
         );
 
-        if (illustrationResult?.localPath) {
-          const illustrationUrl = `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_illustrations/${path.basename(illustrationResult.localPath)}`;
+        if (illustrationResult?.imageUrl || illustrationResult?.localPath) {
+          const localIllustrationUrl = illustrationResult?.localPath
+            ? `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_illustrations/${path.basename(illustrationResult.localPath)}`
+            : null;
+          const illustrationUrl = illustrationResult?.imageUrl || localIllustrationUrl;
 
           await Storyteller.findByIdAndUpdate(savedStoryteller._id, {
             illustration: illustrationUrl
@@ -1914,7 +2218,10 @@ app.post('/api/textToStoryteller', async (req, res) => {
       sessionId,
       storytellers: savedStorytellers,
       keyImages,
-      count: savedStorytellers.length
+      count: savedStorytellers.length,
+      mocked: shouldMockStorytellers || shouldMockIllustrations,
+      mockedStorytellers: shouldMockStorytellers,
+      mockedIllustrations: shouldMockIllustrations
     });
   } catch (err) {
     if (err.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
@@ -1971,7 +2278,9 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
     }
     storytellerDocIdForReset = storyteller._id;
 
-    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
+    const entityPipeline = await getAiPipelineSettings('entity_creation');
+    const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
+    const shouldMock = resolveMockMode(body, entityPipeline.useMock);
     const durationDays = Number.isFinite(Number(duration)) ? Number(duration) : undefined;
 
     await Storyteller.findByIdAndUpdate(
@@ -2024,6 +2333,8 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       text: subEntitySeed,
       includeCards: false,
       debug: shouldMock,
+      llmModel: entityPipeline.model,
+      entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
       mainEntityId: entity.externalId || String(entity._id),
       isSubEntity: true
     });
@@ -2196,11 +2507,13 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
 
     // If dryRun, return without committing
     if (dryRun) {
+      const strength = deriveRelationshipStrength(evaluation?.quality?.score);
       return res.status(200).json({
         verdict: 'accepted',
         dryRun: true,
         quality: evaluation.quality,
         predicate,
+        strength,
         message: 'Relationship would be accepted (dry run, not committed).',
         fastValidate: evaluation.fastValidate
       });
@@ -2209,6 +2522,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
     // Commit edges
     const createdEdges = [];
     const edgesArray = Array.isArray(arena.edges) ? arena.edges : [];
+    const relationshipStrength = deriveRelationshipStrength(evaluation?.quality?.score);
 
     for (const target of targets) {
       const edge = {
@@ -2218,6 +2532,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
         surfaceText: relationshipPayload.surfaceText,
         predicate,
         direction: relationshipPayload.direction || 'source_to_target',
+        strength: relationshipStrength,
         quality: evaluation.quality,
         createdBy: playerId,
         createdAt: new Date().toISOString()
@@ -2228,37 +2543,66 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
 
     // Calculate and update points
     const pointsAwarded = calculatePoints(evaluation.quality.score);
-    const scores = arena.scores || {};
+    const scores = { ...(arena.scores || {}) };
     const previousTotal = scores[playerId] || 0;
     scores[playerId] = previousTotal + pointsAwarded;
 
-    // Save Arena to MongoDB
-    await Arena.findOneAndUpdate(
-      { sessionId },
-      {
-        $set: {
-          'arena.edges': edgesArray,
-          'arena.scores': scores,
-          lastUpdatedBy: playerId
-        }
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+    const edgeIds = createdEdges.map((edge) => edge.edgeId);
+    const enforceDualWrite = !shouldMock;
 
-    // Sync to Neo4j (graceful fallback if unavailable)
+    if (enforceDualWrite) {
+      try {
+        await syncEntityNode(sessionId, source);
+        for (const target of targets) {
+          await syncEntityNode(sessionId, target);
+        }
+        for (const edge of createdEdges) {
+          await createRelationship(sessionId, edge);
+        }
+      } catch (neo4jError) {
+        console.error('Neo4j sync failed before Mongo commit, aborting relationship proposal:', neo4jError);
+        return res.status(503).json({
+          message: 'Relationship persistence failed: Neo4j unavailable. No changes were committed.'
+        });
+      }
+    }
+
     try {
-      // Sync source entity node
-      await syncEntityNode(sessionId, source);
-      // Sync target entity nodes
-      for (const target of targets) {
-        await syncEntityNode(sessionId, target);
+      await Arena.findOneAndUpdate(
+        { sessionId },
+        {
+          $set: {
+            'arena.edges': edgesArray,
+            'arena.scores': scores,
+            lastUpdatedBy: playerId
+          }
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+    } catch (mongoError) {
+      if (enforceDualWrite) {
+        try {
+          await deleteRelationshipsByEdgeIds(sessionId, edgeIds);
+        } catch (rollbackError) {
+          console.error('Neo4j rollback failed after MongoDB persistence error:', rollbackError);
+        }
       }
-      // Create relationships in Neo4j
-      for (const edge of createdEdges) {
-        await createRelationship(sessionId, edge);
+      throw mongoError;
+    }
+
+    // In mock mode, keep Neo4j synchronization best-effort for local testing.
+    if (!enforceDualWrite) {
+      try {
+        await syncEntityNode(sessionId, source);
+        for (const target of targets) {
+          await syncEntityNode(sessionId, target);
+        }
+        for (const edge of createdEdges) {
+          await createRelationship(sessionId, edge);
+        }
+      } catch (neo4jError) {
+        console.warn('Neo4j sync failed in mock mode (MongoDB updated successfully):', neo4jError.message);
       }
-    } catch (neo4jError) {
-      console.warn('Neo4j sync failed (MongoDB updated successfully):', neo4jError.message);
     }
 
     // Build response

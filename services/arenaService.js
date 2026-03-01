@@ -180,3 +180,17 @@ export function calculatePoints(qualityScore) {
     // Base points: 5-20 based on quality
     return Math.round(5 + qualityScore * 15);
 }
+
+/**
+ * Derives a relationship strength from quality score.
+ * Maps [0..1] score to integer [1..5].
+ * @param {number} qualityScore
+ * @returns {number}
+ */
+export function deriveRelationshipStrength(qualityScore) {
+    const numericScore = Number(qualityScore);
+    const normalizedScore = Number.isFinite(numericScore)
+        ? Math.min(Math.max(numericScore, 0), 1)
+        : 0;
+    return Math.round(1 + normalizedScore * 4);
+}
