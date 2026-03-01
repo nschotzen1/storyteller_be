@@ -20,6 +20,7 @@ import {
   getLatestPromptTemplate,
   renderPromptTemplateString
 } from '../services/typewriterPromptConfigService.js';
+import { getTypewriterSessionFragment } from '../services/typewriterSessionService.js';
 
 const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -39,6 +40,17 @@ const MEMORY_CARD_MOCK_BACK_IMAGES = [
 
 function getFragmentText(body) {
   return body?.text || body?.userText || body?.fragment || '';
+}
+
+async function resolveFragmentText(body) {
+  const fragmentText = getFragmentText(body);
+  if (fragmentText) {
+    return fragmentText;
+  }
+  if (!body?.sessionId) {
+    return '';
+  }
+  return getTypewriterSessionFragment(body.sessionId);
 }
 
 function normalizeMemoryCount(value) {
@@ -305,7 +317,7 @@ router.post('/fragmentToMemories', async (req, res) => {
       mock_api_calls,
       mocked_api_calls
     } = body;
-    const fragmentText = getFragmentText(body);
+    const fragmentText = await resolveFragmentText(body);
 
     if (!sessionId || !fragmentText) {
       return res.status(400).json({ message: 'Missing required parameters: sessionId or text.' });

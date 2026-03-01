@@ -56,6 +56,12 @@ import {
   renderPromptTemplateString
 } from './services/typewriterPromptConfigService.js';
 import { seedCurrentTypewriterPromptTemplates } from './services/typewriterDefaultPromptSeedService.js';
+import {
+  getTypewriterSessionFragment,
+  mergeTypewriterFragment,
+  saveTypewriterSessionFragment,
+  startTypewriterSession
+} from './services/typewriterSessionService.js';
 
 
 const app = express();
@@ -571,6 +577,17 @@ app.post('/api/shouldGenerateContinuation', async (req, res) => {
   }
 });
 
+app.post('/api/typewriter/session/start', async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+    const session = await startTypewriterSession(sessionId);
+    return res.status(200).json(session);
+  } catch (error) {
+    console.error('Error in /api/typewriter/session/start:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.post('/api/send_typewriter_text', async (req, res) => {
   try {
     const { sessionId, message } = req.body || {};
@@ -578,11 +595,20 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       return res.status(400).json({ error: 'Missing sessionId or message' });
     }
 
+    await startTypewriterSession(sessionId);
+
     const continuationPipeline = await getAiPipelineSettings('story_continuation');
     const shouldMock = resolveMockMode(req.body, continuationPipeline.useMock);
     if (shouldMock) {
       const mockMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
-      return res.status(200).json(createTypewriterResponse(buildMockContinuation(message), mockMetadata, 3));
+      const continuation = buildMockContinuation(message);
+      const nextFragment = mergeTypewriterFragment(message, continuation);
+      await saveTypewriterSessionFragment(sessionId, nextFragment);
+      return res.status(200).json({
+        ...createTypewriterResponse(continuation, mockMetadata, 3),
+        sessionId,
+        fragment: nextFragment
+      });
     }
 
     try {
@@ -603,12 +629,26 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       const metadata = normalizeTypewriterMetadata(aiResponse?.style || aiResponse?.metadata)
         || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
         || TYPEWRITER_DEFAULT_FONTS[0];
+      const nextFragment = mergeTypewriterFragment(message, continuation);
 
-      return res.status(200).json(createTypewriterResponse(continuation, metadata, 3));
+      await saveTypewriterSessionFragment(sessionId, nextFragment);
+
+      return res.status(200).json({
+        ...createTypewriterResponse(continuation, metadata, 3),
+        sessionId,
+        fragment: nextFragment
+      });
     } catch (aiError) {
       console.error('Error in non-mock /api/send_typewriter_text call. Falling back to mock response:', aiError);
       const fallbackMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
-      return res.status(200).json(createTypewriterResponse(buildMockContinuation(message), fallbackMetadata, 3));
+      const continuation = buildMockContinuation(message);
+      const nextFragment = mergeTypewriterFragment(message, continuation);
+      await saveTypewriterSessionFragment(sessionId, nextFragment);
+      return res.status(200).json({
+        ...createTypewriterResponse(continuation, fallbackMetadata, 3),
+        sessionId,
+        fragment: nextFragment
+      });
     }
   } catch (error) {
     console.error('Error in /api/send_typewriter_text:', error);
@@ -716,6 +756,17 @@ function sanitizeRoomForPublic(room) {
 
 function getFragmentText(body) {
   return body?.text || body?.userText || body?.fragment || '';
+}
+
+async function resolveFragmentText(body) {
+  const fragmentText = getFragmentText(body);
+  if (fragmentText) {
+    return fragmentText;
+  }
+  if (!body?.sessionId) {
+    return '';
+  }
+  return getTypewriterSessionFragment(body.sessionId);
 }
 
 function resolveSchemaErrorMessage(error, fallback) {
@@ -2011,7 +2062,7 @@ app.post('/api/textToEntity', async (req, res) => {
       mocked_api_calls
     } = body;
 
-    const fragmentText = text || userText || fragment;
+    const fragmentText = await resolveFragmentText(body);
 
     if (!sessionId || !playerId || !fragmentText) {
       return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or text.' });
@@ -2081,7 +2132,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
       mock_api_calls,
       mocked_api_calls
     } = body;
-    const fragmentText = getFragmentText(body);
+    const fragmentText = await resolveFragmentText(body);
 
     if (!sessionId || !playerId || !fragmentText) {
       return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or text.' });
