@@ -214,8 +214,8 @@ async function buildCardsForEntities({
   return cards;
 }
 
-function buildMockEntities() {
-  return [
+function buildMockEntities(count = 3) {
+  const templates = [
     {
       id: 'mock-entity-1',
       name: 'Emberline Waystation',
@@ -244,12 +244,27 @@ function buildMockEntities() {
       connections: ['Emberline Waystation']
     }
   ];
+
+  const safeCount = Number.isFinite(Number(count)) ? Math.min(Math.max(1, Math.floor(Number(count))), 12) : 3;
+  return Array.from({ length: safeCount }).map((_, index) => {
+    const template = templates[index % templates.length];
+    if (index < templates.length) {
+      return { ...template };
+    }
+    return {
+      ...template,
+      id: `mock-entity-${index + 1}`,
+      name: `${template.name} ${index + 1}`,
+      relevance: `${template.relevance} Variant ${index + 1}.`
+    };
+  });
 }
 
 export async function textToEntityFromText({
   sessionId,
   playerId,
   text,
+  entityCount = 8,
   includeCards = false,
   includeFront = true,
   includeBack = true,
@@ -264,9 +279,12 @@ export async function textToEntityFromText({
   frontPromptTemplate = ''
 }) {
   const shouldMockTextures = Boolean(debug || mockTextures);
+  const safeEntityCount = Number.isFinite(Number(entityCount))
+    ? Math.min(Math.max(1, Math.floor(Number(entityCount))), 12)
+    : 8;
 
   if (debug) {
-    const entities = buildMockEntities();
+    const entities = buildMockEntities(safeEntityCount);
     if (mainEntityId) {
       entities.forEach((entity) => {
         entity.mainEntityId = mainEntityId;
@@ -312,6 +330,7 @@ export async function textToEntityFromText({
       mainEntityId,
       isSubEntity,
       playerId,
+      maxEntities: safeEntityCount,
       llmModel,
       entityPromptTemplate
     }

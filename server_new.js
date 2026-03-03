@@ -113,7 +113,17 @@ function collectTypewriterPageImages(assetRoots, subDirectory, allowedExtensions
 
 const DEFAULT_QUEST_ID = 'ruined_rose_court';
 const DEFAULT_QUEST_SESSION_ID = 'rose-court-demo';
-const MOCK_STORYTELLER_ILLUSTRATION_URL = '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png';
+const MOCK_STORYTELLER_ILLUSTRATION_URLS = [
+  '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png',
+  '/assets/mocks/storyteller_illustrations/ashen_inkbinder.png',
+  '/assets/mocks/storyteller_illustrations/veil_cartographer.png'
+];
+const MOCK_STORYTELLER_KEY_URLS = [
+  '/assets/mocks/storyteller_keys/stormwright_weather_speaker_key.png',
+  '/assets/mocks/storyteller_keys/ashen_inkbinder_key.png',
+  '/assets/mocks/storyteller_keys/veil_cartographer_key.png'
+];
+const MOCK_STORYTELLER_ILLUSTRATION_URL = MOCK_STORYTELLER_ILLUSTRATION_URLS[0];
 const OPEN_API_SPEC = buildOpenApiSpec();
 const TYPEWRITER_PAGE_IMAGES_SUBDIR = 'typewriter_page_images';
 const TYPEWRITER_ALLOWED_PAGE_IMAGE_EXTENSIONS = new Set(['.png']);
@@ -579,8 +589,12 @@ app.post('/api/shouldGenerateContinuation', async (req, res) => {
 
 app.post('/api/typewriter/session/start', async (req, res) => {
   try {
-    const { sessionId } = req.body || {};
+    const { sessionId, fragment } = req.body || {};
     const session = await startTypewriterSession(sessionId);
+    if (typeof fragment === 'string') {
+      const seededSession = await saveTypewriterSessionFragment(session.sessionId, fragment);
+      return res.status(200).json(seededSession);
+    }
     return res.status(200).json(session);
   } catch (error) {
     console.error('Error in /api/typewriter/session/start:', error);
@@ -756,6 +770,64 @@ function sanitizeRoomForPublic(room) {
 
 function getFragmentText(body) {
   return body?.text || body?.userText || body?.fragment || '';
+}
+
+function normalizeOptionalPlayerId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function applyOptionalPlayerId(query, playerId) {
+  const safePlayerId = normalizeOptionalPlayerId(playerId);
+  if (safePlayerId) {
+    query.playerId = safePlayerId;
+  }
+  return query;
+}
+
+function matchesOptionalPlayerId(actualPlayerId, expectedPlayerId) {
+  const safeExpectedPlayerId = normalizeOptionalPlayerId(expectedPlayerId);
+  if (!safeExpectedPlayerId) {
+    return true;
+  }
+  return normalizeOptionalPlayerId(actualPlayerId) === safeExpectedPlayerId;
+}
+
+function pickMockStorytellerIllustrationUrl(index = 0) {
+  if (!MOCK_STORYTELLER_ILLUSTRATION_URLS.length) {
+    return '';
+  }
+  return MOCK_STORYTELLER_ILLUSTRATION_URLS[index % MOCK_STORYTELLER_ILLUSTRATION_URLS.length];
+}
+
+function pickMockStorytellerKeyUrl(index = 0) {
+  if (!MOCK_STORYTELLER_KEY_URLS.length) {
+    return '';
+  }
+  return MOCK_STORYTELLER_KEY_URLS[index % MOCK_STORYTELLER_KEY_URLS.length];
+}
+
+function firstDefinedString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+function buildStorytellerListItem(storyteller) {
+  const illustration = firstDefinedString(storyteller?.illustration);
+  const keyImageUrl = firstDefinedString(storyteller?.keyImageUrl);
+  return {
+    id: storyteller._id,
+    name: storyteller.name,
+    status: storyteller.status,
+    level: storyteller.level,
+    illustration,
+    keyImageUrl,
+    iconUrl: keyImageUrl || illustration,
+    lastMission: buildLastMissionSummary(storyteller)
+  };
 }
 
 async function resolveFragmentText(body) {
@@ -1144,6 +1216,14 @@ function normalizeStorytellerCount(value) {
   return Math.min(Math.max(1, Math.floor(count)), 10);
 }
 
+function normalizeEntityCount(value, fallback = 8) {
+  const count = Number(value);
+  if (!Number.isFinite(count)) {
+    return fallback;
+  }
+  return Math.min(Math.max(1, Math.floor(count)), 12);
+}
+
 function buildMockStorytellers(count, fragmentText) {
   const baseStoryteller = {
     ...MOCK_STORYTELLER,
@@ -1284,16 +1364,28 @@ async function findEntityById(sessionId, playerId, entityId) {
     return null;
   }
 
-  const byExternalId = await NarrativeEntity.findOne({
-    session_id: sessionId,
-    playerId,
-    externalId: String(entityId)
-  });
+  const byExternalId = await NarrativeEntity.findOne(
+    applyOptionalPlayerId(
+      {
+        session_id: sessionId,
+        externalId: String(entityId)
+      },
+      playerId
+    )
+  );
   if (byExternalId) {
     return byExternalId;
   }
 
-  return NarrativeEntity.findOne({ _id: entityId, session_id: sessionId, playerId });
+  return NarrativeEntity.findOne(
+    applyOptionalPlayerId(
+      {
+        _id: entityId,
+        session_id: sessionId
+      },
+      playerId
+    )
+  );
 }
 
 // --- Admin LLM Route Config ---
@@ -1911,18 +2003,14 @@ app.post('/api/worlds/:worldId/lore', (req, res) => handleWorldElements(req, res
 app.get('/api/storytellers', async (req, res) => {
   try {
     const { sessionId, playerId } = req.query;
-    if (!sessionId || !playerId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId or playerId.' });
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
 
-    const storytellers = await Storyteller.find({ session_id: sessionId, playerId }).sort({ createdAt: 1 });
-    const response = storytellers.map((storyteller) => ({
-      id: storyteller._id,
-      name: storyteller.name,
-      status: storyteller.status,
-      level: storyteller.level,
-      lastMission: buildLastMissionSummary(storyteller)
-    }));
+    const storytellers = await Storyteller.find(
+      applyOptionalPlayerId({ session_id: sessionId }, playerId)
+    ).sort({ createdAt: 1 });
+    const response = storytellers.map((storyteller) => buildStorytellerListItem(storyteller));
 
     return res.status(200).json({ sessionId, storytellers: response });
   } catch (error) {
@@ -1937,18 +2025,20 @@ app.get('/api/storytellers/:id', async (req, res) => {
     const { id } = req.params;
     const { sessionId, playerId } = req.query;
 
-    if (!sessionId || !playerId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId or playerId.' });
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
     const storyteller = await Storyteller.findById(id);
     if (!storyteller) {
       return res.status(404).json({ message: 'Storyteller not found.' });
     }
-    if (storyteller.session_id !== sessionId || storyteller.playerId !== playerId) {
+    if (storyteller.session_id !== sessionId || !matchesOptionalPlayerId(storyteller.playerId, playerId)) {
       return res.status(404).json({ message: 'Storyteller not found.' });
     }
 
-    return res.status(200).json({ storyteller });
+    const storytellerPayload = storyteller.toObject ? storyteller.toObject() : JSON.parse(JSON.stringify(storyteller));
+    storytellerPayload.iconUrl = storytellerPayload.keyImageUrl || storytellerPayload.illustration || '';
+    return res.status(200).json({ storyteller: storytellerPayload });
   } catch (error) {
     console.error('Error in /api/storytellers/:id:', error);
     return res.status(500).json({ message: 'Server error during storyteller fetch.' });
@@ -1959,11 +2049,11 @@ app.get('/api/storytellers/:id', async (req, res) => {
 app.get('/api/entities', async (req, res) => {
   try {
     const { sessionId, playerId, mainEntityId, isSubEntity } = req.query;
-    if (!sessionId || !playerId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId or playerId.' });
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
 
-    const query = { session_id: sessionId, playerId };
+    const query = applyOptionalPlayerId({ session_id: sessionId }, playerId);
     if (mainEntityId) {
       query.mainEntityId = mainEntityId;
     }
@@ -1985,13 +2075,14 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
     const { id } = req.params;
     const body = req.body || {};
     const { sessionId, playerId, note, debug, mock, mock_api_calls, mocked_api_calls } = body;
+    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
 
-    if (!sessionId || !playerId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId or playerId.' });
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
 
-    const entity = await findEntityById(sessionId, playerId, id);
-    if (!entity || entity.session_id !== sessionId || entity.playerId !== playerId) {
+    const entity = await findEntityById(sessionId, resolvedPlayerId, id);
+    if (!entity || entity.session_id !== sessionId || !matchesOptionalPlayerId(entity.playerId, resolvedPlayerId)) {
       return res.status(404).json({ message: 'Entity not found.' });
     }
 
@@ -2007,7 +2098,7 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
     const shouldMock = resolveMockMode(body, entityPipeline.useMock);
     const subEntityResult = await textToEntityFromText({
       sessionId,
-      playerId,
+      playerId: resolvedPlayerId,
       text: promptText,
       includeCards: false,
       debug: shouldMock,
@@ -2023,12 +2114,16 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
       .map((value) => String(value));
 
     const savedSubEntities = subEntityExternalIds.length
-      ? await NarrativeEntity.find({
-        session_id: sessionId,
-        playerId,
-        externalId: { $in: subEntityExternalIds },
-        mainEntityId: entity.externalId || String(entity._id)
-      })
+      ? await NarrativeEntity.find(
+        applyOptionalPlayerId(
+          {
+            session_id: sessionId,
+            externalId: { $in: subEntityExternalIds },
+            mainEntityId: entity.externalId || String(entity._id)
+          },
+          resolvedPlayerId
+        )
+      )
       : [];
 
     return res.status(200).json({
@@ -2050,6 +2145,8 @@ app.post('/api/textToEntity', async (req, res) => {
     const {
       sessionId,
       playerId,
+      count,
+      numberOfEntities,
       text,
       userText,
       fragment,
@@ -2061,11 +2158,12 @@ app.post('/api/textToEntity', async (req, res) => {
       mock_api_calls,
       mocked_api_calls
     } = body;
+    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
 
     const fragmentText = await resolveFragmentText(body);
 
-    if (!sessionId || !playerId || !fragmentText) {
-      return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or text.' });
+    if (!sessionId || !fragmentText) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or text.' });
     }
 
     const entityPipeline = await getAiPipelineSettings('entity_creation');
@@ -2073,12 +2171,17 @@ app.post('/api/textToEntity', async (req, res) => {
     const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
     const entityFrontPromptDoc = await getLatestPromptTemplate('entity_card_front');
     const texturePromptDoc = await getLatestPromptTemplate('texture_creation');
+    const entityCount = normalizeEntityCount(
+      count ?? numberOfEntities,
+      normalizeEntityCount(entityPipeline.entityCount, 8)
+    );
     const shouldMockEntities = resolveMockMode(body, entityPipeline.useMock);
     const shouldMockTextures = resolveMockMode(body, texturePipeline.useMock);
     const options = {
       sessionId,
-      playerId,
+      playerId: resolvedPlayerId,
       text: fragmentText,
+      entityCount,
       includeCards: includeCards === undefined ? false : Boolean(includeCards),
       includeFront: includeFront === undefined ? true : Boolean(includeFront),
       includeBack: includeBack === undefined ? true : Boolean(includeBack),
@@ -2095,6 +2198,8 @@ app.post('/api/textToEntity', async (req, res) => {
 
     const response = {
       sessionId,
+      count: result.entities?.length || 0,
+      requestedCount: entityCount,
       entities: result.entities,
       mocked: result.mocked,
       mockedEntities: result.mockedEntities,
@@ -2132,15 +2237,19 @@ app.post('/api/textToStoryteller', async (req, res) => {
       mock_api_calls,
       mocked_api_calls
     } = body;
+    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
     const fragmentText = await resolveFragmentText(body);
 
-    if (!sessionId || !playerId || !fragmentText) {
-      return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, or text.' });
+    if (!sessionId || !fragmentText) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or text.' });
     }
 
-    const storytellerCount = normalizeStorytellerCount(count ?? numberOfStorytellers);
+    const shouldGenerateKeyImages = generateKeyImages === undefined ? true : Boolean(generateKeyImages);
     const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
     const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
+    const storytellerCount = normalizeStorytellerCount(
+      count ?? numberOfStorytellers ?? storytellerPipeline.storytellerCount
+    );
     const storytellerPromptDoc = await getLatestPromptTemplate('storyteller_creation');
     const storytellerKeyPromptDoc = await getLatestPromptTemplate('storyteller_key_creation');
     const illustrationPromptDoc = await getLatestPromptTemplate('illustration_creation');
@@ -2192,7 +2301,8 @@ app.post('/api/textToStoryteller', async (req, res) => {
     const savedStorytellers = [];
     const keyImages = [];
 
-    for (const storytellerData of storytellerDataArray) {
+    for (let storytellerIndex = 0; storytellerIndex < storytellerDataArray.length; storytellerIndex += 1) {
+      const storytellerData = storytellerDataArray[storytellerIndex];
       if (!storytellerData || typeof storytellerData !== 'object') {
         continue;
       }
@@ -2200,22 +2310,43 @@ app.post('/api/textToStoryteller', async (req, res) => {
       const payload = {
         session_id: sessionId,
         sessionId,
-        playerId,
         fragmentText,
         ...storytellerData
       };
+      if (resolvedPlayerId) {
+        payload.playerId = resolvedPlayerId;
+      }
       if (shouldMockIllustrations && !payload.illustration) {
-        payload.illustration = MOCK_STORYTELLER_ILLUSTRATION_URL;
+        payload.illustration = pickMockStorytellerIllustrationUrl(storytellerIndex);
+      }
+      if (shouldGenerateKeyImages && shouldMockIllustrations && payload.typewriter_key?.symbol && !payload.keyImageUrl) {
+        payload.keyImageUrl = pickMockStorytellerKeyUrl(storytellerIndex);
+        payload.keyImageLocalUrl = payload.keyImageUrl;
+        payload.keyImageLocalPath = '';
       }
 
+      const storytellerLookup = applyOptionalPlayerId(
+        { session_id: sessionId, name: payload.name },
+        resolvedPlayerId
+      );
       const savedStoryteller = await Storyteller.findOneAndUpdate(
-        { session_id: sessionId, playerId, name: payload.name },
+        storytellerLookup,
         payload,
         { new: true, upsert: true, setDefaultsOnInsert: true }
       );
       savedStorytellers.push(savedStoryteller);
 
-      if (!shouldMockIllustrations && generateKeyImages && payload.typewriter_key?.symbol) {
+      if (shouldGenerateKeyImages && shouldMockIllustrations && payload.keyImageUrl) {
+        keyImages.push({
+          storytellerId: savedStoryteller._id,
+          name: savedStoryteller.name,
+          imageUrl: payload.keyImageUrl,
+          localUrl: payload.keyImageLocalUrl || payload.keyImageUrl,
+          localPath: payload.keyImageLocalPath || ''
+        });
+      }
+
+      if (!shouldMockIllustrations && shouldGenerateKeyImages && payload.typewriter_key?.symbol) {
         const keyImageResult = await createStoryTellerKey(
           payload.typewriter_key,
           sessionId,
@@ -2229,6 +2360,14 @@ app.post('/api/textToStoryteller', async (req, res) => {
             ? `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_keys/${path.basename(keyImageResult.localPath)}`
             : null;
           const imageUrl = keyImageResult?.imageUrl || localUrl;
+          await Storyteller.findByIdAndUpdate(savedStoryteller._id, {
+            keyImageUrl: imageUrl,
+            keyImageLocalUrl: localUrl || imageUrl || '',
+            keyImageLocalPath: keyImageResult.localPath || ''
+          });
+          savedStoryteller.keyImageUrl = imageUrl;
+          savedStoryteller.keyImageLocalUrl = localUrl || imageUrl || '';
+          savedStoryteller.keyImageLocalPath = keyImageResult.localPath || '';
           keyImages.push({
             storytellerId: savedStoryteller._id,
             name: savedStoryteller.name,
@@ -2270,6 +2409,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
       storytellers: savedStorytellers,
       keyImages,
       count: savedStorytellers.length,
+      generateKeyImages: shouldGenerateKeyImages,
       mocked: shouldMockStorytellers || shouldMockIllustrations,
       mockedStorytellers: shouldMockStorytellers,
       mockedIllustrations: shouldMockIllustrations
@@ -2304,9 +2444,10 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       mock_api_calls,
       mocked_api_calls
     } = body;
+    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
 
-    if (!sessionId || !playerId || !entityId || !storytellerId) {
-      return res.status(400).json({ message: 'Missing required parameters: sessionId, playerId, entityId, storytellerId.' });
+    if (!sessionId || !entityId || !storytellerId) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId, entityId, storytellerId.' });
     }
     if (!Number.isInteger(storytellingPoints)) {
       return res.status(400).json({ message: 'Missing or invalid storytellingPoints (int required).' });
@@ -2315,16 +2456,18 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       return res.status(400).json({ message: 'Missing or invalid message (string required).' });
     }
 
-    const entity = await findEntityById(sessionId, playerId, entityId);
-    if (!entity || entity.session_id !== sessionId || entity.playerId !== playerId) {
+    const entity = await findEntityById(sessionId, resolvedPlayerId, entityId);
+    if (!entity || entity.session_id !== sessionId || !matchesOptionalPlayerId(entity.playerId, resolvedPlayerId)) {
       return res.status(404).json({ message: 'Entity not found.' });
     }
 
     let storyteller = await Storyteller.findById(storytellerId);
     if (!storyteller) {
-      storyteller = await Storyteller.findOne({ name: storytellerId, session_id: sessionId, playerId });
+      storyteller = await Storyteller.findOne(
+        applyOptionalPlayerId({ name: storytellerId, session_id: sessionId }, resolvedPlayerId)
+      );
     }
-    if (!storyteller || storyteller.session_id !== sessionId || storyteller.playerId !== playerId) {
+    if (!storyteller || storyteller.session_id !== sessionId || !matchesOptionalPlayerId(storyteller.playerId, resolvedPlayerId)) {
       return res.status(404).json({ message: 'Storyteller not found.' });
     }
     storytellerDocIdForReset = storyteller._id;
@@ -2380,7 +2523,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
 
     const subEntityResult = await textToEntityFromText({
       sessionId,
-      playerId,
+      playerId: resolvedPlayerId,
       text: subEntitySeed,
       includeCards: false,
       debug: shouldMock,
@@ -2396,17 +2539,21 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       .filter(Boolean)
       .map((id) => String(id));
     const savedSubEntities = subEntityExternalIds.length
-      ? await NarrativeEntity.find({
-        session_id: sessionId,
-        playerId,
-        externalId: { $in: subEntityExternalIds },
-        mainEntityId: entity.externalId || String(entity._id)
-      })
+      ? await NarrativeEntity.find(
+        applyOptionalPlayerId(
+          {
+            session_id: sessionId,
+            externalId: { $in: subEntityExternalIds },
+            mainEntityId: entity.externalId || String(entity._id)
+          },
+          resolvedPlayerId
+        )
+      )
       : [];
     const missionRecord = {
       entityId: entity._id,
       entityExternalId: entity.externalId || String(entity._id),
-      playerId,
+      playerId: resolvedPlayerId,
       storytellingPoints,
       message,
       durationDays,

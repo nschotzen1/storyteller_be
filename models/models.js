@@ -137,6 +137,9 @@ const StorytellerSchema = new mongoose.Schema({
   },
   vector: { type: [Number] },
   illustration: { type: String },
+  keyImageUrl: { type: String },
+  keyImageLocalUrl: { type: String },
+  keyImageLocalPath: { type: String },
   status: { type: String, enum: ['active', 'in_mission'], default: 'active' },
   missions: {
     type: [
