@@ -924,7 +924,10 @@ export async function chatWithStoryteller(sessionId, fragmentText, userInput = '
 }
 
 export async function generateEntitiesFromFragment(sessionId, fragmentText, turn = 1, existinEntities, options = {}) {
-  const maxEntities = 8
+  const requestedMaxEntities = Number(options.maxEntities);
+  const maxEntities = Number.isFinite(requestedMaxEntities)
+    ? Math.min(Math.max(1, Math.floor(requestedMaxEntities)), 12)
+    : 8;
   let commonEntities = []
   const llmModel = typeof options.llmModel === 'string' ? options.llmModel.trim() : '';
   const entityPromptTemplate = typeof options.entityPromptTemplate === 'string'

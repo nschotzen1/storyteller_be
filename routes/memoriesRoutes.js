@@ -323,9 +323,9 @@ router.post('/fragmentToMemories', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameters: sessionId or text.' });
     }
 
-    const memoryCount = normalizeMemoryCount(count ?? numberOfMemories);
     const memorySettings = await getPipelineSettings('memory_creation');
     const textureSettings = await getPipelineSettings('texture_creation');
+    const memoryCount = normalizeMemoryCount(count ?? numberOfMemories ?? memorySettings.memoryCount);
     const shouldMock = resolveMockMode(body, memorySettings.useMock);
     const shouldMockTextures = resolveMockMode(body, textureSettings.useMock);
     const memoryFrontPrompt = await getLatestPromptTemplate('memory_card_front');
