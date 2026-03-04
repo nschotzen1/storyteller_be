@@ -62,6 +62,7 @@ describe('Fragment memories API integration', () => {
     const first = response.body.memories[0];
     expect(first).toHaveProperty('_id');
     expect(first).toHaveProperty('memory_strength');
+    expect(first).toHaveProperty('short_title');
     expect(first).toHaveProperty('action_name');
     expect(first).toHaveProperty('interior/exterior');
     expect(first).toHaveProperty('estimated_duration_of_memory');

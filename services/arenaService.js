@@ -98,9 +98,18 @@ export function buildMockJudgment(source, targets, relationship, existingEdges) 
  * @param {Array} existingEdges 
  * @param {boolean} shouldMock 
  * @param {string} clusterContext - Formatted cluster context string (optional)
+ * @param {string} llmModel
  * @returns {Promise<Object>}
  */
-export async function evaluateRelationship(source, targets, relationship, existingEdges, shouldMock, clusterContext = null) {
+export async function evaluateRelationship(
+    source,
+    targets,
+    relationship,
+    existingEdges,
+    shouldMock,
+    clusterContext = null,
+    llmModel = ''
+) {
     if (shouldMock) {
         return buildMockJudgment(source, targets, relationship, existingEdges);
     }
@@ -162,7 +171,8 @@ Return JSON:
             undefined,
             undefined,
             true,
-            true
+            true,
+            llmModel
         );
         return result || buildMockJudgment(source, targets, relationship, existingEdges);
     } catch (err) {

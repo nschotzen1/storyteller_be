@@ -126,6 +126,7 @@ function buildMockMemories(count) {
     currently_assumed_turns_to_round: '10 minutes - 1 hour',
     relevant_rolls: ['Dexterity', 'Perception', 'Resolve'],
     action_level: 'round',
+    short_title: 'Stone Gives Way',
     dramatic_definition: 'Where Stone Gives Way',
     miseenscene:
       'The rope burns my palm when I jerk it tight. Wet stone slicks under my heel and the ravine yawns, loud and black, below.'
@@ -133,6 +134,7 @@ function buildMockMemories(count) {
 
   return Array.from({ length: count }).map((_, idx) => ({
     ...base,
+    short_title: idx === 0 ? base.short_title : `Fractured Trace ${idx + 1}`,
     dramatic_definition: idx === 0 ? base.dramatic_definition : `Memory ${idx + 1}: Fractured Trace`,
     distance_from_fragment_location_km: idx === 0 ? 0 : idx * 3,
     memory_distance: idx === 0 ? 'meanwhile' : `${idx + 1} hours prior`
@@ -152,14 +154,30 @@ function sanitizeFileSegment(value, fallback) {
   return cleaned;
 }
 
+function buildDerivedShortTitle(...candidates) {
+  for (const candidate of candidates) {
+    const normalized = typeof candidate === 'string' ? candidate.trim() : '';
+    if (!normalized) continue;
+    const withoutPrefix = normalized.replace(/^memory\s+\d+\s*:\s*/i, '').trim();
+    const words = withoutPrefix.split(/\s+/).filter(Boolean).slice(0, 6);
+    const compact = words.join(' ').replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '');
+    if (compact) {
+      return compact.slice(0, 42).trim();
+    }
+  }
+  return 'Untitled Memory';
+}
+
 function buildMemoryFrontPrompt(memory, fragmentText) {
-  const title = memory?.dramatic_definition || memory?.action_name || 'Untitled memory';
+  const title = memory?.short_title || memory?.dramatic_definition || memory?.action_name || 'Untitled memory';
+  const longTitle = memory?.dramatic_definition || memory?.action_name || title;
   const scene = memory?.miseenscene || memory?.actual_result || memory?.what_is_being_watched || fragmentText;
   const location = memory?.location || 'unknown location';
   const mood = memory?.emotional_sentiment || 'tense silence';
   const viewpoint = memory?.whose_eyes || 'an involved witness';
 
   return `Create a full-frame RPG collector card FRONT illustration titled "${title}".
+Long-form memory identity: "${longTitle}".
 Memory viewpoint: "${viewpoint}".
 Scene location: "${location}".
 Emotional tone: "${mood}".
@@ -173,6 +191,7 @@ function buildMemoryFrontPromptWithTemplate(memory, fragmentText, promptTemplate
     return buildMemoryFrontPrompt(memory, fragmentText);
   }
   return renderPromptTemplateString(promptTemplate, {
+    short_title: memory?.short_title || buildDerivedShortTitle(memory?.dramatic_definition, memory?.action_name),
     dramatic_definition: memory?.dramatic_definition || memory?.action_name || 'Untitled memory',
     action_name: memory?.action_name || '',
     miseenscene: memory?.miseenscene || '',
@@ -186,7 +205,7 @@ function buildMemoryFrontPromptWithTemplate(memory, fragmentText, promptTemplate
 }
 
 function buildMemoryBackPrompt(memory, fragmentText) {
-  const title = memory?.dramatic_definition || memory?.action_name || 'Untitled memory';
+  const title = memory?.short_title || memory?.dramatic_definition || memory?.action_name || 'Untitled memory';
   const temporal = memory?.memory_distance || memory?.temporal_relation || 'echoing in uncertain time';
   const environment = memory?.geographical_relevance || fragmentText;
   const sentiment = memory?.emotional_sentiment || 'ambiguous';
@@ -205,6 +224,7 @@ function buildMemoryBackPromptWithTemplate(memory, fragmentText, promptTemplate 
     return buildMemoryBackPrompt(memory, fragmentText);
   }
   return renderPromptTemplateString(promptTemplate, {
+    short_title: memory?.short_title || buildDerivedShortTitle(memory?.dramatic_definition, memory?.action_name),
     dramatic_definition: memory?.dramatic_definition || memory?.action_name || 'Untitled memory',
     action_name: memory?.action_name || '',
     memory_distance: memory?.memory_distance || '',
@@ -284,6 +304,107 @@ function toPersistenceMemory(memory) {
   return projected;
 }
 
+function normalizeStringValue(value) {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeStringValue(entry))
+      .filter(Boolean)
+      .join(', ');
+  }
+  if (value && typeof value === 'object') {
+    if (typeof value.label === 'string' && value.label.trim()) {
+      return value.label.trim();
+    }
+    if (typeof value.value === 'string' && value.value.trim()) {
+      return value.value.trim();
+    }
+  }
+  return '';
+}
+
+function normalizeIntegerValue(value, { min, max } = {}) {
+  let numeric = Number(value);
+  if (!Number.isFinite(numeric) && typeof value === 'string') {
+    const match = value.match(/-?\d+/);
+    if (match) {
+      numeric = Number(match[0]);
+    }
+  }
+  if (!Number.isFinite(numeric)) {
+    return value;
+  }
+  let normalized = Math.floor(numeric);
+  if (Number.isFinite(min)) normalized = Math.max(min, normalized);
+  if (Number.isFinite(max)) normalized = Math.min(max, normalized);
+  return normalized;
+}
+
+function normalizeStringArray(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeStringValue(entry))
+      .filter(Boolean);
+  }
+  const single = normalizeStringValue(value);
+  return single ? [single] : [];
+}
+
+function normalizeMemoryForSchema(memory = {}) {
+  const normalized = { ...(memory || {}) };
+
+  for (const [field, schema] of Object.entries(FRAGMENT_MEMORY_PROPERTIES_JSON_SCHEMA)) {
+    if (!Object.prototype.hasOwnProperty.call(normalized, field)) {
+      continue;
+    }
+    if (schema?.type === 'string') {
+      normalized[field] = normalizeStringValue(normalized[field]);
+      continue;
+    }
+    if (schema?.type === 'integer') {
+      normalized[field] = normalizeIntegerValue(normalized[field], {
+        min: schema.minimum,
+        max: schema.maximum
+      });
+      continue;
+    }
+    if (schema?.type === 'array' && schema?.items?.type === 'string') {
+      normalized[field] = normalizeStringArray(normalized[field]);
+    }
+  }
+
+  normalized.short_title = buildDerivedShortTitle(
+    normalized.short_title,
+    normalized.dramatic_definition,
+    normalized.action_name
+  );
+
+  return normalized;
+}
+
+function normalizeMemoriesPayload(payload) {
+  if (Array.isArray(payload)) {
+    return {
+      memories: payload.map((memory) => normalizeMemoryForSchema(memory))
+    };
+  }
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    memories: Array.isArray(payload.memories)
+      ? payload.memories.map((memory) => normalizeMemoryForSchema(memory))
+      : payload.memories
+  };
+}
+
 function ensurePersistableMemory(memory) {
   const projected = toPersistenceMemory(memory);
   const missing = [];
@@ -361,7 +482,9 @@ router.post('/fragmentToMemories', async (req, res) => {
         true,
         memorySettings.model
       );
-      memoriesPayload = Array.isArray(llmResult) ? { memories: llmResult } : llmResult;
+      memoriesPayload = normalizeMemoriesPayload(
+        Array.isArray(llmResult) ? { memories: llmResult } : llmResult
+      );
     }
 
     await validatePayloadForRoute('fragment_to_memories', memoriesPayload);
@@ -418,7 +541,19 @@ router.post('/fragmentToMemories', async (req, res) => {
       count: saved.length,
       mocked: shouldMock || shouldMockTextures,
       mockedMemories: shouldMock,
-      mockedTextures: shouldMockTextures
+      mockedTextures: shouldMockTextures,
+      runtime: {
+        generation: {
+          pipeline: 'memory_creation',
+          model: memorySettings.model || '',
+          mocked: shouldMock
+        },
+        textures: {
+          pipeline: 'texture_creation',
+          model: textureSettings.model || '',
+          mocked: shouldMockTextures
+        }
+      }
     };
 
     if (shouldIncludeCards) {

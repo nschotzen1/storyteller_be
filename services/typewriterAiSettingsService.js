@@ -13,14 +13,14 @@ const PIPELINE_DEFINITIONS = {
     label: 'Story Continuation',
     modelKind: 'text',
     defaultUseMock: process.env.TYPEWRITER_MOCK_MODE === 'true',
-    defaultModel: process.env.TYPEWRITER_CONTINUATION_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-5'
+    defaultModel: process.env.TYPEWRITER_CONTINUATION_MODEL || 'gpt-5-mini'
   },
   memory_creation: {
     key: 'memory_creation',
     label: 'Memory Creation',
     modelKind: 'text',
     defaultUseMock: false,
-    defaultModel: process.env.OPENAI_MEMORY_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-5',
+    defaultModel: process.env.OPENAI_MEMORY_MODEL || 'gpt-5-mini',
     countProperty: 'memoryCount',
     defaultCount: Number.isFinite(Number(process.env.OPENAI_MEMORY_COUNT))
       ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_MEMORY_COUNT))), 10)
@@ -31,7 +31,7 @@ const PIPELINE_DEFINITIONS = {
     label: 'Entity Creation',
     modelKind: 'text',
     defaultUseMock: false,
-    defaultModel: process.env.OPENAI_ENTITY_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-5',
+    defaultModel: process.env.OPENAI_ENTITY_MODEL || 'gpt-5-mini',
     countProperty: 'entityCount',
     defaultCount: Number.isFinite(Number(process.env.OPENAI_ENTITY_COUNT))
       ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_ENTITY_COUNT))), 12)
@@ -42,11 +42,18 @@ const PIPELINE_DEFINITIONS = {
     label: 'Storyteller Creation',
     modelKind: 'text',
     defaultUseMock: false,
-    defaultModel: process.env.OPENAI_STORYTELLER_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-5',
+    defaultModel: process.env.OPENAI_STORYTELLER_MODEL || 'gpt-5-mini',
     countProperty: 'storytellerCount',
     defaultCount: Number.isFinite(Number(process.env.OPENAI_STORYTELLER_COUNT))
       ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_STORYTELLER_COUNT))), 10)
       : 4
+  },
+  relationship_evaluation: {
+    key: 'relationship_evaluation',
+    label: 'Relationship Evaluation',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_RELATIONSHIP_MODEL || 'gpt-5-mini'
   },
   texture_creation: {
     key: 'texture_creation',

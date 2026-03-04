@@ -139,18 +139,19 @@ Entity names (use exactly for text_for_entity, one per texture):
 }
 
 function buildMemoryCardFrontPromptTemplate() {
-  return `Create a full-frame RPG collector card FRONT illustration titled "{{dramatic_definition}}".
+  return `Create a full-frame RPG collector card FRONT illustration titled "{{short_title}}".
+Long-form memory identity: "{{dramatic_definition}}".
 Memory viewpoint: "{{viewpoint}}".
 Scene location: "{{location}}".
 Emotional tone: "{{emotional_sentiment}}".
 Memory scene details: "{{miseenscene}}{{actual_result}}{{watched}}".
 Visual style: cinematic, tactile, grainy, with collector-card embellishments and subtle filigree.
 Use this fragment as backup context when needed: "{{fragmentText}}".
-No visible text except the title "{{dramatic_definition}}".`;
+No visible text except the title "{{short_title}}".`;
 }
 
 function buildMemoryCardBackPromptTemplate() {
-  return `Create a full-frame RPG collector card BACK texture for memory "{{dramatic_definition}}".
+  return `Create a full-frame RPG collector card BACK texture for memory "{{short_title}}".
 Theme: memory residue, archival symbolism, layered weathered materials.
 Temporal cue: "{{memory_distance}}{{temporal_relation}}".
 Environmental cue: "{{geographical_relevance}}{{fragmentText}}".
@@ -260,13 +261,13 @@ export async function getCurrentTypewriterPromptTemplates() {
       pipelineKey: 'memory_card_front',
       promptTemplate: buildMemoryCardFrontPromptTemplate(),
       source: 'routes/memoriesRoutes.js:buildMemoryFrontPrompt',
-      variables: ['dramatic_definition', 'viewpoint', 'location', 'emotional_sentiment', 'miseenscene', 'actual_result', 'watched', 'fragmentText']
+      variables: ['short_title', 'dramatic_definition', 'viewpoint', 'location', 'emotional_sentiment', 'miseenscene', 'actual_result', 'watched', 'fragmentText']
     },
     memory_card_back: {
       pipelineKey: 'memory_card_back',
       promptTemplate: buildMemoryCardBackPromptTemplate(),
       source: 'routes/memoriesRoutes.js:buildMemoryBackPrompt',
-      variables: ['dramatic_definition', 'memory_distance', 'temporal_relation', 'geographical_relevance', 'emotional_sentiment', 'fragmentText']
+      variables: ['short_title', 'dramatic_definition', 'memory_distance', 'temporal_relation', 'geographical_relevance', 'emotional_sentiment', 'fragmentText']
     },
     entity_creation: {
       pipelineKey: 'entity_creation',
