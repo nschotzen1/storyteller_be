@@ -28,6 +28,7 @@ function buildValidMemory(overrides = {}) {
     currently_assumed_turns_to_round: '10 minutes - 1 hour',
     relevant_rolls: ['Dexterity', 'Perception', 'Resolve'],
     action_level: 'round',
+    short_title: 'Stone Gives Way',
     dramatic_definition: 'Where Stone Gives Way',
     miseenscene:
       'The rope burns my palm when I jerk it tight. Wet stone slicks under my heel and the ravine yawns, loud and black, below.',
@@ -195,6 +196,7 @@ describe('Memories routes - mock mode and persistence', () => {
       expect(response.body.count).toBe(2);
       expect(response.body.cardOptions).toEqual({ includeFront: true, includeBack: true });
       expect(response.body.memories[0]).toHaveProperty('memory_strength');
+      expect(response.body.memories[0]).toHaveProperty('short_title');
       expect(response.body.memories[0]).toHaveProperty('dramatic_definition');
       expect(response.body.memories[0].front?.imageUrl).toMatch(/^\/assets\//);
       expect(response.body.memories[0].front?.imageUrl).toContain('/assets/mocks/memory_cards/memory_front_');
@@ -228,7 +230,8 @@ describe('Memories routes - mock mode and persistence', () => {
         count: 2,
         includeCards: true,
         includeFront: true,
-        includeBack: false
+        includeBack: false,
+        mock: false
       }
     });
 
@@ -245,6 +248,53 @@ describe('Memories routes - mock mode and persistence', () => {
     expect(response.body.memories[0].front?.imageUrl).toMatch(/^\/assets\/session-live-like\/memory_cards\//);
     expect(response.body.memories[0].back).toBeUndefined();
     expect(response.body.memories[0].back_image_url).toBe('');
+  });
+
+  it('normalizes live memory field types before schema validation and persistence', async () => {
+    mockDirectExternalApiCall.mockResolvedValue({
+      memories: [
+        buildValidMemory({
+          memory_strength: 7,
+          estimated_duration_of_memory: '14 minutes',
+          memory_distance: 3,
+          currently_assumed_turns_to_round: 2,
+          entities_in_memory: 'bell tower',
+          relevant_rolls: 'Perception'
+        })
+      ]
+    });
+
+    const response = await invoke(postFragmentToMemories, {
+      body: {
+        sessionId: 'session-live-normalized',
+        playerId: 'player-live-normalized',
+        fragment: 'A harbor bell cuts through the fog.',
+        count: 1,
+        mock: false
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockValidatePayloadForRoute).toHaveBeenCalledWith('fragment_to_memories', {
+      memories: [
+        expect.objectContaining({
+          memory_strength: '7',
+          estimated_duration_of_memory: 14,
+          memory_distance: '3',
+          currently_assumed_turns_to_round: '2',
+          entities_in_memory: ['bell tower'],
+          relevant_rolls: ['Perception'],
+          short_title: 'Stone Gives Way'
+        })
+      ]
+    });
+    expect(response.body.memories[0].memory_strength).toBe('7');
+    expect(response.body.memories[0].estimated_duration_of_memory).toBe(14);
+    expect(response.body.memories[0].memory_distance).toBe('3');
+    expect(response.body.memories[0].currently_assumed_turns_to_round).toBe('2');
+    expect(response.body.memories[0].entities_in_memory).toEqual(['bell tower']);
+    expect(response.body.memories[0].relevant_rolls).toEqual(['Perception']);
+    expect(response.body.memories[0].short_title).toBe('Stone Gives Way');
   });
 
   it('deletes persisted memories via DELETE /api/memories', async () => {

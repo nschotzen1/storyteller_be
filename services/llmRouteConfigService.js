@@ -185,33 +185,75 @@ As you read this fragment, **memories** begin to flash before your eyes. Some me
 
 Your task is to document these memories. Return them in a JSON array under key "memories", generating {{memoryCount}} memories (default is 3 when count is absent).
 
-Use this schema for each memory object:
-- memory_strength
-- emotional_sentiment
-- action_name
-- estimated_action_length
-- time_within_action
-- actual_result
-- related_through_what
-- geographical_relevance
-- temporal_relation
-- organizational_affiliation
-- consequences
-- distance_from_fragment_location_km
-- shot_type
-- time_of_day
-- whose_eyes
-- interior/exterior
-- what_is_being_watched
-- location
-- estimated_duration_of_memory
-- memory_distance
-- entities_in_memory
-- currently_assumed_turns_to_round
-- relevant_rolls
-- action_level
-- dramatic_definition
-- miseenscene
+Each memory object must use these exact keys and types:
+- memory_strength: string
+- emotional_sentiment: string
+- action_name: string
+- estimated_action_length: string
+- time_within_action: string
+- actual_result: string
+- related_through_what: string
+- geographical_relevance: string
+- temporal_relation: string
+- organizational_affiliation: string
+- consequences: string
+- distance_from_fragment_location_km: integer
+- shot_type: string
+- time_of_day: string
+- whose_eyes: string
+- interior/exterior: string
+- what_is_being_watched: string
+- location: string
+- estimated_duration_of_memory: integer
+- memory_distance: string
+- entities_in_memory: array of strings
+- currently_assumed_turns_to_round: string
+- relevant_rolls: array of strings
+- action_level: string
+- short_title: string
+- dramatic_definition: string
+- miseenscene: string
+
+short_title rules:
+- 2 to 6 words
+- short enough to print on a memory card UI
+- concrete and evocative
+- not generic like "Memory 1"
+
+Output shape:
+{
+  "memories": [
+    {
+      "memory_strength": "string",
+      "emotional_sentiment": "string",
+      "action_name": "string",
+      "estimated_action_length": "string",
+      "time_within_action": "string",
+      "actual_result": "string",
+      "related_through_what": "string",
+      "geographical_relevance": "string",
+      "temporal_relation": "string",
+      "organizational_affiliation": "string",
+      "consequences": "string",
+      "distance_from_fragment_location_km": 0,
+      "shot_type": "string",
+      "time_of_day": "string",
+      "whose_eyes": "string",
+      "interior/exterior": "string",
+      "what_is_being_watched": "string",
+      "location": "string",
+      "estimated_duration_of_memory": 12,
+      "memory_distance": "string",
+      "entities_in_memory": ["string"],
+      "currently_assumed_turns_to_round": "string",
+      "relevant_rolls": ["string"],
+      "action_level": "string",
+      "short_title": "string",
+      "dramatic_definition": "string",
+      "miseenscene": "string"
+    }
+  ]
+}
 
 Make the miseenscene first-person, sensory, specific, and paced to the memory itself (fast moments fragmented, slow moments reflective). Return only JSON.`,
     responseSchema: FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA

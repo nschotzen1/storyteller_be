@@ -23,6 +23,7 @@ export const FRAGMENT_MEMORY_REQUIRED_FIELDS = [
   'currently_assumed_turns_to_round',
   'relevant_rolls',
   'action_level',
+  'short_title',
   'dramatic_definition',
   'miseenscene'
 ];
@@ -52,6 +53,7 @@ export const FRAGMENT_MEMORY_PROPERTIES_JSON_SCHEMA = {
   currently_assumed_turns_to_round: { type: 'string' },
   relevant_rolls: { type: 'array', items: { type: 'string' } },
   action_level: { type: 'string' },
+  short_title: { type: 'string' },
   dramatic_definition: { type: 'string' },
   miseenscene: { type: 'string' },
   front: {

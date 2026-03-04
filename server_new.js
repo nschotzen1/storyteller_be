@@ -621,7 +621,13 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       return res.status(200).json({
         ...createTypewriterResponse(continuation, mockMetadata, 3),
         sessionId,
-        fragment: nextFragment
+        fragment: nextFragment,
+        mocked: true,
+        runtime: {
+          pipeline: 'story_continuation',
+          model: continuationPipeline.model || '',
+          mocked: true
+        }
       });
     }
 
@@ -639,7 +645,17 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       );
       const continuation = typeof aiResponse?.continuation === 'string' && aiResponse.continuation.trim()
         ? aiResponse.continuation.trim()
-        : buildMockContinuation(message);
+        : '';
+      if (!continuation) {
+        return res.status(502).json({
+          error: 'Live typewriter continuation did not return valid content.',
+          runtime: {
+            pipeline: 'story_continuation',
+            model: continuationPipeline.model || '',
+            mocked: false
+          }
+        });
+      }
       const metadata = normalizeTypewriterMetadata(aiResponse?.style || aiResponse?.metadata)
         || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
         || TYPEWRITER_DEFAULT_FONTS[0];
@@ -650,18 +666,24 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       return res.status(200).json({
         ...createTypewriterResponse(continuation, metadata, 3),
         sessionId,
-        fragment: nextFragment
+        fragment: nextFragment,
+        mocked: false,
+        runtime: {
+          pipeline: 'story_continuation',
+          model: continuationPipeline.model || '',
+          mocked: false
+        }
       });
     } catch (aiError) {
-      console.error('Error in non-mock /api/send_typewriter_text call. Falling back to mock response:', aiError);
-      const fallbackMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
-      const continuation = buildMockContinuation(message);
-      const nextFragment = mergeTypewriterFragment(message, continuation);
-      await saveTypewriterSessionFragment(sessionId, nextFragment);
-      return res.status(200).json({
-        ...createTypewriterResponse(continuation, fallbackMetadata, 3),
-        sessionId,
-        fragment: nextFragment
+      console.error('Error in live /api/send_typewriter_text call:', aiError);
+      return res.status(502).json({
+        error: 'Live typewriter continuation failed.',
+        details: aiError?.message || 'Unknown error',
+        runtime: {
+          pipeline: 'story_continuation',
+          model: continuationPipeline.model || '',
+          mocked: false
+        }
       });
     }
   } catch (error) {
@@ -2203,7 +2225,19 @@ app.post('/api/textToEntity', async (req, res) => {
       entities: result.entities,
       mocked: result.mocked,
       mockedEntities: result.mockedEntities,
-      mockedTextures: result.mockedTextures
+      mockedTextures: result.mockedTextures,
+      runtime: {
+        generation: {
+          pipeline: 'entity_creation',
+          model: entityPipeline.model || '',
+          mocked: shouldMockEntities
+        },
+        textures: {
+          pipeline: 'texture_creation',
+          model: texturePipeline.model || '',
+          mocked: shouldMockTextures
+        }
+      }
     };
 
     if (options.includeCards) {
@@ -2231,7 +2265,6 @@ app.post('/api/textToStoryteller', async (req, res) => {
       count,
       numberOfStorytellers,
       generateKeyImages,
-      mockImage,
       debug,
       mock,
       mock_api_calls,
@@ -2351,7 +2384,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
           payload.typewriter_key,
           sessionId,
           payload.name,
-          Boolean(mockImage),
+          false,
           illustrationPipeline.model,
           storytellerKeyPromptDoc?.promptTemplate || ''
         );
@@ -2383,7 +2416,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
         const illustrationResult = await createStorytellerIllustration(
           payload,
           sessionId,
-          Boolean(mockImage),
+          false,
           illustrationPipeline.model,
           illustrationPromptDoc?.promptTemplate || ''
         );
@@ -2412,7 +2445,19 @@ app.post('/api/textToStoryteller', async (req, res) => {
       generateKeyImages: shouldGenerateKeyImages,
       mocked: shouldMockStorytellers || shouldMockIllustrations,
       mockedStorytellers: shouldMockStorytellers,
-      mockedIllustrations: shouldMockIllustrations
+      mockedIllustrations: shouldMockIllustrations,
+      runtime: {
+        generation: {
+          pipeline: 'storyteller_creation',
+          model: storytellerPipeline.model || '',
+          mocked: shouldMockStorytellers
+        },
+        illustrations: {
+          pipeline: 'illustration_creation',
+          model: illustrationPipeline.model || '',
+          mocked: shouldMockIllustrations
+        }
+      }
     });
   } catch (err) {
     if (err.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
@@ -2472,9 +2517,11 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
     }
     storytellerDocIdForReset = storyteller._id;
 
+    const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
     const entityPipeline = await getAiPipelineSettings('entity_creation');
     const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
-    const shouldMock = resolveMockMode(body, entityPipeline.useMock);
+    const shouldMockMission = resolveMockMode(body, storytellerPipeline.useMock);
+    const shouldMockSubEntities = resolveMockMode(body, entityPipeline.useMock);
     const durationDays = Number.isFinite(Number(duration)) ? Number(duration) : undefined;
 
     await Storyteller.findByIdAndUpdate(
@@ -2484,7 +2531,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
     missionActivated = true;
 
     let missionResult;
-    if (shouldMock) {
+    if (shouldMockMission) {
       missionResult = {
         outcome: 'success',
         userText: `The mission concludes. ${storyteller.name} returns with a focused insight about ${entity.name}.`,
@@ -2510,7 +2557,8 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
         undefined,
         undefined,
         true,
-        true
+        true,
+        storytellerPipeline.model
       );
     }
 
@@ -2526,7 +2574,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       playerId: resolvedPlayerId,
       text: subEntitySeed,
       includeCards: false,
-      debug: shouldMock,
+      debug: shouldMockSubEntities,
       llmModel: entityPipeline.model,
       entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
       mainEntityId: entity.externalId || String(entity._id),
@@ -2580,7 +2628,19 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       userText: userText || undefined,
       gmNote: gmNote || undefined,
       entity,
-      subEntities: savedSubEntities
+      subEntities: savedSubEntities,
+      runtime: {
+        mission: {
+          pipeline: 'storyteller_creation',
+          model: storytellerPipeline.model || '',
+          mocked: shouldMockMission
+        },
+        subEntities: {
+          pipeline: 'entity_creation',
+          model: entityPipeline.model || '',
+          mocked: shouldMockSubEntities
+        }
+      }
     });
   } catch (err) {
     if (missionActivated && storytellerDocIdForReset) {
@@ -2624,6 +2684,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       ...(relationship || {}),
       fastValidate: Boolean(relationship?.fastValidate || options?.fastValidate)
     };
+    const relationshipPipeline = await getAiPipelineSettings('relationship_evaluation');
 
     // Validate required parameters
     if (!sessionId || !playerId) {
@@ -2639,7 +2700,10 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       return res.status(400).json({ message: 'Missing required parameter: relationship.surfaceText.' });
     }
 
-    const shouldMock = Boolean(debug || mock || mock_api_calls || mocked_api_calls);
+    const shouldMock = resolveMockMode(
+      { debug, mock, mock_api_calls, mocked_api_calls },
+      relationshipPipeline.useMock
+    );
     const dryRun = forceDryRun || Boolean(options?.dryRun);
 
     // Load Arena doc
@@ -2690,7 +2754,8 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       relationshipPayload,
       existingEdges,
       shouldMock,
-      clusterContext
+      clusterContext,
+      relationshipPipeline.model
     );
 
     // Handle rejection
@@ -2699,7 +2764,13 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
         verdict: 'rejected',
         quality: evaluation.quality,
         suggestions: evaluation.suggestions || [],
-        fastValidate: evaluation.fastValidate
+        fastValidate: evaluation.fastValidate,
+        mocked: shouldMock,
+        runtime: {
+          pipeline: 'relationship_evaluation',
+          model: relationshipPipeline.model || '',
+          mocked: shouldMock
+        }
       });
     }
 
@@ -2713,7 +2784,13 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
         predicate,
         strength,
         message: 'Relationship would be accepted (dry run, not committed).',
-        fastValidate: evaluation.fastValidate
+        fastValidate: evaluation.fastValidate,
+        mocked: shouldMock,
+        runtime: {
+          pipeline: 'relationship_evaluation',
+          model: relationshipPipeline.model || '',
+          mocked: shouldMock
+        }
       });
     }
 
@@ -2826,7 +2903,12 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       },
       existingEdgesCount: existingEdges.length,
       mocked: shouldMock,
-      fastValidate: evaluation.fastValidate
+      fastValidate: evaluation.fastValidate,
+      runtime: {
+        pipeline: 'relationship_evaluation',
+        model: relationshipPipeline.model || '',
+        mocked: shouldMock
+      }
     };
 
     return res.status(200).json(response);

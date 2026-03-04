@@ -30,6 +30,7 @@ const fragmentMemorySchemaDefinition = {
   currently_assumed_turns_to_round: { type: String, required: true },
   relevant_rolls: { type: [String], required: true, default: [] },
   action_level: { type: String, required: true },
+  short_title: { type: String, required: true },
   dramatic_definition: { type: String, required: true },
   miseenscene: { type: String, required: true },
   front: {

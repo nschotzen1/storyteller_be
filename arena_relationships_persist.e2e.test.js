@@ -17,9 +17,17 @@ import mongoose from 'mongoose';
 // Mock external API calls
 const mockDirectExternalApiCall = jest.fn();
 const mockTextToImageOpenAi = jest.fn();
+const mockListAvailableOpenAiModels = jest.fn().mockResolvedValue({
+  source: 'mock',
+  fetchedAt: '2026-03-03T00:00:00.000Z',
+  textModels: [],
+  imageModels: [],
+  allModels: []
+});
 
 await jest.unstable_mockModule('./ai/openai/apiService.js', () => ({
   directExternalApiCall: mockDirectExternalApiCall,
+  listAvailableOpenAiModels: mockListAvailableOpenAiModels
 }));
 
 await jest.unstable_mockModule('./ai/textToImage/api.js', () => ({

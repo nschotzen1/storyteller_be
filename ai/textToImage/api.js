@@ -80,6 +80,27 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function isDallEModel(model = '') {
+  return /^dall-e-/i.test(model);
+}
+
+function buildOpenAiImageRequest(model, prompt) {
+  const request = {
+    model,
+    prompt,
+    n: 1,
+    size: '1024x1024'
+  };
+
+  // GPT Image models return base64 image bytes by default. DALL-E still needs
+  // the legacy response_format flag when we want to save bytes locally.
+  if (isDallEModel(model)) {
+    request.response_format = 'b64_json';
+  }
+
+  return request;
+}
+
 export async function textToImageOpenAi(
   prompt,
   samples = 1,
@@ -103,28 +124,34 @@ export async function textToImageOpenAi(
 
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
       try {
-        const response = await getOpenaiClient().images.generate({
-          model: selectedModel,
-          prompt,
-          n: 1,
-          size: '1024x1024', // Explicit size standard for DALL-E 3
-          response_format: 'b64_json' // Explicitly request base64 for file writing
-        })
+        const response = await getOpenaiClient().images.generate(
+          buildOpenAiImageRequest(selectedModel, prompt)
+        );
 
+        const firstImage = response?.data?.[0];
+        if (!firstImage) {
+          throw new Error('OpenAI image response did not include image data.');
+        }
 
-        const image_base64 = response.data[0].b64_json;
-        const image_bytes = Buffer.from(image_base64, "base64");
-        const url = response.data[0].url || null;
-        const revised_prompt = response.data[0].revised_prompt || null; // Fixed access to revised_prompt
+        const imageBase64 = firstImage.b64_json || null;
+        const url = firstImage.url || null;
+        const revised_prompt = firstImage.revised_prompt || null;
 
-        fs.writeFileSync(localPath, image_bytes);
+        if (imageBase64) {
+          const imageBytes = Buffer.from(imageBase64, 'base64');
+          fs.writeFileSync(localPath, imageBytes);
+        } else if (url) {
+          await downloadImage(url, localPath);
+        } else {
+          throw new Error('OpenAI image response did not include b64_json or url.');
+        }
 
         // const {revised_prompt, url} = {url:"https://i.ibb.co/4VWg3y9/Dusk.png", revised_prompt:"asf"}
         // await downloadImage(url, localPath);
         return { revised_prompt, url, localPath };
       } catch (e) {
         prompt += 'I need this prompt to work. So revise anything that use need to revise. any content policy issue should be smoothed by revising the issues. please!'
-        if (e.message.includes('must be length 1000'))
+        if ((e?.message || '').includes('must be length 1000'))
           prompt = prompt.slice(0, 950)
         console.log('Attempt', attempt + 1, 'failed for OpenAI DALL-E 3:', e);
         let sleepTo = 5 * (attempt ^ 2)
