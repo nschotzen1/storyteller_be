@@ -39,7 +39,7 @@ const MEMORY_CARD_MOCK_BACK_IMAGES = [
 ];
 
 function getFragmentText(body) {
-  return body?.text || body?.userText || body?.fragment || '';
+  return typeof body?.text === 'string' ? body.text : '';
 }
 
 async function resolveFragmentText(body) {

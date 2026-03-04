@@ -249,7 +249,7 @@ export async function getCurrentTypewriterPromptTemplates() {
       pipelineKey: 'story_continuation',
       promptTemplate: buildStoryContinuationPromptTemplate(),
       source: 'ai/openai/promptsUtils.js:generateTypewriterPrompt',
-      variables: ['existing_text', 'desired_length_min', 'desiredlength_max', 'word_count']
+      variables: ['existing_text', 'desired_length_min', 'desiredlength_max', 'word_count', 'preferred_font_size_px']
     },
     memory_creation: {
       pipelineKey: 'memory_creation',

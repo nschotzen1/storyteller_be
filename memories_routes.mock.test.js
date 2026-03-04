@@ -184,7 +184,7 @@ describe('Memories routes - mock mode and persistence', () => {
         body: {
           sessionId: 'session-mock',
           playerId: 'player-mock',
-          fragment: 'A cold pass and dangerous footing.',
+          text: 'A cold pass and dangerous footing.',
           count: 2,
           includeCards: true,
           [flagName]: true
@@ -226,7 +226,7 @@ describe('Memories routes - mock mode and persistence', () => {
       body: {
         sessionId: 'session-live-like',
         playerId: 'player-live-like',
-        fragment: 'Torchlight over wet basalt.',
+        text: 'Torchlight over wet basalt.',
         count: 2,
         includeCards: true,
         includeFront: true,
@@ -268,7 +268,7 @@ describe('Memories routes - mock mode and persistence', () => {
       body: {
         sessionId: 'session-live-normalized',
         playerId: 'player-live-normalized',
-        fragment: 'A harbor bell cuts through the fog.',
+        text: 'A harbor bell cuts through the fog.',
         count: 1,
         mock: false
       }
@@ -302,7 +302,7 @@ describe('Memories routes - mock mode and persistence', () => {
       body: {
         sessionId: 'delete-session',
         playerId: 'player-a',
-        fragment: 'First stream of events',
+        text: 'First stream of events',
         count: 3,
         debug: true
       }
@@ -313,7 +313,7 @@ describe('Memories routes - mock mode and persistence', () => {
       body: {
         sessionId: 'delete-session',
         playerId: 'player-b',
-        fragment: 'Second stream of events',
+        text: 'Second stream of events',
         count: 2,
         debug: true
       }

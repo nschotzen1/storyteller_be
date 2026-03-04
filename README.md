@@ -54,7 +54,7 @@ Optional admin auth:
 
 - Most routes require `sessionId` and `playerId`.
 - `debug`, `mock`, or `mocked_api_calls` returns mocked outputs and skips external API calls.
-- `text`, `userText`, or `fragment` are accepted for text input.
+- Use `text` as the canonical input field for narrative/fragment payloads.
 
 ## Core Routes
 
@@ -77,7 +77,7 @@ Request body:
 ```
 
 Notes:
-- Use `text`, `userText`, or `fragment` for the input text (the route picks the first provided).
+- Use `text` for the input narrative.
 - `includeCards` defaults to `false`.
 - `includeFront` and `includeBack` default to `true` when cards are requested.
 - `debug`, `mock`, or `mocked_api_calls` returns mock entities/cards without external API calls.
@@ -270,7 +270,7 @@ Request body:
 {
   "sessionId": "demo-1",
   "playerId": "player-1",
-  "fragment": "It was getting dark, and the pass had no rail, only wet stone and wind.",
+  "text": "It was getting dark, and the pass had no rail, only wet stone and wind.",
   "count": 3,
   "includeCards": true,
   "includeFront": true,
@@ -281,7 +281,7 @@ Request body:
 
 Notes:
 - `sessionId` is required.
-- Use `text`, `userText`, or `fragment` for source text.
+- Use `text` for source narrative.
 - `count` (or `numberOfMemories`) defaults to `3` and is clamped to 1–10.
 - `includeCards` defaults to `false`.
 - `includeFront` and `includeBack` default to `true` when cards are requested.

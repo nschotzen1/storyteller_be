@@ -2643,6 +2643,8 @@ so this is how it begins: may this story rise, and grow and prosper live to its 
         existing_text,
         desired_length_min,
         desiredlength_max,
+        word_count: wordCount,
+        preferred_font_size_px: 30,
     });
 
     return [

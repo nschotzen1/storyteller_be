@@ -137,6 +137,10 @@ const TYPEWRITER_DEFAULT_FONTS = [
   { font: "'IM Fell English SC', serif", font_size: '1.9rem', font_color: '#2a120f' },
   { font: "'EB Garamond', serif", font_size: '2rem', font_color: '#1f0e08' }
 ];
+const TYPEWRITER_MIN_FONT_SIZE_PX = 28;
+const TYPEWRITER_MIN_FONT_SIZE_REM = 1.75;
+const TYPEWRITER_DEFAULT_FONT_SIZE = '1.9rem';
+const TYPEWRITER_PREFERRED_FONT_SIZE_PX = 30;
 const DEFAULT_QUEST_CONFIG = {
   sessionId: DEFAULT_QUEST_SESSION_ID,
   questId: DEFAULT_QUEST_ID,
@@ -432,14 +436,25 @@ async function getAiPipelineSettings(pipelineKey) {
   return getPipelineSettingsSnapshot(settings, pipelineKey);
 }
 
+function countWords(text = '') {
+  if (typeof text !== 'string') return 0;
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function clampValue(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function buildTypewriterPromptPayload(existingText = '') {
-  const wordCount = existingText ? existingText.trim().split(/\s+/).filter(Boolean).length : 0;
+  const wordCount = countWords(existingText);
   const desired_length_min = parseInt(Math.max(3, wordCount / (1.61 * 1.61)), 10);
   const desiredlength_max = parseInt(Math.max(80, wordCount / 1.61), 10);
   return {
     existing_text: existingText,
     desired_length_min,
-    desiredlength_max
+    desiredlength_max,
+    word_count: wordCount,
+    preferred_font_size_px: TYPEWRITER_PREFERRED_FONT_SIZE_PX
   };
 }
 
@@ -453,7 +468,8 @@ function buildTypewriterPromptMessages(existingText, promptTemplate) {
     existing_text: existingText,
     desired_length_min: payload.desired_length_min,
     desiredlength_max: payload.desiredlength_max,
-    word_count: existingText ? existingText.trim().split(/\s+/).filter(Boolean).length : 0
+    word_count: payload.word_count,
+    preferred_font_size_px: payload.preferred_font_size_px
   });
 
   return [
@@ -474,6 +490,36 @@ function buildAbsoluteAssetUrl(req, assetPath) {
   return `${req.protocol}://${req.get('host')}${normalized}`;
 }
 
+function normalizeTypewriterFontSize(fontSize) {
+  if (typeof fontSize === 'number' && Number.isFinite(fontSize)) {
+    return `${Math.max(TYPEWRITER_MIN_FONT_SIZE_PX, fontSize)}px`;
+  }
+
+  if (typeof fontSize === 'string') {
+    const trimmed = fontSize.trim();
+    if (!trimmed) return TYPEWRITER_DEFAULT_FONT_SIZE;
+
+    const pxMatch = trimmed.match(/^([0-9]*\.?[0-9]+)\s*px$/i);
+    if (pxMatch) {
+      const value = Math.max(TYPEWRITER_MIN_FONT_SIZE_PX, Number(pxMatch[1]));
+      return `${Number(value.toFixed(2))}px`;
+    }
+
+    const remMatch = trimmed.match(/^([0-9]*\.?[0-9]+)\s*rem$/i);
+    if (remMatch) {
+      const value = Math.max(TYPEWRITER_MIN_FONT_SIZE_REM, Number(remMatch[1]));
+      return `${Number(value.toFixed(2))}rem`;
+    }
+
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric)) {
+      return `${Math.max(TYPEWRITER_MIN_FONT_SIZE_PX, numeric)}px`;
+    }
+  }
+
+  return TYPEWRITER_DEFAULT_FONT_SIZE;
+}
+
 function normalizeTypewriterMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return null;
   const font = metadata.font || metadata.fontName || metadata.font_family || metadata.fontFamily;
@@ -482,15 +528,122 @@ function normalizeTypewriterMetadata(metadata) {
   if (!font && !fontSize && !fontColor) return null;
   return {
     font: font || pickRandomItem(TYPEWRITER_DEFAULT_FONTS).font,
-    font_size: typeof fontSize === 'number' ? `${fontSize}px` : (fontSize || '1.9rem'),
+    font_size: normalizeTypewriterFontSize(fontSize),
     font_color: fontColor || '#2a120f'
   };
 }
 
-function createTypewriterResponse(fullText, metadata, fadeSteps = 3) {
+function toFiniteNumber(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function sanitizeTimingScale(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return 1;
+  return clampValue(numericValue, 0.35, 4);
+}
+
+function computeFadeTimingProfile(narrativeWordCount, fadeSteps = 3, options = {}) {
+  const normalizedWordCount = Math.max(0, Number(narrativeWordCount) || 0);
+  const timingScale = sanitizeTimingScale(options.timingScale);
+  const lengthRatio = clampValue(normalizedWordCount / 220, 0, 1);
+  const firstPauseDelay = Math.round((3000 + (7600 - 3000) * lengthRatio) * timingScale);
+  const phasePauseDelay = Math.round((1400 + (3600 - 1400) * lengthRatio) * timingScale);
+  const finalPauseDelay = Math.round((1000 + (2600 - 1000) * lengthRatio) * timingScale);
+  const fadePhaseDelay = Math.round((2200 + (6800 - 2200) * lengthRatio) * timingScale);
+  const safeFadeSteps = Math.max(1, Number(fadeSteps) || 1);
+  const intermediatePauseCount = Math.max(0, safeFadeSteps - 1);
+  const estimatedTotalDurationMs =
+    firstPauseDelay +
+    (intermediatePauseCount * phasePauseDelay) +
+    finalPauseDelay +
+    ((safeFadeSteps + 1) * fadePhaseDelay);
+
+  return {
+    narrative_word_count: normalizedWordCount,
+    fade_steps: safeFadeSteps,
+    first_pause_delay: firstPauseDelay,
+    phase_pause_delay: phasePauseDelay,
+    final_pause_delay: finalPauseDelay,
+    fade_phase_delay: fadePhaseDelay,
+    estimated_total_duration_ms: estimatedTotalDurationMs,
+    timing_scale: timingScale
+  };
+}
+
+function computeFadeStepCount(narrativeWordCount) {
+  const normalizedWordCount = Math.max(0, Number(narrativeWordCount) || 0);
+  if (normalizedWordCount <= 35) return 2;
+  if (normalizedWordCount <= 120) return 3;
+  return 4;
+}
+
+function normalizeContinuationInsights(rawInsights, continuation, fallbackStyle) {
+  const source = rawInsights && typeof rawInsights === 'object' ? rawInsights : {};
+  const meaning = Array.isArray(source.meaning)
+    ? source.meaning.map((line) => (typeof line === 'string' ? line.trim() : '')).filter(Boolean)
+    : [];
+  const contextualStrengthening = typeof source.contextual_strengthening === 'string'
+    ? source.contextual_strengthening.trim()
+    : '';
+  const continuationWordCount = toFiniteNumber(source.continuation_word_count) ?? countWords(continuation);
+  const pointsPool = toFiniteNumber(source.current_storytelling_points_pool);
+  const pointsEarned = toFiniteNumber(source.points_earned);
+  const rawEntities = Array.isArray(source.Entities)
+    ? source.Entities
+    : Array.isArray(source.entities)
+      ? source.entities
+      : [];
+  const entities = rawEntities
+    .map((entity) => {
+      if (!entity || typeof entity !== 'object') return null;
+      const entity_name = typeof entity.entity_name === 'string' ? entity.entity_name.trim() : '';
+      const ner_category = typeof entity.ner_category === 'string' ? entity.ner_category.trim() : '';
+      const ascope_pmesii = typeof entity.ascope_pmesii === 'string' ? entity.ascope_pmesii.trim() : '';
+      const storytelling_points = toFiniteNumber(entity.storytelling_points);
+      const reuse = typeof entity.reuse === 'boolean' ? entity.reuse : null;
+      if (!entity_name && !ner_category && !ascope_pmesii && storytelling_points === null && reuse === null) {
+        return null;
+      }
+      return {
+        entity_name,
+        ner_category,
+        ascope_pmesii,
+        storytelling_points,
+        reuse
+      };
+    })
+    .filter(Boolean);
+  const style = normalizeTypewriterMetadata(source.style || source.metadata || fallbackStyle);
+
+  return {
+    meaning,
+    contextual_strengthening: contextualStrengthening,
+    continuation_word_count: continuationWordCount,
+    current_storytelling_points_pool: pointsPool,
+    points_earned: pointsEarned,
+    Entities: entities,
+    style
+  };
+}
+
+function createTypewriterResponse(fullText, metadata, fadeSteps = null, options = {}) {
   const style = normalizeTypewriterMetadata(metadata) || pickRandomItem(TYPEWRITER_DEFAULT_FONTS);
   const narrative = typeof fullText === 'string' ? fullText.trim() : '';
   const safeNarrative = narrative || 'The wind caught the page and held its breath.';
+  const requestedWordCount = toFiniteNumber(options.narrativeWordCount);
+  const fadeTimingScale = sanitizeTimingScale(options.fadeTimingScale);
+  const resolvedNarrativeWordCount = requestedWordCount !== null ? requestedWordCount : countWords(safeNarrative);
+  const explicitFadeSteps = toFiniteNumber(fadeSteps);
+  const resolvedFadeSteps = explicitFadeSteps !== null && explicitFadeSteps > 0
+    ? Math.floor(explicitFadeSteps)
+    : computeFadeStepCount(resolvedNarrativeWordCount);
+  const fadeTiming = computeFadeTimingProfile(
+    resolvedNarrativeWordCount,
+    resolvedFadeSteps,
+    { timingScale: fadeTimingScale }
+  );
 
   const writing_sequence = [
     { action: 'type', text: safeNarrative, style, delay: 0 },
@@ -498,23 +651,32 @@ function createTypewriterResponse(fullText, metadata, fadeSteps = 3) {
   ];
 
   const fade_sequence = [];
-  const fadeDelay = Math.floor(14000 / (fadeSteps + 1));
-  for (let i = 0; i < fadeSteps; i += 1) {
-    const cutoff = Math.round(safeNarrative.length * (1 - (i + 1) / (fadeSteps + 1)));
-    fade_sequence.push({ action: 'pause', delay: i === 0 ? 2200 : 1000 });
+  for (let i = 0; i < fadeTiming.fade_steps; i += 1) {
+    const cutoff = Math.round(safeNarrative.length * (1 - (i + 1) / (fadeTiming.fade_steps + 1)));
+    fade_sequence.push({
+      action: 'pause',
+      delay: i === 0 ? fadeTiming.first_pause_delay : fadeTiming.phase_pause_delay
+    });
     fade_sequence.push({
       action: 'fade',
       phase: i + 1,
       to_text: safeNarrative.slice(0, cutoff).trim(),
       style,
-      delay: fadeDelay
+      delay: fadeTiming.fade_phase_delay
     });
   }
-  fade_sequence.push({ action: 'pause', delay: 900 });
-  fade_sequence.push({ action: 'fade', phase: fadeSteps + 1, to_text: '', style, delay: fadeDelay });
+  fade_sequence.push({ action: 'pause', delay: fadeTiming.final_pause_delay });
+  fade_sequence.push({
+    action: 'fade',
+    phase: fadeTiming.fade_steps + 1,
+    to_text: '',
+    style,
+    delay: fadeTiming.fade_phase_delay
+  });
 
   return {
     metadata: style,
+    timing: fadeTiming,
     writing_sequence,
     fade_sequence,
     sequence: [...writing_sequence, ...fade_sequence]
@@ -522,7 +684,7 @@ function createTypewriterResponse(fullText, metadata, fadeSteps = 3) {
 }
 
 function buildMockContinuation(message) {
-  const words = String(message || '').trim().split(/\s+/).filter(Boolean).length;
+  const words = countWords(message);
   if (words <= 5) return 'while a lantern blinked once in the ravine wind.';
   if (words <= 12) return 'and the trail answered with bells buried under ash.';
   return 'as the pass fell quiet and every footstep sounded borrowed.';
@@ -567,20 +729,35 @@ app.post('/api/shouldGenerateContinuation', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const wordCount = latestAddition.trim().split(/\s+/).filter(Boolean).length;
+    const wordCount = countWords(latestAddition);
     const goldenThreshold = Math.max(minWords, Math.floor((lastGhostwriterWordCount || 1) / goldenRatio));
     if (wordCount < goldenThreshold) {
       return res.status(200).json({ shouldGenerate: false });
     }
 
-    const totalLength = currentText.trim().split(/\s+/).filter(Boolean).length;
-    const basePause = 1.8;
-    const scaleFactor = Math.min(3, totalLength * 0.05);
-    const additionFactor = Math.min(1.5, wordCount * 0.2);
-    const randomness = Math.random() * 0.7 - 0.3;
-    const requiredPause = basePause + scaleFactor + additionFactor + randomness;
+    const totalLength = countWords(currentText);
+    const additionChars = String(latestAddition || '').trim().length;
 
-    return res.status(200).json({ shouldGenerate: latestPauseSeconds > requiredPause });
+    const hardMinimumPauseSeconds = 4.2;
+    if (latestPauseSeconds < hardMinimumPauseSeconds) {
+      return res.status(200).json({ shouldGenerate: false });
+    }
+
+    // Keep continuation from interrupting likely writing sprees.
+    if (wordCount >= 8 && latestPauseSeconds < 6.8) {
+      return res.status(200).json({ shouldGenerate: false });
+    }
+    if (wordCount >= 14 && latestPauseSeconds < 8.6) {
+      return res.status(200).json({ shouldGenerate: false });
+    }
+
+    const basePause = 5.4;
+    const narrativeFactor = clampValue(totalLength * 0.018, 0, 3.5);
+    const additionFactor = clampValue(wordCount * 0.11, 0, 2.2);
+    const densityFactor = clampValue(additionChars / 120, 0, 1.2);
+    const requiredPause = basePause + narrativeFactor + additionFactor + densityFactor;
+
+    return res.status(200).json({ shouldGenerate: latestPauseSeconds >= requiredPause });
   } catch (error) {
     console.error('Error in /api/shouldGenerateContinuation:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -608,6 +785,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     if (!sessionId || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ error: 'Missing sessionId or message' });
     }
+    const requestedFadeTimingScale = toFiniteNumber(req.body?.fadeTimingScale);
 
     await startTypewriterSession(sessionId);
 
@@ -617,9 +795,15 @@ app.post('/api/send_typewriter_text', async (req, res) => {
       const mockMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
       const continuation = buildMockContinuation(message);
       const nextFragment = mergeTypewriterFragment(message, continuation);
+      const narrativeWordCount = countWords(message);
+      const continuationInsights = normalizeContinuationInsights({}, continuation, mockMetadata);
       await saveTypewriterSessionFragment(sessionId, nextFragment);
       return res.status(200).json({
-        ...createTypewriterResponse(continuation, mockMetadata, 3),
+        ...createTypewriterResponse(continuation, mockMetadata, null, {
+          narrativeWordCount,
+          fadeTimingScale: requestedFadeTimingScale
+        }),
+        continuation_insights: continuationInsights,
         sessionId,
         fragment: nextFragment,
         mocked: true,
@@ -660,11 +844,17 @@ app.post('/api/send_typewriter_text', async (req, res) => {
         || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
         || TYPEWRITER_DEFAULT_FONTS[0];
       const nextFragment = mergeTypewriterFragment(message, continuation);
+      const narrativeWordCount = countWords(message);
+      const continuationInsights = normalizeContinuationInsights(aiResponse, continuation, metadata);
 
       await saveTypewriterSessionFragment(sessionId, nextFragment);
 
       return res.status(200).json({
-        ...createTypewriterResponse(continuation, metadata, 3),
+        ...createTypewriterResponse(continuation, metadata, null, {
+          narrativeWordCount,
+          fadeTimingScale: requestedFadeTimingScale
+        }),
+        continuation_insights: continuationInsights,
         sessionId,
         fragment: nextFragment,
         mocked: false,
@@ -791,7 +981,7 @@ function sanitizeRoomForPublic(room) {
 }
 
 function getFragmentText(body) {
-  return body?.text || body?.userText || body?.fragment || '';
+  return typeof body?.text === 'string' ? body.text : '';
 }
 
 function normalizeOptionalPlayerId(value) {
@@ -2169,9 +2359,6 @@ app.post('/api/textToEntity', async (req, res) => {
       playerId,
       count,
       numberOfEntities,
-      text,
-      userText,
-      fragment,
       includeCards,
       includeFront,
       includeBack,
