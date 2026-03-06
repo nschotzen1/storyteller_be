@@ -1,4 +1,4 @@
-import { directExternalApiCall } from '../ai/openai/apiService.js';
+import { callJsonLlm } from '../ai/openai/apiService.js';
 
 /**
  * Normalizes a relationship string into a slug.
@@ -99,6 +99,7 @@ export function buildMockJudgment(source, targets, relationship, existingEdges) 
  * @param {boolean} shouldMock 
  * @param {string} clusterContext - Formatted cluster context string (optional)
  * @param {string} llmModel
+ * @param {string} llmProvider
  * @returns {Promise<Object>}
  */
 export async function evaluateRelationship(
@@ -108,7 +109,8 @@ export async function evaluateRelationship(
     existingEdges,
     shouldMock,
     clusterContext = null,
-    llmModel = ''
+    llmModel = '',
+    llmProvider = 'openai'
 ) {
     if (shouldMock) {
         return buildMockJudgment(source, targets, relationship, existingEdges);
@@ -165,15 +167,13 @@ Return JSON:
 }`;
 
     try {
-        const result = await directExternalApiCall(
-            [{ role: 'system', content: prompt }],
-            800,
-            undefined,
-            undefined,
-            true,
-            true,
-            llmModel
-        );
+        const result = await callJsonLlm({
+            prompts: [{ role: 'system', content: prompt }],
+            provider: llmProvider,
+            model: llmModel,
+            max_tokens: 800,
+            explicitJsonObjectFormat: true
+        });
         return result || buildMockJudgment(source, targets, relationship, existingEdges);
     } catch (err) {
         console.error('Error in LLM relationship evaluation:', err);

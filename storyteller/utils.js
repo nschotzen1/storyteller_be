@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 // Local AI utility imports
 import { generateStorytellerGuidance, generate_cards, generate_seer_response } from "../ai/openai/cardReadingPrompts.js";
-import {directExternalApiCall} from '../ai/openai/apiService.js';
+import { callJsonLlm, directExternalApiCall } from '../ai/openai/apiService.js';
 import {  generate_texture_by_fragment_and_conversation, } from "../ai/openai/texturePrompts.js"
 import { generate_entities_by_fragment } from "../ai/openai/promptsUtils.js";
 import { 
@@ -930,6 +930,7 @@ export async function generateEntitiesFromFragment(sessionId, fragmentText, turn
     : 8;
   let commonEntities = []
   const llmModel = typeof options.llmModel === 'string' ? options.llmModel.trim() : '';
+  const llmProvider = typeof options.llmProvider === 'string' ? options.llmProvider.trim().toLowerCase() : 'openai';
   const entityPromptTemplate = typeof options.entityPromptTemplate === 'string'
     ? options.entityPromptTemplate.trim()
     : '';
@@ -948,13 +949,13 @@ export async function generateEntitiesFromFragment(sessionId, fragmentText, turn
       : generate_entities_by_fragment(fragmentText, maxEntities);
     if(! existinEntities)
       existinEntities = []
-    const response = await directExternalApiCall(prompts.concat(existinEntities), {
+    const response = await callJsonLlm({
+      prompts: prompts.concat(existinEntities),
+      provider: llmProvider,
+      model: llmModel || undefined,
       max_tokens: 6000,
       temperature: 0.7,
-      mockedResponse: null,
-      explicitJsonObjectFormat: true,
-      isOpenAi: true,
-      model: llmModel || undefined,
+      explicitJsonObjectFormat: true
     });
     let { clusters, entities} = response
     if(entities.card_backs){

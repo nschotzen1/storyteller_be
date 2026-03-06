@@ -30,20 +30,20 @@ Result: after fade completion, ghostwriter does not retrigger until the user add
 
 ### Prompt payload
 
-`buildTypewriterPromptPayload(existingText)` now computes word count once and passes it through:
+`buildTypewriterPromptPayload(currentNarrative)` computes bounds once and passes a single canonical contract:
 
 ```json
 {
-  "existing_text": "...",
-  "desired_length_min": 3,
-  "desiredlength_max": 80,
+  "current_narrative": "...",
+  "min_words": 5,
+  "max_words": 80,
   "word_count": 42,
   "preferred_font_size_px": 30
 }
 ```
 
 This payload is used in both:
-- rendered prompt template variables (`{{word_count}}`, `{{preferred_font_size_px}}`), and
+- rendered prompt template variables (`{{current_narrative}}`, `{{min_words}}`, `{{max_words}}`, `{{word_count}}`, `{{preferred_font_size_px}}`), and
 - user JSON payload sent to the model.
 
 ### Response shaping
@@ -66,13 +66,14 @@ Fade pacing is computed from the current narrative length (`message` word count 
 
 - `narrative_word_count`
 - dynamic `fade_steps`:
-  - `<=35` words: 2 steps
-  - `36-120` words: 3 steps
-  - `>120` words: 4 steps
+  - `<=6` words: 2 steps
+  - `7-40` words: 3 steps
+  - `>40` words: 4 steps
 - delays scale with narrative length:
   - `first_pause_delay`
   - `phase_pause_delay`
   - `final_pause_delay`
+  - `fade_interval_ms` (alias of `fade_phase_delay`, easier for UI consumption)
   - `fade_phase_delay`
   - plus `estimated_total_duration_ms`
   - `timing_scale`
@@ -119,6 +120,7 @@ Frontend displays `continuation_insights` in a dedicated "Last Ghostwrite" panel
 - points pool (`current_storytelling_points_pool`)
 - delta (`points_earned`)
 - entity count (`Entities.length`)
+- optional timing chips (fade interval, estimated total fade, scales)
 - `contextual_strengthening`
 - first 3 `meaning` lines
 
@@ -128,6 +130,6 @@ This is implemented in:
 
 ## 6) Practical Contract Notes
 
-- `timing` is informational and can be surfaced later in UI debug overlays.
+- `timing` is now surfaced in both a toggleable debug panel and optional "Last Ghostwrite" timing chips.
 - `continuation_insights` is safe for both live and mock responses.
 - `word_count` is now explicit in the story continuation prompt payload contract.

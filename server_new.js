@@ -5,7 +5,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { BrewRoom } from './models/brewing_models.js';
-import { directExternalApiCall, listAvailableOpenAiModels } from './ai/openai/apiService.js';
+import {
+  callJsonLlm,
+  directExternalApiCall,
+  listAvailableAnthropicModels,
+  listAvailableOpenAiModels
+} from './ai/openai/apiService.js';
 import { Storyteller, SessionPlayer, Arena, World, WorldElement, QuestScreenGraph } from './models/models.js';
 import {
   createStoryTellerKey,
@@ -445,29 +450,35 @@ function clampValue(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function buildTypewriterPromptPayload(existingText = '') {
-  const wordCount = countWords(existingText);
-  const desired_length_min = parseInt(Math.max(3, wordCount / (1.61 * 1.61)), 10);
-  const desiredlength_max = parseInt(Math.max(80, wordCount / 1.61), 10);
+function computeTypewriterWordBounds(wordCount = 0) {
+  const safeWordCount = Math.max(0, Number(wordCount) || 0);
+  const minWords = Math.max(5, parseInt(safeWordCount / (1.61 * 1.61), 10) || 0);
+  const maxWords = Math.min(80, parseInt(safeWordCount / 1.61, 10) || 0);
+  return { minWords, maxWords };
+}
+
+function buildTypewriterPromptPayload(currentNarrative = '') {
+  const wordCount = countWords(currentNarrative);
+  const { minWords, maxWords } = computeTypewriterWordBounds(wordCount);
   return {
-    existing_text: existingText,
-    desired_length_min,
-    desiredlength_max,
+    current_narrative: currentNarrative,
+    min_words: minWords,
+    max_words: maxWords,
     word_count: wordCount,
     preferred_font_size_px: TYPEWRITER_PREFERRED_FONT_SIZE_PX
   };
 }
 
-function buildTypewriterPromptMessages(existingText, promptTemplate) {
+function buildTypewriterPromptMessages(currentNarrative, promptTemplate) {
   if (!promptTemplate || !promptTemplate.trim()) {
-    return generateTypewriterPrompt(existingText);
+    return generateTypewriterPrompt(currentNarrative);
   }
 
-  const payload = buildTypewriterPromptPayload(existingText);
+  const payload = buildTypewriterPromptPayload(currentNarrative);
   const renderedPrompt = renderPromptTemplateString(promptTemplate, {
-    existing_text: existingText,
-    desired_length_min: payload.desired_length_min,
-    desiredlength_max: payload.desiredlength_max,
+    current_narrative: payload.current_narrative,
+    min_words: payload.min_words,
+    max_words: payload.max_words,
     word_count: payload.word_count,
     preferred_font_size_px: payload.preferred_font_size_px
   });
@@ -541,17 +552,22 @@ function toFiniteNumber(value) {
 function sanitizeTimingScale(value) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) return 1;
-  return clampValue(numericValue, 0.35, 4);
+  return clampValue(numericValue, 0.35, 5);
 }
 
 function computeFadeTimingProfile(narrativeWordCount, fadeSteps = 3, options = {}) {
   const normalizedWordCount = Math.max(0, Number(narrativeWordCount) || 0);
   const timingScale = sanitizeTimingScale(options.timingScale);
-  const lengthRatio = clampValue(normalizedWordCount / 220, 0, 1);
-  const firstPauseDelay = Math.round((3000 + (7600 - 3000) * lengthRatio) * timingScale);
-  const phasePauseDelay = Math.round((1400 + (3600 - 1400) * lengthRatio) * timingScale);
-  const finalPauseDelay = Math.round((1000 + (2600 - 1000) * lengthRatio) * timingScale);
-  const fadePhaseDelay = Math.round((2200 + (6800 - 2200) * lengthRatio) * timingScale);
+  const lengthRatio = clampValue(normalizedWordCount / 260, 0, 1);
+  const brevityFactor = normalizedWordCount <= 6
+    ? 0.72
+    : normalizedWordCount <= 14
+      ? 0.86
+      : 1;
+  const firstPauseDelay = Math.round((4200 + (9000 - 4200) * lengthRatio) * timingScale * brevityFactor);
+  const phasePauseDelay = Math.round((1900 + (4200 - 1900) * lengthRatio) * timingScale * brevityFactor);
+  const finalPauseDelay = Math.round((1300 + (2900 - 1300) * lengthRatio) * timingScale * brevityFactor);
+  const fadePhaseDelay = Math.round((2800 + (7200 - 2800) * lengthRatio) * timingScale * brevityFactor);
   const safeFadeSteps = Math.max(1, Number(fadeSteps) || 1);
   const intermediatePauseCount = Math.max(0, safeFadeSteps - 1);
   const estimatedTotalDurationMs =
@@ -566,6 +582,7 @@ function computeFadeTimingProfile(narrativeWordCount, fadeSteps = 3, options = {
     first_pause_delay: firstPauseDelay,
     phase_pause_delay: phasePauseDelay,
     final_pause_delay: finalPauseDelay,
+    fade_interval_ms: fadePhaseDelay,
     fade_phase_delay: fadePhaseDelay,
     estimated_total_duration_ms: estimatedTotalDurationMs,
     timing_scale: timingScale
@@ -574,8 +591,8 @@ function computeFadeTimingProfile(narrativeWordCount, fadeSteps = 3, options = {
 
 function computeFadeStepCount(narrativeWordCount) {
   const normalizedWordCount = Math.max(0, Number(narrativeWordCount) || 0);
-  if (normalizedWordCount <= 35) return 2;
-  if (normalizedWordCount <= 120) return 3;
+  if (normalizedWordCount <= 6) return 2;
+  if (normalizedWordCount <= 40) return 3;
   return 4;
 }
 
@@ -790,6 +807,9 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     await startTypewriterSession(sessionId);
 
     const continuationPipeline = await getAiPipelineSettings('story_continuation');
+    const continuationProvider = typeof continuationPipeline?.provider === 'string'
+      ? continuationPipeline.provider
+      : 'openai';
     const shouldMock = resolveMockMode(req.body, continuationPipeline.useMock);
     if (shouldMock) {
       const mockMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
@@ -809,6 +829,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
         mocked: true,
         runtime: {
           pipeline: 'story_continuation',
+          provider: continuationProvider,
           model: continuationPipeline.model || '',
           mocked: true
         }
@@ -818,15 +839,13 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     try {
       const continuationPromptDoc = await getLatestPromptTemplate('story_continuation');
       const prompt = buildTypewriterPromptMessages(message, continuationPromptDoc?.promptTemplate || '');
-      const aiResponse = await directExternalApiCall(
-        prompt,
-        2500,
-        undefined,
-        undefined,
-        true,
-        true,
-        continuationPipeline.model
-      );
+      const aiResponse = await callJsonLlm({
+        prompts: prompt,
+        provider: continuationProvider,
+        model: continuationPipeline.model || '',
+        max_tokens: 2500,
+        explicitJsonObjectFormat: true
+      });
       const continuation = typeof aiResponse?.continuation === 'string' && aiResponse.continuation.trim()
         ? aiResponse.continuation.trim()
         : '';
@@ -835,6 +854,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
           error: 'Live typewriter continuation did not return valid content.',
           runtime: {
             pipeline: 'story_continuation',
+            provider: continuationProvider,
             model: continuationPipeline.model || '',
             mocked: false
           }
@@ -860,6 +880,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
         mocked: false,
         runtime: {
           pipeline: 'story_continuation',
+          provider: continuationProvider,
           model: continuationPipeline.model || '',
           mocked: false
         }
@@ -871,6 +892,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
         details: aiError?.message || 'Unknown error',
         runtime: {
           pipeline: 'story_continuation',
+          provider: continuationProvider,
           model: continuationPipeline.model || '',
           mocked: false
         }
@@ -1653,8 +1675,17 @@ app.get('/api/admin/openai/models', requireAdmin, async (req, res) => {
   try {
     const forceRefresh = parseBooleanFlag(req.query?.forceRefresh) === true
       || parseBooleanFlag(req.query?.refresh) === true;
-    const modelsPayload = await listAvailableOpenAiModels({ forceRefresh });
-    return res.status(200).json(modelsPayload);
+    const [openAiModelsPayload, anthropicModelsPayload] = await Promise.all([
+      listAvailableOpenAiModels({ forceRefresh }),
+      listAvailableAnthropicModels({ forceRefresh })
+    ]);
+    return res.status(200).json({
+      ...openAiModelsPayload,
+      providers: {
+        openai: openAiModelsPayload,
+        anthropic: anthropicModelsPayload
+      }
+    });
   } catch (error) {
     console.error('Error in GET /api/admin/openai/models:', error);
     return res.status(500).json({ message: 'Server error while loading OpenAI models.' });
@@ -2306,6 +2337,7 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
     ].filter(Boolean).join('\n');
 
     const entityPipeline = await getAiPipelineSettings('entity_creation');
+    const entityProvider = typeof entityPipeline?.provider === 'string' ? entityPipeline.provider : 'openai';
     const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
     const shouldMock = resolveMockMode(body, entityPipeline.useMock);
     const subEntityResult = await textToEntityFromText({
@@ -2315,6 +2347,7 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
       includeCards: false,
       debug: shouldMock,
       llmModel: entityPipeline.model,
+      llmProvider: entityProvider,
       entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
       mainEntityId: entity.externalId || String(entity._id),
       isSubEntity: true
@@ -2377,6 +2410,8 @@ app.post('/api/textToEntity', async (req, res) => {
 
     const entityPipeline = await getAiPipelineSettings('entity_creation');
     const texturePipeline = await getAiPipelineSettings('texture_creation');
+    const entityProvider = typeof entityPipeline?.provider === 'string' ? entityPipeline.provider : 'openai';
+    const textureProvider = typeof texturePipeline?.provider === 'string' ? texturePipeline.provider : 'openai';
     const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
     const entityFrontPromptDoc = await getLatestPromptTemplate('entity_card_front');
     const texturePromptDoc = await getLatestPromptTemplate('texture_creation');
@@ -2396,6 +2431,7 @@ app.post('/api/textToEntity', async (req, res) => {
       includeBack: includeBack === undefined ? true : Boolean(includeBack),
       debug: shouldMockEntities,
       llmModel: entityPipeline.model,
+      llmProvider: entityProvider,
       textureModel: texturePipeline.model,
       mockTextures: shouldMockTextures,
       entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
@@ -2416,11 +2452,13 @@ app.post('/api/textToEntity', async (req, res) => {
       runtime: {
         generation: {
           pipeline: 'entity_creation',
+          provider: entityProvider,
           model: entityPipeline.model || '',
           mocked: shouldMockEntities
         },
         textures: {
           pipeline: 'texture_creation',
+          provider: textureProvider,
           model: texturePipeline.model || '',
           mocked: shouldMockTextures
         }
@@ -2467,6 +2505,8 @@ app.post('/api/textToStoryteller', async (req, res) => {
     const shouldGenerateKeyImages = generateKeyImages === undefined ? true : Boolean(generateKeyImages);
     const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
     const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
+    const storytellerProvider = typeof storytellerPipeline?.provider === 'string' ? storytellerPipeline.provider : 'openai';
+    const illustrationProvider = typeof illustrationPipeline?.provider === 'string' ? illustrationPipeline.provider : 'openai';
     const storytellerCount = normalizeStorytellerCount(
       count ?? numberOfStorytellers ?? storytellerPipeline.storytellerCount
     );
@@ -2493,15 +2533,13 @@ app.post('/api/textToStoryteller', async (req, res) => {
           storytellerCount
         });
       }
-      storytellerDataArray = await directExternalApiCall(
-        [{ role: 'system', content: prompt }],
-        2500,
-        undefined,
-        undefined,
-        true,
-        true,
-        storytellerPipeline.model
-      );
+      storytellerDataArray = await callJsonLlm({
+        prompts: [{ role: 'system', content: prompt }],
+        provider: storytellerProvider,
+        model: storytellerPipeline.model || '',
+        max_tokens: 2500,
+        explicitJsonObjectFormat: true
+      });
     }
 
     const normalizedStorytellers = Array.isArray(storytellerDataArray)
@@ -2636,11 +2674,13 @@ app.post('/api/textToStoryteller', async (req, res) => {
       runtime: {
         generation: {
           pipeline: 'storyteller_creation',
+          provider: storytellerProvider,
           model: storytellerPipeline.model || '',
           mocked: shouldMockStorytellers
         },
         illustrations: {
           pipeline: 'illustration_creation',
+          provider: illustrationProvider,
           model: illustrationPipeline.model || '',
           mocked: shouldMockIllustrations
         }
@@ -2706,6 +2746,8 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
 
     const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
     const entityPipeline = await getAiPipelineSettings('entity_creation');
+    const storytellerProvider = typeof storytellerPipeline?.provider === 'string' ? storytellerPipeline.provider : 'openai';
+    const entityProvider = typeof entityPipeline?.provider === 'string' ? entityPipeline.provider : 'openai';
     const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
     const shouldMockMission = resolveMockMode(body, storytellerPipeline.useMock);
     const shouldMockSubEntities = resolveMockMode(body, entityPipeline.useMock);
@@ -2738,15 +2780,13 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
         message,
         durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
       });
-      missionResult = await directExternalApiCall(
-        [{ role: 'system', content: prompt }],
-        1200,
-        undefined,
-        undefined,
-        true,
-        true,
-        storytellerPipeline.model
-      );
+      missionResult = await callJsonLlm({
+        prompts: [{ role: 'system', content: prompt }],
+        provider: storytellerProvider,
+        model: storytellerPipeline.model || '',
+        max_tokens: 1200,
+        explicitJsonObjectFormat: true
+      });
     }
 
     await validatePayloadForRoute('storyteller_mission', missionResult);
@@ -2763,6 +2803,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       includeCards: false,
       debug: shouldMockSubEntities,
       llmModel: entityPipeline.model,
+      llmProvider: entityProvider,
       entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
       mainEntityId: entity.externalId || String(entity._id),
       isSubEntity: true
@@ -2819,11 +2860,13 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       runtime: {
         mission: {
           pipeline: 'storyteller_creation',
+          provider: storytellerProvider,
           model: storytellerPipeline.model || '',
           mocked: shouldMockMission
         },
         subEntities: {
           pipeline: 'entity_creation',
+          provider: entityProvider,
           model: entityPipeline.model || '',
           mocked: shouldMockSubEntities
         }
@@ -2872,6 +2915,9 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       fastValidate: Boolean(relationship?.fastValidate || options?.fastValidate)
     };
     const relationshipPipeline = await getAiPipelineSettings('relationship_evaluation');
+    const relationshipProvider = typeof relationshipPipeline?.provider === 'string'
+      ? relationshipPipeline.provider
+      : 'openai';
 
     // Validate required parameters
     if (!sessionId || !playerId) {
@@ -2942,7 +2988,8 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       existingEdges,
       shouldMock,
       clusterContext,
-      relationshipPipeline.model
+      relationshipPipeline.model,
+      relationshipProvider
     );
 
     // Handle rejection
@@ -2955,6 +3002,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
         mocked: shouldMock,
         runtime: {
           pipeline: 'relationship_evaluation',
+          provider: relationshipProvider,
           model: relationshipPipeline.model || '',
           mocked: shouldMock
         }
@@ -2975,6 +3023,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
         mocked: shouldMock,
         runtime: {
           pipeline: 'relationship_evaluation',
+          provider: relationshipProvider,
           model: relationshipPipeline.model || '',
           mocked: shouldMock
         }
@@ -3093,6 +3142,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       fastValidate: evaluation.fastValidate,
       runtime: {
         pipeline: 'relationship_evaluation',
+        provider: relationshipProvider,
         model: relationshipPipeline.model || '',
         mocked: shouldMock
       }

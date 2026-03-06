@@ -123,30 +123,63 @@ export async function createStoryTellerKey(
   }
 
   const { symbol, description } = typewriterKey;
-  const defaultPrompt = `A rugged, aged typewriter key rendered as a masked PNG on transparent background. The key has a unique silhouette tailored to the symbol: a form echoing the essence of "${symbol}". The base material reflects the description: ${description.toLowerCase().replace('.', '')}, marked by time and purpose.
+  const blankShape = typeof typewriterKey.blank_shape === 'string'
+    ? typewriterKey.blank_shape
+    : 'blank storyteller slot';
+  const blankTextureUrl = typeof typewriterKey.blank_texture_url === 'string'
+    ? typewriterKey.blank_texture_url
+    : '';
+  const shapePromptHint = typeof typewriterKey.shape_prompt_hint === 'string'
+    ? typewriterKey.shape_prompt_hint
+    : 'front-facing typewriter key silhouette';
+  const defaultPrompt = `Create a single isolated storyteller typewriter key asset as a PNG with transparent background.
 
-At its center is a symbolic feature: a representation of the "${symbol}" — whether carved, inlaid, or raised — reflecting the key's specific lore. The symbol is worn, oxidized, or subtly glowing, depending on its material origin and thematic tone.
+This key must replace a predefined blank key slot in the UI.
+- Slot silhouette name: "${blankShape}"
+- Slot reference texture path: "${blankTextureUrl || 'not provided'}"
+- Geometry guidance: ${shapePromptHint}
 
-Engraving: There is no letter — only the central symbol. Around it, suggest faint glyphs, radial etchings, or runes that feel ancient and tied to navigation, memory, or storytelling — unique to the symbol’s theme.
+Non-negotiable output rules:
+- Preserve the outer silhouette and proportions of the slot exactly. Do not invent a different key shape.
+- One key only, centered, front-facing, orthographic or near-orthographic.
+- No table, no hands, no typewriter body, no scene dressing, no extra objects, no visible background.
+- The transparent area outside the key silhouette must stay fully empty.
+- No letters, no numbers, no readable words. The only focal mark is the symbol.
 
-Texture: The surface is weathered and physical — with fine cracks, pitting, tarnish, or erosion consistent with ${description.toLowerCase().split(';')[0]}. The rim is uneven, softly chipped, with wear patterns showing heavy use.
+Storyteller identity:
+- Central symbol: "${symbol}"
+- Material / lore cue: ${description}
 
-Effect: Add a subtle ambient effect appropriate to the ${symbol}: a glow, pulse, shimmer, or faint movement — hinting that the key responds to narrative actions, like pressing or storytelling alignment.
+Design direction:
+- The key is a real analog artifact from the Storyteller Society, weathered by use.
+- Build the symbol into the face of the key as an inlay, engraving, raised relief, cutout, or fused material event.
+- Keep the symbol bold and legible at small UI size.
+- The face should still read as a typewriter key, not a coin, badge, medallion, amulet, or button from another machine.
 
-Feel: The key evokes a distinct mood — solemn, mythic, mysterious, or sacred — in line with the described tone. It should feel like an artifact passed through generations of narrators.
+Surface + wear:
+- Physical textures only: tarnish, pitting, hairline cracks, rubbed edges, oxidized metal, worn enamel, stained ivory, smoky glass, chipped lacquer, or obsidian abrasions as appropriate to the description.
+- The rim and face should show age and repeated presses.
+- Add a subtle narrative charge: faint glow, embering seam, ink shimmer, ghost residue, or dormant pulse, but keep it restrained and physical.
 
-Storyteller Society Infusion:
-- Subtle sigil of the Storyteller Society (an eye, quill, and flame) integrated into the design — either hidden beneath the main symbol, faded into the rim, or reversed as a wax-stamp impression.
-- Optional runic ring around the edge with fragmented words or glyphs.
-- A mark or scar that shows the key’s bond to narrative authority.
+Storyteller Society infusion:
+- Hide a tiny eye-quill-flame sigil somewhere in the rim, underside shadow, or worn impression.
+- Optional radial runes or etched guidance marks around the symbol, but they must remain unreadable fragments.
+- Include one scar, notch, or imperfection suggesting the key has a history inside the order.
 
-Lighting should emphasize realism: catching brass tarnish, glass shimmer, or obsidian fractures. Shadows help isolate the symbol, while the overall look is that of a physical, analog artifact — part of a magical typewriter from a secret order of storytellers.
-  `.trim();
+Lighting:
+- Studio-style isolated asset lighting with realistic highlights and soft contact shadow inside the key only.
+- Emphasize material realism and crisp silhouette separation.
+
+The final result should feel like a production-ready UI asset that can directly replace the blank slot texture.`
+    .trim();
   const prompt = typeof promptTemplate === 'string' && promptTemplate.trim()
     ? renderPromptTemplateString(promptTemplate, {
       symbol,
       description,
-      storyteller_name: storytellerName || ''
+      storyteller_name: storytellerName || '',
+      blank_shape: blankShape,
+      blank_texture_url: blankTextureUrl,
+      shape_prompt_hint: shapePromptHint
     })
     : defaultPrompt;
   // Sanitize storytellerName for use in file path

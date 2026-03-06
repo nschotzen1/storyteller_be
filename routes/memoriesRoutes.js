@@ -2,7 +2,7 @@ import express from 'express';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { directExternalApiCall } from '../ai/openai/apiService.js';
+import { callJsonLlm } from '../ai/openai/apiService.js';
 import { FragmentMemory } from '../models/memory_models.js';
 import { ensureDirectoryExists } from '../storyteller/utils.js';
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
@@ -446,6 +446,8 @@ router.post('/fragmentToMemories', async (req, res) => {
 
     const memorySettings = await getPipelineSettings('memory_creation');
     const textureSettings = await getPipelineSettings('texture_creation');
+    const memoryProvider = typeof memorySettings?.provider === 'string' ? memorySettings.provider : 'openai';
+    const textureProvider = typeof textureSettings?.provider === 'string' ? textureSettings.provider : 'openai';
     const memoryCount = normalizeMemoryCount(count ?? numberOfMemories ?? memorySettings.memoryCount);
     const shouldMock = resolveMockMode(body, memorySettings.useMock);
     const shouldMockTextures = resolveMockMode(body, textureSettings.useMock);
@@ -473,15 +475,13 @@ router.post('/fragmentToMemories', async (req, res) => {
           memoryCount
         });
       }
-      const llmResult = await directExternalApiCall(
-        [{ role: 'system', content: prompt }],
-        3000,
-        undefined,
-        undefined,
-        true,
-        true,
-        memorySettings.model
-      );
+      const llmResult = await callJsonLlm({
+        prompts: [{ role: 'system', content: prompt }],
+        provider: memoryProvider,
+        model: memorySettings.model,
+        max_tokens: 3000,
+        explicitJsonObjectFormat: true
+      });
       memoriesPayload = normalizeMemoriesPayload(
         Array.isArray(llmResult) ? { memories: llmResult } : llmResult
       );
@@ -545,11 +545,13 @@ router.post('/fragmentToMemories', async (req, res) => {
       runtime: {
         generation: {
           pipeline: 'memory_creation',
+          provider: memoryProvider,
           model: memorySettings.model || '',
           mocked: shouldMock
         },
         textures: {
           pipeline: 'texture_creation',
+          provider: textureProvider,
           model: textureSettings.model || '',
           mocked: shouldMockTextures
         }

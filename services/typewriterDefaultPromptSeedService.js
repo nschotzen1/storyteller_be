@@ -13,7 +13,7 @@ const DEFAULT_ENTITY_COUNT = 4;
 const DEFAULT_MAX_ENTITIES = 8;
 
 function buildStoryContinuationPromptTemplate() {
-  return generateTypewriterPrompt('{{existing_text}}')?.[0]?.content || '';
+  return generateTypewriterPrompt('{{current_narrative}}')?.[0]?.content || '';
 }
 
 async function buildMemoryCreationPromptTemplate() {
@@ -249,7 +249,13 @@ export async function getCurrentTypewriterPromptTemplates() {
       pipelineKey: 'story_continuation',
       promptTemplate: buildStoryContinuationPromptTemplate(),
       source: 'ai/openai/promptsUtils.js:generateTypewriterPrompt',
-      variables: ['existing_text', 'desired_length_min', 'desiredlength_max', 'word_count', 'preferred_font_size_px']
+      variables: [
+        'current_narrative',
+        'min_words',
+        'max_words',
+        'word_count',
+        'preferred_font_size_px'
+      ]
     },
     memory_creation: {
       pipelineKey: 'memory_creation',

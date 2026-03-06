@@ -140,6 +140,9 @@ const StorytellerSchema = new mongoose.Schema({
   keyImageUrl: { type: String },
   keyImageLocalUrl: { type: String },
   keyImageLocalPath: { type: String },
+  keyShape: { type: String },
+  keyBlankTextureUrl: { type: String },
+  keySlotIndex: { type: Number },
   status: { type: String, enum: ['active', 'in_mission'], default: 'active' },
   missions: {
     type: [

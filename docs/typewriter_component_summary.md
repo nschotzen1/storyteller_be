@@ -42,6 +42,10 @@ Core frontend responsibilities:
   - `message`
   - optional `fadeTimingScale` (debug/tuning override)
   - optional mock flags
+- Prompt variables populated for continuation templates:
+  - `current_narrative`
+  - `min_words` / `max_words`
+  - `word_count`
 - Output includes:
   - `writing_sequence`, `fade_sequence`, `sequence`
   - `metadata`
@@ -71,8 +75,10 @@ Core frontend responsibilities:
 
 ### Fade mechanics
 - Fade timing scales with narrative word count.
-- Fade steps auto-scale by narrative length (`2 / 3 / 4` tiers).
+- Fade steps auto-scale by narrative length (`2 / 3 / 4` tiers, with slower defaults).
 - Longer narratives fade slower/more gradually.
+- Timing payload exposes both `fade_phase_delay` and alias `fade_interval_ms`.
+- UI fade animation duration is now derived from response timing (not fixed-only timing).
 
 ### Font mechanics
 - Prompt payload now includes `preferred_font_size_px` to steer model style choices.
@@ -105,3 +111,4 @@ Frontend knobs:
 - insights panel visibility
 - timing chip visibility
 - request-level `fadeTimingScale`
+- visual fade duration scale (`fadeVisualScale`) for client-side crossfade pacing
