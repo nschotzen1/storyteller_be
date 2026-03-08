@@ -24,11 +24,26 @@ Summon {{storytellerCount}} distinct storytellers for this fragment:
 "{{fragmentText}}"`;
 
 const LLM_ROUTE_CONFIG_EXAMPLE = {
+  id: '67ce00000000000000000001',
   routeKey: 'text_to_storyteller',
   routePath: '/api/textToStoryteller',
   method: 'POST',
   description: 'Generate storyteller personas from a fragment.',
-  promptTemplate: STORYTELLER_PROMPT_EXAMPLE,
+  promptMode: 'contract',
+  promptTemplate: `${STORYTELLER_PROMPT_EXAMPLE}\n\nReturn JSON only.`,
+  compiledPromptTemplate: `${STORYTELLER_PROMPT_EXAMPLE}\n\nReturn JSON only.`,
+  promptCore: STORYTELLER_PROMPT_EXAMPLE,
+  fieldDocs: {
+    'storytellers[].name': 'Distinct, evocative name.'
+  },
+  examplePayload: {
+    storytellers: [
+      {
+        name: 'The Veil Cartographer'
+      }
+    ]
+  },
+  outputRules: ['Do not use readable text in typewriter_key.symbol.'],
   responseSchema: {
     type: 'object',
     required: ['storytellers'],
@@ -36,9 +51,15 @@ const LLM_ROUTE_CONFIG_EXAMPLE = {
       storytellers: { type: 'array' }
     }
   },
+  version: 4,
+  isLatest: true,
+  createdBy: 'story-admin-ui',
+  createdAt: '2026-03-08T12:00:00.000Z',
+  updatedAt: '2026-03-08T12:00:00.000Z',
   meta: {
-    updatedBy: 'admin',
-    updatedAt: '2026-02-11T12:00:00.000Z'
+    source: 'mongo',
+    updatedBy: 'story-admin-ui',
+    updatedAt: '2026-03-08T12:00:00.000Z'
   }
 };
 
@@ -72,6 +93,7 @@ export function buildOpenApiSpec() {
       { name: 'Docs', description: 'API documentation endpoints.' },
       { name: 'Admin', description: 'LLM prompt/schema management for important generation routes.' },
       { name: 'Sessions', description: 'Session lifecycle and shared arena persistence.' },
+      { name: 'Messenger', description: 'Messenger intake flow used to place the typewriter delivery.' },
       { name: 'Quest', description: 'Quest scene graph and directional screen editing APIs.' },
       { name: 'Worldbuilding', description: 'World creation and element generation.' },
       { name: 'Generation', description: 'Entity/storyteller generation and missions.' },
@@ -115,16 +137,28 @@ export function buildOpenApiSpec() {
           type: 'object',
           required: ['routeKey', 'routePath', 'method', 'description', 'promptTemplate', 'responseSchema'],
           properties: {
+            id: { type: 'string' },
             routeKey: { type: 'string' },
             routePath: { type: 'string' },
             method: { type: 'string' },
             description: { type: 'string' },
+            promptMode: { type: 'string', enum: ['manual', 'contract'] },
             promptTemplate: {
               type: 'string',
               description: 'Route-level LLM system prompt template with {{token}} placeholders.',
               example: STORYTELLER_PROMPT_EXAMPLE
             },
+            compiledPromptTemplate: { type: 'string' },
+            promptCore: { type: 'string' },
+            fieldDocs: { type: 'object', additionalProperties: { type: 'string' } },
+            examplePayload: { type: 'object', additionalProperties: true },
+            outputRules: { type: 'array', items: { type: 'string' } },
             responseSchema: { type: 'object', additionalProperties: true },
+            version: { type: 'number' },
+            isLatest: { type: 'boolean' },
+            createdBy: { type: 'string' },
+            createdAt: { type: 'string' },
+            updatedAt: { type: 'string' },
             meta: { type: 'object', additionalProperties: true }
           },
           example: LLM_ROUTE_CONFIG_EXAMPLE
@@ -226,6 +260,208 @@ export function buildOpenApiSpec() {
               }
             }
           }
+        },
+        MessengerChatMessage: {
+          type: 'object',
+          required: ['id', 'order', 'type', 'sender', 'text', 'hasChatEnded'],
+          properties: {
+            id: { type: 'string' },
+            order: { type: 'number' },
+            type: { type: 'string', enum: ['initial', 'response', 'user'] },
+            sender: { type: 'string', enum: ['system', 'user'] },
+            text: { type: 'string' },
+            hasChatEnded: { type: 'boolean' },
+            createdAt: { type: 'string', format: 'date-time', nullable: true }
+          }
+        },
+        MessengerConversationResponse: {
+          type: 'object',
+          required: ['sessionId', 'sceneId', 'count', 'hasChatEnded', 'messages'],
+          properties: {
+            sessionId: { type: 'string' },
+            sceneId: { type: 'string' },
+            count: { type: 'integer', minimum: 0 },
+            hasChatEnded: { type: 'boolean' },
+            messages: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/MessengerChatMessage' }
+            }
+          }
+        },
+        MessengerSendResponse: {
+          allOf: [
+            { $ref: '#/components/schemas/MessengerConversationResponse' },
+            {
+              type: 'object',
+              required: ['reply', 'has_chat_ended', 'mocked'],
+              properties: {
+                reply: { type: 'string' },
+                has_chat_ended: { type: 'boolean' },
+                mocked: { type: 'boolean' },
+                runtime: {
+                  type: 'object',
+                  properties: {
+                    pipeline: { type: 'string' },
+                    provider: { type: 'string' },
+                    model: { type: 'string' },
+                    mocked: { type: 'boolean' }
+                  },
+                  additionalProperties: true
+                }
+              }
+            }
+          ]
+        },
+        TypewriterAiPipelineSetting: {
+          type: 'object',
+          properties: {
+            key: { type: 'string' },
+            label: { type: 'string' },
+            description: { type: 'string' },
+            modelKind: { type: 'string', enum: ['text', 'image'] },
+            useMock: { type: 'boolean' },
+            model: { type: 'string' },
+            provider: { type: 'string', enum: ['openai', 'anthropic'] },
+            supportedProviders: { type: 'array', items: { type: 'string' } },
+            defaultProvider: { type: 'string' },
+            countProperty: { type: 'string' },
+            supportsCount: { type: 'boolean' },
+            countLabel: { type: 'string' },
+            minCount: { type: 'integer' },
+            maxCount: { type: 'integer' },
+            defaultCount: { type: 'integer' }
+          },
+          additionalProperties: true
+        },
+        TypewriterAiSettingsResponse: {
+          type: 'object',
+          properties: {
+            updatedAt: { type: 'string', format: 'date-time' },
+            updatedBy: { type: 'string' },
+            pipelines: {
+              type: 'object',
+              additionalProperties: { $ref: '#/components/schemas/TypewriterAiPipelineSetting' }
+            },
+            pipelinesMeta: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterAiPipelineSetting' }
+            }
+          }
+        },
+        TypewriterPromptDefinition: {
+          type: 'object',
+          properties: {
+            key: { type: 'string' },
+            label: { type: 'string' },
+            description: { type: 'string' },
+            settingsKey: { type: 'string' }
+          }
+        },
+        TypewriterPromptVersion: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            pipelineKey: { type: 'string' },
+            version: { type: 'integer' },
+            promptTemplate: { type: 'string' },
+            isLatest: { type: 'boolean' },
+            createdBy: { type: 'string' },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
+            meta: { type: 'object', additionalProperties: true }
+          }
+        },
+        TypewriterPromptCollection: {
+          type: 'object',
+          properties: {
+            pipelines: {
+              type: 'object',
+              additionalProperties: {
+                anyOf: [
+                  { $ref: '#/components/schemas/TypewriterPromptVersion' },
+                  { type: 'null' }
+                ]
+              }
+            },
+            pipelinesMeta: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterPromptDefinition' }
+            }
+          }
+        },
+        TypewriterModelListResponse: {
+          type: 'object',
+          properties: {
+            source: { type: 'string' },
+            fetchedAt: { type: 'string', format: 'date-time' },
+            textModels: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' }
+                },
+                additionalProperties: true
+              }
+            },
+            imageModels: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' }
+                },
+                additionalProperties: true
+              }
+            },
+            providers: {
+              type: 'object',
+              additionalProperties: {
+                type: 'object',
+                additionalProperties: true
+              }
+            }
+          }
+        },
+        TypewriterSessionResponse: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            fragment: { type: 'string' }
+          }
+        },
+        TypewriterStorytellerSlot: {
+          type: 'object',
+          properties: {
+            slotIndex: { type: 'integer' },
+            slotKey: { type: 'string' },
+            keyShape: { type: 'string' },
+            blankTextureUrl: { type: 'string' },
+            blankShape: { type: 'string' },
+            filled: { type: 'boolean' },
+            storytellerId: { type: 'string' },
+            storytellerName: { type: 'string' },
+            keyImageUrl: { type: 'string' },
+            symbol: { type: 'string' },
+            description: { type: 'string' }
+          }
+        },
+        TypewriterStorytellerKeyCheckResponse: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            narrativeWordCount: { type: 'integer' },
+            checkIntervalWords: { type: 'integer' },
+            shouldCreate: { type: 'boolean' },
+            created: { type: 'boolean' },
+            createdStoryteller: { type: 'object', additionalProperties: true },
+            assignedStorytellerCount: { type: 'integer' },
+            nextThreshold: { type: 'integer', nullable: true },
+            slots: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterStorytellerSlot' }
+            }
+          }
         }
       }
     },
@@ -294,6 +530,67 @@ export function buildOpenApiSpec() {
             },
             '400': { description: 'Unknown routeKey.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
+        }),
+        post: op({
+          tags: ['Admin'],
+          summary: 'Save full route config version',
+          importance: 'Critical',
+          flow: 'Primary structured-output contract save path used by Story Admin.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [pathParam('routeKey', 'Configured route key.')],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    promptMode: { type: 'string', enum: ['manual', 'contract'] },
+                    promptTemplate: { type: 'string' },
+                    promptCore: { type: 'string' },
+                    responseSchema: { type: 'object', additionalProperties: true },
+                    fieldDocs: { type: 'object', additionalProperties: { type: 'string' } },
+                    examplePayload: { type: 'object', additionalProperties: true },
+                    outputRules: { type: 'array', items: { type: 'string' } },
+                    updatedBy: { type: 'string' },
+                    markLatest: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Structured route config version saved.', ...jsonResponse({ $ref: '#/components/schemas/LlmRouteConfig' }) },
+            '400': { description: 'Invalid request.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/llm-config/{routeKey}/versions': {
+        get: op({
+          tags: ['Admin'],
+          summary: 'List route config versions',
+          importance: 'High',
+          flow: 'Used by Story Admin to inspect structured-contract history before rollback.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [
+            pathParam('routeKey', 'Configured route key.'),
+            queryParam('limit', false, 'Maximum number of versions to return.')
+          ],
+          responses: {
+            '200': {
+              description: 'Version list returned.',
+              ...jsonResponse({
+                type: 'object',
+                properties: {
+                  routeKey: { type: 'string' },
+                  versions: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/LlmRouteConfig' }
+                  }
+                }
+              })
+            }
+          }
         })
       },
       '/api/admin/llm-config/{routeKey}/prompt': {
@@ -357,6 +654,34 @@ export function buildOpenApiSpec() {
           }
         })
       },
+      '/api/admin/llm-config/{routeKey}/latest': {
+        post: op({
+          tags: ['Admin'],
+          summary: 'Set latest route config version',
+          importance: 'High',
+          flow: 'Story Admin rollback control for structured-output contracts stored in Mongo.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [pathParam('routeKey', 'Configured route key.')],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    version: { type: 'number' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Selected version promoted to latest.', ...jsonResponse({ $ref: '#/components/schemas/LlmRouteConfig' }) },
+            '400': { description: 'Invalid request.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
       '/api/admin/llm-config/{routeKey}/reset': {
         post: op({
           tags: ['Admin'],
@@ -367,6 +692,495 @@ export function buildOpenApiSpec() {
           parameters: [pathParam('routeKey', 'Configured route key.')],
           responses: {
             '200': { description: 'Config reset.', ...jsonResponse({ $ref: '#/components/schemas/LlmRouteConfig' }) }
+          }
+        })
+      },
+      '/api/admin/openai/models': {
+        get: op({
+          tags: ['Admin'],
+          summary: 'List available admin-selectable models',
+          importance: 'High',
+          flow: 'Story Admin uses this to populate OpenAI/Anthropic model dropdowns for narrative pipelines.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [queryParam('forceRefresh', false, 'Refresh provider model caches before responding.')],
+          responses: {
+            '200': {
+              description: 'Model inventory returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterModelListResponse' })
+            },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/typewriter/ai-settings': {
+        get: op({
+          tags: ['Admin'],
+          summary: 'Load Story Admin runtime AI settings',
+          importance: 'Critical',
+          flow: 'Story Admin hydration for provider/model/mock defaults across story pipelines.',
+          security: [{ AdminApiKey: [] }],
+          responses: {
+            '200': {
+              description: 'Runtime AI settings returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterAiSettingsResponse' })
+            },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        }),
+        put: op({
+          tags: ['Admin'],
+          summary: 'Save Story Admin runtime AI settings',
+          importance: 'Critical',
+          flow: 'Admin control surface for toggling mock/live mode and choosing provider/model per story pipeline.',
+          security: [{ AdminApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    updatedBy: { type: 'string' },
+                    pipelines: {
+                      type: 'object',
+                      additionalProperties: {
+                        type: 'object',
+                        properties: {
+                          useMock: { type: 'boolean' },
+                          model: { type: 'string' },
+                          provider: { type: 'string', enum: ['openai', 'anthropic'] }
+                        },
+                        additionalProperties: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Updated runtime AI settings returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterAiSettingsResponse' })
+            },
+            '400': { description: 'Invalid pipeline key or payload.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/typewriter/ai-settings/reset': {
+        post: op({
+          tags: ['Admin'],
+          summary: 'Reset Story Admin runtime AI settings',
+          importance: 'High',
+          flow: 'Rollback path when experimental model/mock settings break story generation.',
+          security: [{ AdminApiKey: [] }],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    updatedBy: { type: 'string' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Default runtime AI settings returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterAiSettingsResponse' })
+            },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/typewriter/prompts': {
+        get: op({
+          tags: ['Admin'],
+          summary: 'Load latest Story Admin prompts',
+          importance: 'Critical',
+          flow: 'Story Admin hydration for prompt editors backed by Mongo latest-version selection.',
+          security: [{ AdminApiKey: [] }],
+          responses: {
+            '200': {
+              description: 'Latest prompt versions plus prompt metadata returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterPromptCollection' })
+            },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/typewriter/prompts/seed-current': {
+        post: op({
+          tags: ['Admin'],
+          summary: 'Seed in-code story prompts into Mongo',
+          importance: 'High',
+          flow: 'One-time bootstrap to capture current code prompts as versioned Mongo prompt templates.',
+          security: [{ AdminApiKey: [] }],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    updatedBy: { type: 'string' },
+                    overwrite: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Seed result returned.' },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/typewriter/prompts/{pipelineKey}': {
+        post: op({
+          tags: ['Admin'],
+          summary: 'Save a new prompt version for one story pipeline',
+          importance: 'Critical',
+          flow: 'Primary prompt-editing save path for Story Admin.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [pathParam('pipelineKey', 'Prompt pipeline key (for example storyteller_creation).')],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['promptTemplate'],
+                  properties: {
+                    promptTemplate: { type: 'string' },
+                    updatedBy: { type: 'string' },
+                    markLatest: { type: 'boolean' },
+                    meta: { type: 'object', additionalProperties: true }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '201': {
+              description: 'Prompt version saved.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterPromptVersion' })
+            },
+            '400': { description: 'Invalid pipeline or prompt template.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/typewriter/prompts/{pipelineKey}/versions': {
+        get: op({
+          tags: ['Admin'],
+          summary: 'List prompt versions for one story pipeline',
+          importance: 'High',
+          flow: 'Story Admin version picker used before promoting an older prompt to latest.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [
+            pathParam('pipelineKey', 'Prompt pipeline key.'),
+            queryParam('limit', false, 'Maximum number of versions to return.')
+          ],
+          responses: {
+            '200': {
+              description: 'Prompt version list returned.',
+              ...jsonResponse({
+                type: 'object',
+                properties: {
+                  pipelineKey: { type: 'string' },
+                  versions: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/TypewriterPromptVersion' }
+                  }
+                }
+              })
+            },
+            '400': { description: 'Invalid pipeline key.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/typewriter/prompts/{pipelineKey}/latest': {
+        post: op({
+          tags: ['Admin'],
+          summary: 'Promote an existing prompt version to latest',
+          importance: 'High',
+          flow: 'Story Admin rollback/selection control for Mongo-backed prompt versions.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [pathParam('pipelineKey', 'Prompt pipeline key.')],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    version: { type: 'integer' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Selected latest prompt version returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterPromptVersion' })
+            },
+            '400': { description: 'Invalid prompt version selection.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/shouldGenerateContinuation': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Check whether the typewriter should auto-generate continuation',
+          importance: 'High',
+          flow: 'Front-end pause detector uses this before calling the live continuation route.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['currentText', 'latestAddition', 'latestPauseSeconds', 'lastGhostwriterWordCount'],
+                  properties: {
+                    currentText: { type: 'string' },
+                    latestAddition: { type: 'string' },
+                    latestPauseSeconds: { type: 'number' },
+                    lastGhostwriterWordCount: { type: 'number' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Continuation heuristic result.',
+              ...jsonResponse({
+                type: 'object',
+                properties: {
+                  shouldGenerate: { type: 'boolean' }
+                }
+              })
+            }
+          }
+        })
+      },
+      '/api/typewriter/session/start': {
+        post: op({
+          tags: ['Sessions'],
+          summary: 'Create or hydrate a typewriter session',
+          importance: 'High',
+          flow: 'Used by Story Admin and the typewriter UI to bootstrap or seed a session fragment.',
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    sessionId: { type: 'string' },
+                    fragment: { type: 'string' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Session returned or created.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterSessionResponse' })
+            }
+          }
+        })
+      },
+      '/api/shouldCreateStorytellerKey': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Check whether the narrative should unlock a new storyteller key',
+          importance: 'High',
+          flow: 'Typewriter keyboard polls this after narrative word-count checkpoints to expand storyteller slots.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    playerId: { type: 'string' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Threshold check result and slot state returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterStorytellerKeyCheckResponse' })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/messenger/chat': {
+        get: op({
+          tags: ['Messenger'],
+          summary: 'Load messenger conversation history',
+          importance: 'High',
+          flow: 'Debug and hydration route for the eerie Society messenger UI.',
+          parameters: [
+            queryParam('sessionId', true, 'Messenger session identifier.'),
+            queryParam('sceneId', false, 'Optional messenger scene identifier. Defaults to "messanger".')
+          ],
+          responses: {
+            '200': {
+              description: 'Conversation history returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/MessengerConversationResponse' })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        }),
+        post: op({
+          tags: ['Messenger'],
+          summary: 'Send a messenger reply to the Society',
+          importance: 'Critical',
+          flow: 'Primary intake conversation for describing where the typewriter should be delivered and hidden.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId', 'message'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    message: { type: 'string' },
+                    sceneId: { type: 'string' },
+                    maxHistoryMessages: { type: 'integer', minimum: 4, maximum: 40 },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Assistant reply plus synchronized conversation state returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/MessengerSendResponse' })
+            },
+            '400': { description: 'Missing sessionId or message.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '502': { description: 'LLM/schema mismatch.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        }),
+        delete: op({
+          tags: ['Messenger'],
+          summary: 'Clear messenger conversation history',
+          importance: 'High',
+          flow: 'Debug reset route for restarting the messenger intake flow from a clean slate.',
+          parameters: [
+            queryParam('sessionId', true, 'Messenger session identifier.'),
+            queryParam('sceneId', false, 'Optional messenger scene identifier. Defaults to "messanger".')
+          ],
+          responses: {
+            '200': {
+              description: 'Conversation history deleted.',
+              ...jsonResponse({
+                type: 'object',
+                properties: {
+                  sessionId: { type: 'string' },
+                  sceneId: { type: 'string' },
+                  deletedCount: { type: 'integer', minimum: 0 }
+                }
+              })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/sendMessage': {
+        post: op({
+          tags: ['Messenger'],
+          summary: 'Legacy messenger alias',
+          importance: 'Medium',
+          flow: 'Backward-compatible alias for older messenger clients while the new UI uses /api/messenger/chat.',
+          deprecated: true,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId', 'message'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    message: { type: 'string' },
+                    sceneId: { type: 'string' },
+                    maxHistoryMessages: { type: 'integer', minimum: 4, maximum: 40 },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Assistant reply plus synchronized conversation state returned.',
+              ...jsonResponse({ $ref: '#/components/schemas/MessengerSendResponse' })
+            },
+            '400': { description: 'Missing sessionId or message.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '502': { description: 'LLM/schema mismatch.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/send_typewriter_text': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Generate typewriter continuation text',
+          importance: 'Critical',
+          flow: 'Core continuation route that turns the current typed fragment into the next narrative beat.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId', 'message'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    message: { type: 'string' },
+                    fadeTimingScale: { type: 'number' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Continuation payload returned.' },
+            '400': { description: 'Missing sessionId or message.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '502': { description: 'LLM continuation failed.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
@@ -929,8 +1743,6 @@ export function buildOpenApiSpec() {
                     sessionId: { type: 'string' },
                     playerId: { type: 'string' },
                     text: { type: 'string' },
-                    userText: { type: 'string' },
-                    fragment: { type: 'string' },
                     includeCards: { type: 'boolean' },
                     includeFront: { type: 'boolean' },
                     includeBack: { type: 'boolean' },
@@ -965,8 +1777,6 @@ export function buildOpenApiSpec() {
                     sessionId: { type: 'string' },
                     playerId: { type: 'string' },
                     text: { type: 'string' },
-                    userText: { type: 'string' },
-                    fragment: { type: 'string' },
                     count: { type: 'number' },
                     numberOfStorytellers: { type: 'number' },
                     generateKeyImages: { type: 'boolean' },
@@ -1003,8 +1813,6 @@ export function buildOpenApiSpec() {
                     sessionId: { type: 'string' },
                     playerId: { type: 'string' },
                     text: { type: 'string' },
-                    userText: { type: 'string' },
-                    fragment: { type: 'string' },
                     count: { type: 'number' },
                     numberOfMemories: { type: 'number' },
                     includeCards: { type: 'boolean' },

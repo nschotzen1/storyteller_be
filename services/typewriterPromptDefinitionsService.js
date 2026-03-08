@@ -47,6 +47,24 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/textToStoryteller persona generation',
     settingsKey: 'storyteller_creation'
   },
+  messenger_chat: {
+    key: 'messenger_chat',
+    label: 'Messenger chat',
+    description: '/api/messenger/chat assistant prompt',
+    settingsKey: 'messenger_chat'
+  },
+  storyteller_mission: {
+    key: 'storyteller_mission',
+    label: 'Storyteller mission',
+    description: '/api/sendStorytellerToEntity mission evaluation',
+    settingsKey: 'storyteller_mission'
+  },
+  relationship_evaluation: {
+    key: 'relationship_evaluation',
+    label: 'Relationship evaluation',
+    description: '/api/arena/relationships/* judgment prompt',
+    settingsKey: 'relationship_evaluation'
+  },
   storyteller_key_creation: {
     key: 'storyteller_key_creation',
     label: 'Storyteller key image',

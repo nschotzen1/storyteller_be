@@ -46,7 +46,7 @@ describe('Fragment memories API integration', () => {
       .send({
         sessionId,
         playerId,
-        fragment: 'The pass narrows and the wind stings like ground glass.',
+        text: 'The pass narrows and the wind stings like ground glass.',
         count: 3,
         debug: true
       })
@@ -81,7 +81,7 @@ describe('Fragment memories API integration', () => {
       .send({
         sessionId,
         playerId,
-        fragment: 'A frozen trail under moonlight where footsteps vanish in drifting ash.',
+        text: 'A frozen trail under moonlight where footsteps vanish in drifting ash.',
         count: 2,
         includeCards: true,
         includeFront: true,

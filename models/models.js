@@ -2,6 +2,7 @@ import fs from 'fs';
 import mongoose from 'mongoose';
 import fsPromises from 'fs/promises';
 import path from 'path';
+import { ensureMongoConnection } from '../services/mongoConnectionService.js';
 
 const chatMessageSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, index: true },
@@ -53,12 +54,9 @@ const SessionVectorSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-if (process.env.NODE_ENV !== 'test' && mongoose.connection.readyState === 0) {
-  const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/storytelling';
-  mongoose.connect(mongoUri).then(() => {
-    console.log("Connected to MongoDB.");
-  }).catch(err => {
-    console.error("MongoDB connection error:", err);
+if (process.env.NODE_ENV !== 'test') {
+  ensureMongoConnection({ allowFailure: true }).catch((error) => {
+    console.error('MongoDB connection error:', error);
   });
 }
 
@@ -140,6 +138,9 @@ const StorytellerSchema = new mongoose.Schema({
   keyImageUrl: { type: String },
   keyImageLocalUrl: { type: String },
   keyImageLocalPath: { type: String },
+  keyShape: { type: String },
+  keyBlankTextureUrl: { type: String },
+  keySlotIndex: { type: Number },
   status: { type: String, enum: ['active', 'in_mission'], default: 'active' },
   missions: {
     type: [
@@ -199,3 +200,23 @@ TypewriterPromptTemplateSchema.index({ pipelineKey: 1, version: 1 }, { unique: t
 TypewriterPromptTemplateSchema.index({ pipelineKey: 1, isLatest: 1 });
 
 export const TypewriterPromptTemplate = mongoose.model('TypewriterPromptTemplate', TypewriterPromptTemplateSchema);
+
+const LlmRouteConfigVersionSchema = new mongoose.Schema({
+  routeKey: { type: String, required: true, index: true },
+  version: { type: Number, required: true },
+  promptMode: { type: String, enum: ['manual', 'contract'], default: 'manual' },
+  promptTemplate: { type: String, default: '' },
+  promptCore: { type: String, default: '' },
+  responseSchema: { type: mongoose.Schema.Types.Mixed, default: {} },
+  fieldDocs: { type: mongoose.Schema.Types.Mixed, default: {} },
+  examplePayload: { type: mongoose.Schema.Types.Mixed, default: null },
+  outputRules: { type: [String], default: [] },
+  isLatest: { type: Boolean, default: true, index: true },
+  createdBy: { type: String, default: 'admin' },
+  meta: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { timestamps: true });
+
+LlmRouteConfigVersionSchema.index({ routeKey: 1, version: 1 }, { unique: true });
+LlmRouteConfigVersionSchema.index({ routeKey: 1, isLatest: 1 });
+
+export const LlmRouteConfigVersion = mongoose.model('LlmRouteConfigVersion', LlmRouteConfigVersionSchema);

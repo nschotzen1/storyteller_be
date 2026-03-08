@@ -2632,17 +2632,16 @@ Causality, Agency, Specificity
 so this is how it begins: may this story rise, and grow and prosper live to its destiny as a storytelling world!!
 "${existing_text}"`
 
-  const wordCount = existing_text ? existing_text.trim().split(/\s+/).length : 0;
-    let desired_length_min = parseInt(Math.max(3, wordCount / (1.61*1.61)));
-    desired_length_min = Math.max(3, desired_length_min); // Cap at 50
-    let desiredlength_max = parseInt(Math.max(3, wordCount / 1.61));
-    desiredlength_max = Math.max(80, desiredlength_max); // Cap at 50
-    const number_of_fades = 4;
+  const wordCount = existing_text ? existing_text.trim().split(/\s+/).filter(Boolean).length : 0;
+    const minWords = Math.max(5, parseInt(wordCount / (1.61 * 1.61), 10) || 0);
+    const maxWords = Math.max(80, parseInt(wordCount / 1.61, 10) || 0);
 
     const userContent = JSON.stringify({
-        existing_text,
-        desired_length_min,
-        desiredlength_max,
+        current_narrative: existing_text,
+        min_words: minWords,
+        max_words: maxWords,
+        word_count: wordCount,
+        preferred_font_size_px: 30,
     });
 
     return [

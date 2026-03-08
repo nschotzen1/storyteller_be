@@ -24,10 +24,13 @@ These focus on the important gameplay/worldbuilding/admin routes so the route su
 
 ## Admin LLM Config
 
-The backend now supports editable prompt templates and response schemas (JSON Schema) for key LLM-backed routes.
+The backend now supports versioned structured-output contracts for key LLM-backed routes.
 
 - List configs: `GET /api/admin/llm-config`
 - Get one route config: `GET /api/admin/llm-config/:routeKey`
+- Save full contract version: `POST /api/admin/llm-config/:routeKey`
+- List contract versions: `GET /api/admin/llm-config/:routeKey/versions`
+- Set latest contract version: `POST /api/admin/llm-config/:routeKey/latest`
 - Update prompt template: `PUT /api/admin/llm-config/:routeKey/prompt`
 - Update response schema: `PUT /api/admin/llm-config/:routeKey/schema`
 - Reset route config to defaults: `POST /api/admin/llm-config/:routeKey/reset`
@@ -43,7 +46,8 @@ Route config keys currently available:
 Persistence:
 
 - Defaults are in code (`services/llmRouteConfigService.js`)
-- Overrides are stored in `config/llm_route_overrides.json`
+- Versioned overrides are stored in Mongo (`LlmRouteConfigVersion`)
+- Each contract can store `promptMode`, `promptCore`, `responseSchema`, `fieldDocs`, `examplePayload`, and `outputRules`
 
 Optional admin auth:
 
@@ -54,7 +58,7 @@ Optional admin auth:
 
 - Most routes require `sessionId` and `playerId`.
 - `debug`, `mock`, or `mocked_api_calls` returns mocked outputs and skips external API calls.
-- `text`, `userText`, or `fragment` are accepted for text input.
+- Use `text` as the canonical input field for narrative/fragment payloads.
 
 ## Core Routes
 
@@ -77,7 +81,7 @@ Request body:
 ```
 
 Notes:
-- Use `text`, `userText`, or `fragment` for the input text (the route picks the first provided).
+- Use `text` for the input narrative.
 - `includeCards` defaults to `false`.
 - `includeFront` and `includeBack` default to `true` when cards are requested.
 - `debug`, `mock`, or `mocked_api_calls` returns mock entities/cards without external API calls.
@@ -270,7 +274,7 @@ Request body:
 {
   "sessionId": "demo-1",
   "playerId": "player-1",
-  "fragment": "It was getting dark, and the pass had no rail, only wet stone and wind.",
+  "text": "It was getting dark, and the pass had no rail, only wet stone and wind.",
   "count": 3,
   "includeCards": true,
   "includeFront": true,
@@ -281,7 +285,7 @@ Request body:
 
 Notes:
 - `sessionId` is required.
-- Use `text`, `userText`, or `fragment` for source text.
+- Use `text` for source narrative.
 - `count` (or `numberOfMemories`) defaults to `3` and is clamped to 1–10.
 - `includeCards` defaults to `false`.
 - `includeFront` and `includeBack` default to `true` when cards are requested.

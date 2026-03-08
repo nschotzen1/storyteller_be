@@ -8,12 +8,13 @@ import {
   generate_entities_by_fragment,
   getNArchetypes
 } from '../ai/openai/promptsUtils.js';
+import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
 
 const DEFAULT_ENTITY_COUNT = 4;
 const DEFAULT_MAX_ENTITIES = 8;
 
 function buildStoryContinuationPromptTemplate() {
-  return generateTypewriterPrompt('{{existing_text}}')?.[0]?.content || '';
+  return generateTypewriterPrompt('{{current_narrative}}')?.[0]?.content || '';
 }
 
 async function buildMemoryCreationPromptTemplate() {
@@ -177,25 +178,80 @@ async function buildStorytellerCreationPromptTemplate() {
   return routeConfig?.promptTemplate || '';
 }
 
+function buildMessengerChatPromptTemplate() {
+  return buildInitialChatPromptText();
+}
+
+async function buildStorytellerMissionPromptTemplate() {
+  const routeConfig = await getRouteConfig('storyteller_mission');
+  return routeConfig?.promptTemplate || '';
+}
+
+function buildRelationshipEvaluationPromptTemplate() {
+  return `You are a worldbuilding judge for a collaborative storytelling game.
+
+A player proposes a relationship between entities in an arena:
+- Source: {{source_json}}
+- Targets: {{targets_json}}
+- Proposed relationship: "{{relationship_surface_text}}"
+- Existing direct connections: {{existing_edges_json}}{{cluster_context_section}}
+
+Evaluate this relationship on:
+1. Type coherence (does it make sense for these entity types?)
+2. Specificity (is it descriptive, not vague?)
+3. Non-redundancy (is it different from existing edges?)
+4. Narrative grounding (does it feel plausible in this world?)
+5. Cluster coherence (does it fit with the broader network of relationships?)
+
+Return JSON:
+{
+  "verdict": "accepted" or "rejected",
+  "quality": { "score": 0-1, "confidence": 0-1, "reasons": ["..."] },
+  "suggestions": [{ "predicate": "...", "surfaceText": "..." }] // only if rejected
+}`;
+}
+
 function buildStorytellerKeyPromptTemplate() {
-  return `A rugged, aged typewriter key rendered as a masked PNG on transparent background. The key has a unique silhouette tailored to the symbol: a form echoing the essence of "{{symbol}}". The base material reflects the description: {{description}}, marked by time and purpose.
+  return `Create a single isolated storyteller typewriter key replacement asset as a PNG with transparent background.
 
-At its center is a symbolic feature: a representation of the "{{symbol}}" - whether carved, inlaid, or raised - reflecting the key's specific lore. The symbol is worn, oxidized, or subtly glowing, depending on its material origin and thematic tone.
+Context:
+- Storyteller: "{{storyteller_name}}"
+- Central icon: "{{symbol}}"
+- Material / lore cue: "{{description}}"
+- Target slot silhouette: "{{blank_shape}}"
+- Reference blank texture: "{{blank_texture_url}}"
+- Geometry hint: "{{shape_prompt_hint}}"
 
-Engraving: There is no letter - only the central symbol. Around it, suggest faint glyphs, radial etchings, or runes that feel ancient and tied to navigation, memory, or storytelling - unique to the symbol's theme.
+This asset will directly replace an existing blank key in the Storyteller typewriter UI.
 
-Texture: The surface is weathered and physical - with fine cracks, pitting, tarnish, or erosion consistent with {{description}}. The rim is uneven, softly chipped, with wear patterns showing heavy use.
+Non-negotiable output rules:
+- Match the target silhouette and proportions exactly. Do not invent a new outer key shape.
+- One key only, centered, front-facing, near-orthographic.
+- Fully transparent outside the key silhouette, with clean compositing-ready edges.
+- No hands, no typewriter body, no table, no scene, no extra objects.
+- No letters, no numbers, no readable words.
+- The key must still read as a physical typewriter key, not a coin, badge, medallion, seal, or machine button from some other device.
 
-Effect: Add a subtle ambient effect appropriate to the {{symbol}}: a glow, pulse, shimmer, or faint movement - hinting that the key responds to narrative actions, like pressing or storytelling alignment.
+Icon direction:
+- The icon should feel strange, ancient, and narratively charged: a sign that this storyteller wants to enter the unfolding world.
+- Integrate the icon into the face of the key as engraving, inlay, raised relief, lacquer fill, fissure, smoky glass insert, or another physical construction.
+- Keep the icon bold and legible at small UI size.
+- Prefer one strong central mark over many tiny details.
 
-Feel: The key evokes a distinct mood - solemn, mythic, mysterious, or sacred - in line with the described tone. It should feel like an artifact passed through generations of narrators.
+Material and wear:
+- Treat "{{description}}" as the main material and mood guide.
+- Use tactile wear only: tarnish, chipped enamel, rubbed edges, hairline cracks, oxidized metal, soot, ivory staining, obsidian fractures, dried ink residue.
+- Add one subtle sign of long use: a notch, scar, dent, or worn thumb-polish area.
 
-Storyteller Society Infusion:
-- Subtle sigil of the Storyteller Society (an eye, quill, and flame) integrated into the design - either hidden beneath the main symbol, faded into the rim, or reversed as a wax-stamp impression.
-- Optional runic ring around the edge with fragmented words or glyphs.
-- A mark or scar that shows the key's bond to narrative authority.
+Storyteller Society trace:
+- Hide a tiny eye-quill-flame sigil somewhere in the rim or face wear.
+- Optional faint unreadable radial marks are allowed, but they must never become readable text.
 
-Lighting should emphasize realism: catching brass tarnish, glass shimmer, or obsidian fractures. Shadows help isolate the symbol, while the overall look is that of a physical, analog artifact - part of a magical typewriter from a secret order of storytellers.`;
+Lighting:
+- Studio-isolated asset lighting, crisp silhouette separation, realistic highlights, restrained ambient magic.
+
+Goal:
+The final image should feel like a production-ready replacement texture for the blank slot: uncanny, analog, weathered, and immediately readable as "{{storyteller_name}}" entering the narrative.`;
 }
 
 function buildIllustrationPromptTemplate() {
@@ -249,7 +305,13 @@ export async function getCurrentTypewriterPromptTemplates() {
       pipelineKey: 'story_continuation',
       promptTemplate: buildStoryContinuationPromptTemplate(),
       source: 'ai/openai/promptsUtils.js:generateTypewriterPrompt',
-      variables: ['existing_text', 'desired_length_min', 'desiredlength_max', 'word_count']
+      variables: [
+        'current_narrative',
+        'min_words',
+        'max_words',
+        'word_count',
+        'preferred_font_size_px'
+      ]
     },
     memory_creation: {
       pipelineKey: 'memory_creation',
@@ -293,11 +355,52 @@ export async function getCurrentTypewriterPromptTemplates() {
       source: 'services/llmRouteConfigService.js:text_to_storyteller.promptTemplate',
       variables: ['fragmentText', 'storytellerCount']
     },
+    messenger_chat: {
+      pipelineKey: 'messenger_chat',
+      promptTemplate: buildMessengerChatPromptTemplate(),
+      source: 'ai/openai/personaChatPrompts.js:buildInitialChatPromptText',
+      variables: []
+    },
+    storyteller_mission: {
+      pipelineKey: 'storyteller_mission',
+      promptTemplate: await buildStorytellerMissionPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:storyteller_mission.promptTemplate',
+      variables: [
+        'storytellerName',
+        'entityName',
+        'entityType',
+        'entitySubtype',
+        'entityDescription',
+        'entityLore',
+        'storytellingPoints',
+        'message',
+        'durationDays'
+      ]
+    },
+    relationship_evaluation: {
+      pipelineKey: 'relationship_evaluation',
+      promptTemplate: buildRelationshipEvaluationPromptTemplate(),
+      source: 'services/arenaService.js:evaluateRelationship',
+      variables: [
+        'source_json',
+        'targets_json',
+        'relationship_surface_text',
+        'existing_edges_json',
+        'cluster_context_section'
+      ]
+    },
     storyteller_key_creation: {
       pipelineKey: 'storyteller_key_creation',
       promptTemplate: buildStorytellerKeyPromptTemplate(),
       source: 'services/storytellerService.js:createStoryTellerKey',
-      variables: ['symbol', 'description', 'storyteller_name']
+      variables: [
+        'symbol',
+        'description',
+        'storyteller_name',
+        'blank_shape',
+        'blank_texture_url',
+        'shape_prompt_hint'
+      ]
     },
     illustration_creation: {
       pipelineKey: 'illustration_creation',

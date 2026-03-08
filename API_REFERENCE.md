@@ -201,7 +201,7 @@ Generates memory flashes from a single fragment and saves them in MongoDB.
 {
   "sessionId": "demo-1",
   "playerId": "player-1",
-  "fragment": "It was getting dark and the pass narrowed into wet stone.",
+  "text": "It was getting dark and the pass narrowed into wet stone.",
   "count": 3
 }
 ```

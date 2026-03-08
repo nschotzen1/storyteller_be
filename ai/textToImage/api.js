@@ -128,7 +128,7 @@ export async function textToImageOpenAi(
           buildOpenAiImageRequest(selectedModel, prompt)
         );
 
-        const firstImage = response?.data?.[0];
+        const firstImage =  response?.data?.[0];
         if (!firstImage) {
           throw new Error('OpenAI image response did not include image data.');
         }

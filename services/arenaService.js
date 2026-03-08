@@ -1,4 +1,27 @@
-import { directExternalApiCall } from '../ai/openai/apiService.js';
+import { callJsonLlm } from '../ai/openai/apiService.js';
+import { renderPromptTemplateString } from './typewriterPromptConfigService.js';
+
+const DEFAULT_RELATIONSHIP_EVALUATION_PROMPT = `You are a worldbuilding judge for a collaborative storytelling game.
+
+A player proposes a relationship between entities in an arena:
+- Source: {{source_json}}
+- Targets: {{targets_json}}
+- Proposed relationship: "{{relationship_surface_text}}"
+- Existing direct connections: {{existing_edges_json}}{{cluster_context_section}}
+
+Evaluate this relationship on:
+1. Type coherence (does it make sense for these entity types?)
+2. Specificity (is it descriptive, not vague?)
+3. Non-redundancy (is it different from existing edges?)
+4. Narrative grounding (does it feel plausible in this world?)
+5. Cluster coherence (does it fit with the broader network of relationships?)
+
+Return JSON:
+{
+  "verdict": "accepted" or "rejected",
+  "quality": { "score": 0-1, "confidence": 0-1, "reasons": ["..."] },
+  "suggestions": [{ "predicate": "...", "surfaceText": "..." }] // only if rejected
+}`;
 
 /**
  * Normalizes a relationship string into a slug.
@@ -99,6 +122,8 @@ export function buildMockJudgment(source, targets, relationship, existingEdges) 
  * @param {boolean} shouldMock 
  * @param {string} clusterContext - Formatted cluster context string (optional)
  * @param {string} llmModel
+ * @param {string} llmProvider
+ * @param {string} promptTemplate
  * @returns {Promise<Object>}
  */
 export async function evaluateRelationship(
@@ -108,7 +133,9 @@ export async function evaluateRelationship(
     existingEdges,
     shouldMock,
     clusterContext = null,
-    llmModel = ''
+    llmModel = '',
+    llmProvider = 'openai',
+    promptTemplate = ''
 ) {
     if (shouldMock) {
         return buildMockJudgment(source, targets, relationship, existingEdges);
@@ -142,38 +169,27 @@ export async function evaluateRelationship(
         : '';
 
     // Real mode: use LLM for judgment
-    const prompt = `You are a worldbuilding judge for a collaborative storytelling game.
-
-A player proposes a relationship between entities in an arena:
-- Source: ${JSON.stringify(source)}
-- Targets: ${JSON.stringify(targets)}
-- Proposed relationship: "${relationship.surfaceText}"
-- Existing direct connections: ${JSON.stringify(existingEdges.slice(0, 5))}${clusterSection}
-
-Evaluate this relationship on:
-1. Type coherence (does it make sense for these entity types?)
-2. Specificity (is it descriptive, not vague?)
-3. Non-redundancy (is it different from existing edges?)
-4. Narrative grounding (does it feel plausible in this world?)
-5. Cluster coherence (does it fit with the broader network of relationships?)
-
-Return JSON:
-{
-  "verdict": "accepted" or "rejected",
-  "quality": { "score": 0-1, "confidence": 0-1, "reasons": ["..."] },
-  "suggestions": [{ "predicate": "...", "surfaceText": "..." }] // only if rejected
-}`;
+    const prompt = renderPromptTemplateString(
+        promptTemplate && promptTemplate.trim()
+            ? promptTemplate
+            : DEFAULT_RELATIONSHIP_EVALUATION_PROMPT,
+        {
+            source_json: JSON.stringify(source),
+            targets_json: JSON.stringify(targets),
+            relationship_surface_text: relationship?.surfaceText || '',
+            existing_edges_json: JSON.stringify(existingEdges.slice(0, 5)),
+            cluster_context_section: clusterSection
+        }
+    );
 
     try {
-        const result = await directExternalApiCall(
-            [{ role: 'system', content: prompt }],
-            800,
-            undefined,
-            undefined,
-            true,
-            true,
-            llmModel
-        );
+        const result = await callJsonLlm({
+            prompts: [{ role: 'system', content: prompt }],
+            provider: llmProvider,
+            model: llmModel,
+            max_tokens: 800,
+            explicitJsonObjectFormat: true
+        });
         return result || buildMockJudgment(source, targets, relationship, existingEdges);
     } catch (err) {
         console.error('Error in LLM relationship evaluation:', err);

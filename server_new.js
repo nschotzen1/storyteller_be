@@ -5,8 +5,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { BrewRoom } from './models/brewing_models.js';
-import { directExternalApiCall, listAvailableOpenAiModels } from './ai/openai/apiService.js';
-import { Storyteller, SessionPlayer, Arena, World, WorldElement, QuestScreenGraph } from './models/models.js';
+import {
+  callJsonLlm,
+  directExternalApiCall,
+  listAvailableAnthropicModels,
+  listAvailableOpenAiModels
+} from './ai/openai/apiService.js';
+import { ChatMessage, Storyteller, SessionPlayer, Arena, World, WorldElement, QuestScreenGraph } from './models/models.js';
 import {
   createStoryTellerKey,
   createStorytellerIllustration
@@ -32,8 +37,11 @@ import { buildOpenApiSpec } from './openapi.js';
 import {
   listRouteConfigs,
   getRouteConfig,
+  listRouteConfigVersions,
+  saveRouteConfigVersion,
   updateRoutePrompt,
   updateRouteSchema,
+  setLatestRouteConfig,
   resetRouteConfig,
   renderPrompt,
   validatePayloadForRoute
@@ -55,7 +63,18 @@ import {
   setLatestPromptTemplate,
   renderPromptTemplateString
 } from './services/typewriterPromptConfigService.js';
-import { seedCurrentTypewriterPromptTemplates } from './services/typewriterDefaultPromptSeedService.js';
+import {
+  getCurrentTypewriterPromptTemplates,
+  seedCurrentTypewriterPromptTemplates
+} from './services/typewriterDefaultPromptSeedService.js';
+import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefinitionsService.js';
+import { ensureMongoConnection } from './services/mongoConnectionService.js';
+import {
+  appendStoredMessengerMessage,
+  deleteStoredMessengerConversation,
+  findStoredMessengerMessage,
+  listStoredMessengerMessages
+} from './services/messengerConversationStore.js';
 import {
   getTypewriterSessionFragment,
   mergeTypewriterFragment,
@@ -124,6 +143,35 @@ const MOCK_STORYTELLER_KEY_URLS = [
   '/assets/mocks/storyteller_keys/veil_cartographer_key.png'
 ];
 const MOCK_STORYTELLER_ILLUSTRATION_URL = MOCK_STORYTELLER_ILLUSTRATION_URLS[0];
+const TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS = 5;
+const TYPEWRITER_STORYTELLER_WORD_THRESHOLDS = [30, 50, 100];
+const TYPEWRITER_STORYTELLER_KEY_SLOTS = [
+  {
+    slotIndex: 0,
+    slotKey: 'STORYTELLER_SLOT_HORIZONTAL',
+    keyShape: 'horizontal',
+    blankShape: 'wide horizontal storyteller key slot',
+    blankTextureUrl: '/textures/keys/blank_horizontal_1.png',
+    shapePromptHint: 'wide, low horizontal typewriter key face with a centered strange icon and comfortable edge margins'
+  },
+  {
+    slotIndex: 1,
+    slotKey: 'STORYTELLER_SLOT_VERTICAL',
+    keyShape: 'vertical',
+    blankShape: 'tall vertical storyteller key slot',
+    blankTextureUrl: '/textures/keys/blank_vertical_1.png',
+    shapePromptHint: 'tall narrow typewriter key face with a vertically balanced icon that reads clearly at small size'
+  },
+  {
+    slotIndex: 2,
+    slotKey: 'STORYTELLER_SLOT_RECT_HORIZONTAL',
+    keyShape: 'rect_horizontal',
+    blankShape: 'rectangular horizontal storyteller key slot',
+    blankTextureUrl: '/textures/keys/blank_rect_horizontal_1.png',
+    shapePromptHint: 'broad rectangular typewriter key face with a compact centered emblem and a grounded analog feel'
+  }
+];
+const TYPEWRITER_STORYTELLER_SLOT_INDICES = TYPEWRITER_STORYTELLER_KEY_SLOTS.map((slot) => slot.slotIndex);
 const OPEN_API_SPEC = buildOpenApiSpec();
 const TYPEWRITER_PAGE_IMAGES_SUBDIR = 'typewriter_page_images';
 const TYPEWRITER_ALLOWED_PAGE_IMAGE_EXTENSIONS = new Set(['.png']);
@@ -132,11 +180,19 @@ const TYPEWRITER_DEFAULT_SERVER_BACKGROUNDS = [
   '/assets/mocks/memory_cards/memory_front_02.png',
   '/assets/mocks/memory_cards/memory_front_03.png'
 ];
+const DEFAULT_MESSENGER_SCENE_ID = 'messanger';
+const DEFAULT_MESSENGER_HISTORY_LIMIT = 14;
+const MESSENGER_INITIAL_MESSAGE =
+  'We are pleased to inform you that the typewriter, as discussed, is ready for dispatch. The Society spares no expense in ensuring that our esteemed members receive only the finest instruments for their craft. We trust you are still expecting it? Of course you are. Just a quick confirmation before we proceed. Where shall we send it?';
 const TYPEWRITER_DEFAULT_FONTS = [
   { font: "'Uncial Antiqua', serif", font_size: '1.8rem', font_color: '#3b1d15' },
   { font: "'IM Fell English SC', serif", font_size: '1.9rem', font_color: '#2a120f' },
   { font: "'EB Garamond', serif", font_size: '2rem', font_color: '#1f0e08' }
 ];
+const TYPEWRITER_MIN_FONT_SIZE_PX = 28;
+const TYPEWRITER_MIN_FONT_SIZE_REM = 1.75;
+const TYPEWRITER_DEFAULT_FONT_SIZE = '1.9rem';
+const TYPEWRITER_PREFERRED_FONT_SIZE_PX = 30;
 const DEFAULT_QUEST_CONFIG = {
   sessionId: DEFAULT_QUEST_SESSION_ID,
   questId: DEFAULT_QUEST_ID,
@@ -432,28 +488,46 @@ async function getAiPipelineSettings(pipelineKey) {
   return getPipelineSettingsSnapshot(settings, pipelineKey);
 }
 
-function buildTypewriterPromptPayload(existingText = '') {
-  const wordCount = existingText ? existingText.trim().split(/\s+/).filter(Boolean).length : 0;
-  const desired_length_min = parseInt(Math.max(3, wordCount / (1.61 * 1.61)), 10);
-  const desiredlength_max = parseInt(Math.max(80, wordCount / 1.61), 10);
+function countWords(text = '') {
+  if (typeof text !== 'string') return 0;
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function clampValue(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function computeTypewriterWordBounds(wordCount = 0) {
+  const safeWordCount = Math.max(0, Number(wordCount) || 0);
+  const minWords = Math.max(5, parseInt(safeWordCount / (1.61 * 1.61), 10) || 0);
+  const maxWords = Math.min(80, parseInt(safeWordCount / 1.61, 10) || 0);
+  return { minWords, maxWords };
+}
+
+function buildTypewriterPromptPayload(currentNarrative = '') {
+  const wordCount = countWords(currentNarrative);
+  const { minWords, maxWords } = computeTypewriterWordBounds(wordCount);
   return {
-    existing_text: existingText,
-    desired_length_min,
-    desiredlength_max
+    current_narrative: currentNarrative,
+    min_words: minWords,
+    max_words: maxWords,
+    word_count: wordCount,
+    preferred_font_size_px: TYPEWRITER_PREFERRED_FONT_SIZE_PX
   };
 }
 
-function buildTypewriterPromptMessages(existingText, promptTemplate) {
+function buildTypewriterPromptMessages(currentNarrative, promptTemplate) {
   if (!promptTemplate || !promptTemplate.trim()) {
-    return generateTypewriterPrompt(existingText);
+    return generateTypewriterPrompt(currentNarrative);
   }
 
-  const payload = buildTypewriterPromptPayload(existingText);
+  const payload = buildTypewriterPromptPayload(currentNarrative);
   const renderedPrompt = renderPromptTemplateString(promptTemplate, {
-    existing_text: existingText,
-    desired_length_min: payload.desired_length_min,
-    desiredlength_max: payload.desiredlength_max,
-    word_count: existingText ? existingText.trim().split(/\s+/).filter(Boolean).length : 0
+    current_narrative: payload.current_narrative,
+    min_words: payload.min_words,
+    max_words: payload.max_words,
+    word_count: payload.word_count,
+    preferred_font_size_px: payload.preferred_font_size_px
   });
 
   return [
@@ -474,6 +548,36 @@ function buildAbsoluteAssetUrl(req, assetPath) {
   return `${req.protocol}://${req.get('host')}${normalized}`;
 }
 
+function normalizeTypewriterFontSize(fontSize) {
+  if (typeof fontSize === 'number' && Number.isFinite(fontSize)) {
+    return `${Math.max(TYPEWRITER_MIN_FONT_SIZE_PX, fontSize)}px`;
+  }
+
+  if (typeof fontSize === 'string') {
+    const trimmed = fontSize.trim();
+    if (!trimmed) return TYPEWRITER_DEFAULT_FONT_SIZE;
+
+    const pxMatch = trimmed.match(/^([0-9]*\.?[0-9]+)\s*px$/i);
+    if (pxMatch) {
+      const value = Math.max(TYPEWRITER_MIN_FONT_SIZE_PX, Number(pxMatch[1]));
+      return `${Number(value.toFixed(2))}px`;
+    }
+
+    const remMatch = trimmed.match(/^([0-9]*\.?[0-9]+)\s*rem$/i);
+    if (remMatch) {
+      const value = Math.max(TYPEWRITER_MIN_FONT_SIZE_REM, Number(remMatch[1]));
+      return `${Number(value.toFixed(2))}rem`;
+    }
+
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric)) {
+      return `${Math.max(TYPEWRITER_MIN_FONT_SIZE_PX, numeric)}px`;
+    }
+  }
+
+  return TYPEWRITER_DEFAULT_FONT_SIZE;
+}
+
 function normalizeTypewriterMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return null;
   const font = metadata.font || metadata.fontName || metadata.font_family || metadata.fontFamily;
@@ -482,15 +586,128 @@ function normalizeTypewriterMetadata(metadata) {
   if (!font && !fontSize && !fontColor) return null;
   return {
     font: font || pickRandomItem(TYPEWRITER_DEFAULT_FONTS).font,
-    font_size: typeof fontSize === 'number' ? `${fontSize}px` : (fontSize || '1.9rem'),
+    font_size: normalizeTypewriterFontSize(fontSize),
     font_color: fontColor || '#2a120f'
   };
 }
 
-function createTypewriterResponse(fullText, metadata, fadeSteps = 3) {
+function toFiniteNumber(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function sanitizeTimingScale(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return 1;
+  return clampValue(numericValue, 0.35, 5);
+}
+
+function computeFadeTimingProfile(narrativeWordCount, fadeSteps = 3, options = {}) {
+  const normalizedWordCount = Math.max(0, Number(narrativeWordCount) || 0);
+  const timingScale = sanitizeTimingScale(options.timingScale);
+  const lengthRatio = clampValue(normalizedWordCount / 260, 0, 1);
+  const brevityFactor = normalizedWordCount <= 6
+    ? 0.72
+    : normalizedWordCount <= 14
+      ? 0.86
+      : 1;
+  const firstPauseDelay = Math.round((4200 + (9000 - 4200) * lengthRatio) * timingScale * brevityFactor);
+  const phasePauseDelay = Math.round((1900 + (4200 - 1900) * lengthRatio) * timingScale * brevityFactor);
+  const finalPauseDelay = Math.round((1300 + (2900 - 1300) * lengthRatio) * timingScale * brevityFactor);
+  const fadePhaseDelay = Math.round((2800 + (7200 - 2800) * lengthRatio) * timingScale * brevityFactor);
+  const safeFadeSteps = Math.max(1, Number(fadeSteps) || 1);
+  const intermediatePauseCount = Math.max(0, safeFadeSteps - 1);
+  const estimatedTotalDurationMs =
+    firstPauseDelay +
+    (intermediatePauseCount * phasePauseDelay) +
+    finalPauseDelay +
+    ((safeFadeSteps + 1) * fadePhaseDelay);
+
+  return {
+    narrative_word_count: normalizedWordCount,
+    fade_steps: safeFadeSteps,
+    first_pause_delay: firstPauseDelay,
+    phase_pause_delay: phasePauseDelay,
+    final_pause_delay: finalPauseDelay,
+    fade_interval_ms: fadePhaseDelay,
+    fade_phase_delay: fadePhaseDelay,
+    estimated_total_duration_ms: estimatedTotalDurationMs,
+    timing_scale: timingScale
+  };
+}
+
+function computeFadeStepCount(narrativeWordCount) {
+  const normalizedWordCount = Math.max(0, Number(narrativeWordCount) || 0);
+  if (normalizedWordCount <= 6) return 2;
+  if (normalizedWordCount <= 40) return 3;
+  return 4;
+}
+
+function normalizeContinuationInsights(rawInsights, continuation, fallbackStyle) {
+  const source = rawInsights && typeof rawInsights === 'object' ? rawInsights : {};
+  const meaning = Array.isArray(source.meaning)
+    ? source.meaning.map((line) => (typeof line === 'string' ? line.trim() : '')).filter(Boolean)
+    : [];
+  const contextualStrengthening = typeof source.contextual_strengthening === 'string'
+    ? source.contextual_strengthening.trim()
+    : '';
+  const continuationWordCount = toFiniteNumber(source.continuation_word_count) ?? countWords(continuation);
+  const pointsPool = toFiniteNumber(source.current_storytelling_points_pool);
+  const pointsEarned = toFiniteNumber(source.points_earned);
+  const rawEntities = Array.isArray(source.Entities)
+    ? source.Entities
+    : Array.isArray(source.entities)
+      ? source.entities
+      : [];
+  const entities = rawEntities
+    .map((entity) => {
+      if (!entity || typeof entity !== 'object') return null;
+      const entity_name = typeof entity.entity_name === 'string' ? entity.entity_name.trim() : '';
+      const ner_category = typeof entity.ner_category === 'string' ? entity.ner_category.trim() : '';
+      const ascope_pmesii = typeof entity.ascope_pmesii === 'string' ? entity.ascope_pmesii.trim() : '';
+      const storytelling_points = toFiniteNumber(entity.storytelling_points);
+      const reuse = typeof entity.reuse === 'boolean' ? entity.reuse : null;
+      if (!entity_name && !ner_category && !ascope_pmesii && storytelling_points === null && reuse === null) {
+        return null;
+      }
+      return {
+        entity_name,
+        ner_category,
+        ascope_pmesii,
+        storytelling_points,
+        reuse
+      };
+    })
+    .filter(Boolean);
+  const style = normalizeTypewriterMetadata(source.style || source.metadata || fallbackStyle);
+
+  return {
+    meaning,
+    contextual_strengthening: contextualStrengthening,
+    continuation_word_count: continuationWordCount,
+    current_storytelling_points_pool: pointsPool,
+    points_earned: pointsEarned,
+    Entities: entities,
+    style
+  };
+}
+
+function createTypewriterResponse(fullText, metadata, fadeSteps = null, options = {}) {
   const style = normalizeTypewriterMetadata(metadata) || pickRandomItem(TYPEWRITER_DEFAULT_FONTS);
   const narrative = typeof fullText === 'string' ? fullText.trim() : '';
   const safeNarrative = narrative || 'The wind caught the page and held its breath.';
+  const requestedWordCount = toFiniteNumber(options.narrativeWordCount);
+  const fadeTimingScale = sanitizeTimingScale(options.fadeTimingScale);
+  const resolvedNarrativeWordCount = requestedWordCount !== null ? requestedWordCount : countWords(safeNarrative);
+  const explicitFadeSteps = toFiniteNumber(fadeSteps);
+  const resolvedFadeSteps = explicitFadeSteps !== null && explicitFadeSteps > 0
+    ? Math.floor(explicitFadeSteps)
+    : computeFadeStepCount(resolvedNarrativeWordCount);
+  const fadeTiming = computeFadeTimingProfile(
+    resolvedNarrativeWordCount,
+    resolvedFadeSteps,
+    { timingScale: fadeTimingScale }
+  );
 
   const writing_sequence = [
     { action: 'type', text: safeNarrative, style, delay: 0 },
@@ -498,23 +715,32 @@ function createTypewriterResponse(fullText, metadata, fadeSteps = 3) {
   ];
 
   const fade_sequence = [];
-  const fadeDelay = Math.floor(14000 / (fadeSteps + 1));
-  for (let i = 0; i < fadeSteps; i += 1) {
-    const cutoff = Math.round(safeNarrative.length * (1 - (i + 1) / (fadeSteps + 1)));
-    fade_sequence.push({ action: 'pause', delay: i === 0 ? 2200 : 1000 });
+  for (let i = 0; i < fadeTiming.fade_steps; i += 1) {
+    const cutoff = Math.round(safeNarrative.length * (1 - (i + 1) / (fadeTiming.fade_steps + 1)));
+    fade_sequence.push({
+      action: 'pause',
+      delay: i === 0 ? fadeTiming.first_pause_delay : fadeTiming.phase_pause_delay
+    });
     fade_sequence.push({
       action: 'fade',
       phase: i + 1,
       to_text: safeNarrative.slice(0, cutoff).trim(),
       style,
-      delay: fadeDelay
+      delay: fadeTiming.fade_phase_delay
     });
   }
-  fade_sequence.push({ action: 'pause', delay: 900 });
-  fade_sequence.push({ action: 'fade', phase: fadeSteps + 1, to_text: '', style, delay: fadeDelay });
+  fade_sequence.push({ action: 'pause', delay: fadeTiming.final_pause_delay });
+  fade_sequence.push({
+    action: 'fade',
+    phase: fadeTiming.fade_steps + 1,
+    to_text: '',
+    style,
+    delay: fadeTiming.fade_phase_delay
+  });
 
   return {
     metadata: style,
+    timing: fadeTiming,
     writing_sequence,
     fade_sequence,
     sequence: [...writing_sequence, ...fade_sequence]
@@ -522,11 +748,322 @@ function createTypewriterResponse(fullText, metadata, fadeSteps = 3) {
 }
 
 function buildMockContinuation(message) {
-  const words = String(message || '').trim().split(/\s+/).filter(Boolean).length;
+  const words = countWords(message);
   if (words <= 5) return 'while a lantern blinked once in the ravine wind.';
   if (words <= 12) return 'and the trail answered with bells buried under ash.';
   return 'as the pass fell quiet and every footstep sounded borrowed.';
 }
+
+async function resolveMessengerPersistenceMode() {
+  const hasMongo = await ensureMongoConnection({ allowFailure: true });
+  return hasMongo ? 'mongo' : 'file';
+}
+
+function normalizeMessengerSceneId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_MESSENGER_SCENE_ID;
+}
+
+function normalizeMessengerHistoryLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_MESSENGER_HISTORY_LIMIT;
+  }
+  return Math.max(4, Math.min(40, Math.floor(parsed)));
+}
+
+function toMessengerMessagePayload(doc) {
+  return {
+    id: String(doc?._id || ''),
+    order: Number(doc?.order) || 0,
+    type: typeof doc?.type === 'string' ? doc.type : 'response',
+    sender: typeof doc?.sender === 'string' ? doc.sender : 'system',
+    text: typeof doc?.content === 'string' ? doc.content : '',
+    hasChatEnded: Boolean(doc?.has_chat_ended),
+    createdAt: doc?.createdAt || null
+  };
+}
+
+async function ensureMessengerIntroMessage(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID, persistence = 'mongo') {
+  if (persistence === 'mongo') {
+    const existing = await ChatMessage.findOne({ sessionId, sceneId, type: 'initial' }).sort({ order: 1 });
+    if (existing) {
+      return existing;
+    }
+
+    return ChatMessage.create({
+      sessionId,
+      sceneId,
+      order: Date.now(),
+      sender: 'system',
+      content: MESSENGER_INITIAL_MESSAGE,
+      type: 'initial',
+      has_chat_ended: false
+    });
+  }
+
+  const existing = await findStoredMessengerMessage(sessionId, sceneId, (message) => message.type === 'initial');
+  if (existing) {
+    return existing;
+  }
+
+  return appendStoredMessengerMessage(sessionId, sceneId, {
+    order: Date.now(),
+    sender: 'system',
+    content: MESSENGER_INITIAL_MESSAGE,
+    type: 'initial',
+    has_chat_ended: false
+  });
+}
+
+async function loadMessengerHistoryDocs(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID, persistence = 'mongo') {
+  if (persistence === 'mongo') {
+    return ChatMessage.find({ sessionId, sceneId }).sort({ order: 1, createdAt: 1 });
+  }
+  return listStoredMessengerMessages(sessionId, sceneId);
+}
+
+async function createMessengerMessage(sessionId, sceneId, doc, persistence = 'mongo') {
+  if (persistence === 'mongo') {
+    return ChatMessage.create({
+      sessionId,
+      sceneId,
+      ...doc
+    });
+  }
+  return appendStoredMessengerMessage(sessionId, sceneId, doc);
+}
+
+async function deleteMessengerConversation(sessionId, sceneId, persistence = 'mongo') {
+  if (persistence === 'mongo') {
+    return ChatMessage.deleteMany({ sessionId, sceneId });
+  }
+  const deletedCount = await deleteStoredMessengerConversation(sessionId, sceneId);
+  return { deletedCount };
+}
+
+function buildMessengerPromptMessages(historyDocs, promptTemplate, maxHistoryMessages = DEFAULT_MESSENGER_HISTORY_LIMIT) {
+  const safePrompt = typeof promptTemplate === 'string' && promptTemplate.trim()
+    ? promptTemplate.trim()
+    : 'You are a strange but professional courier for the Storyteller Society. Return JSON only.';
+  const safeLimit = normalizeMessengerHistoryLimit(maxHistoryMessages);
+  const formattedHistory = (Array.isArray(historyDocs) ? historyDocs : []).map((doc) => ({
+    role: doc?.sender === 'user' ? 'user' : 'assistant',
+    content: typeof doc?.content === 'string' ? doc.content : ''
+  }));
+
+  if (formattedHistory.length <= safeLimit + 1) {
+    return [{ role: 'system', content: safePrompt }, ...formattedHistory];
+  }
+
+  const [initialMessage, ...rest] = formattedHistory;
+  return [{ role: 'system', content: safePrompt }, initialMessage, ...rest.slice(-safeLimit)];
+}
+
+function buildMockMessengerResponse(message, historyDocs = []) {
+  const normalizedMessage = typeof message === 'string' ? message.trim() : '';
+  const lowerMessage = normalizedMessage.toLowerCase();
+  const priorUserTurns = (Array.isArray(historyDocs) ? historyDocs : []).filter((entry) => entry?.sender === 'user').length;
+  const mentionsLocation = /(window|bay|attic|apartment|room|woods|forest|desert|plateau|harbor|house|flat|studio|tower|lane|street|road|courtyard|monastery|pass|cellar|basement)/i.test(normalizedMessage);
+  const mentionsHiding = /(hide|hiding|closet|cupboard|cabinet|wardrobe|locker|crate|cellar|under|beneath|false wall|safe|chest|trunk|crawlspace)/i.test(normalizedMessage);
+  const shouldEnd = (mentionsLocation && mentionsHiding) || priorUserTurns >= 2;
+
+  if (shouldEnd) {
+    return {
+      has_chat_ended: true,
+      message_assistant:
+        'Splendid. That will do very nicely. I have noted the room, the atmosphere, and the discreet means by which the machine may disappear should the need arise. The Society shall make its arrangements, and if anyone asks, we were never here.'
+    };
+  }
+
+  if (mentionsLocation || priorUserTurns >= 1) {
+    return {
+      has_chat_ended: false,
+      message_assistant:
+        'Excellent. We are beginning to see the room properly now. One final practical matter: if the typewriter had to vanish at short notice, where exactly would you conceal it, and what in that place would keep it safe from idle hands?'
+    };
+  }
+
+  if (/address|send|deliver|dispatch|ship|post/i.test(lowerMessage)) {
+    return {
+      has_chat_ended: false,
+      message_assistant:
+        'Quite. But an address alone is such a blunt instrument. We require the atmosphere as well: the table, the light, the weather at the window, the noises in the corridor, and the sort of room in which the keys will learn your habits.'
+    };
+  }
+
+  return {
+    has_chat_ended: false,
+    message_assistant:
+      'Yes, yes, but where will it actually live once it reaches you? We need the physical truth of it: the room, the surface, the view, the air, and any nearby place in which a very precious typewriter might be hidden without remark.'
+  };
+}
+
+async function buildMessengerConversationPayload(
+  sessionId,
+  sceneId = DEFAULT_MESSENGER_SCENE_ID,
+  persistence = 'mongo'
+) {
+  await ensureMessengerIntroMessage(sessionId, sceneId, persistence);
+  const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId, persistence);
+  const messages = historyDocs.map(toMessengerMessagePayload);
+  return {
+    sessionId,
+    sceneId,
+    count: messages.length,
+    hasChatEnded: messages.some((message) => message.hasChatEnded),
+    messages,
+    storage: persistence
+  };
+}
+
+async function handleMessengerChatPost(req, res) {
+  try {
+    const body = req.body || {};
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+    const sceneId = normalizeMessengerSceneId(body.sceneId);
+
+    if (!sessionId || !message) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or message.' });
+    }
+
+    const persistence = await resolveMessengerPersistenceMode();
+    await ensureMessengerIntroMessage(sessionId, sceneId, persistence);
+
+    const baseOrder = Date.now();
+    await createMessengerMessage(sessionId, sceneId, {
+      order: baseOrder,
+      sender: 'user',
+      content: message,
+      type: 'user',
+      has_chat_ended: false
+    }, persistence);
+
+    const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId, persistence);
+    const messengerPipeline = await getAiPipelineSettings('messenger_chat');
+    const messengerProvider = typeof messengerPipeline?.provider === 'string'
+      ? messengerPipeline.provider
+      : 'openai';
+    const shouldMock = resolveMockMode(body, messengerPipeline.useMock);
+
+    let aiResponse;
+    if (shouldMock) {
+      aiResponse = buildMockMessengerResponse(message, historyDocs);
+    } else {
+      const promptDoc = await getLatestPromptTemplate('messenger_chat');
+      const routeConfig = await getRouteConfig('messenger_chat');
+      const promptTemplate = promptDoc?.promptTemplate || routeConfig?.promptTemplate || '';
+      aiResponse = await callJsonLlm({
+        prompts: buildMessengerPromptMessages(historyDocs, promptTemplate, body.maxHistoryMessages),
+        provider: messengerProvider,
+        model: messengerPipeline.model || '',
+        max_tokens: 1200,
+        explicitJsonObjectFormat: true
+      });
+    }
+
+    if (!aiResponse || typeof aiResponse !== 'object') {
+      return res.status(502).json({
+        message: 'Messenger generation failed.',
+        runtime: {
+          pipeline: 'messenger_chat',
+          provider: messengerProvider,
+          model: messengerPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    await validatePayloadForRoute('messenger_chat', aiResponse);
+
+    const reply = typeof aiResponse.message_assistant === 'string' ? aiResponse.message_assistant.trim() : '';
+    const hasChatEnded = Boolean(aiResponse.has_chat_ended);
+    if (!reply) {
+      return res.status(502).json({
+        message: 'Messenger generation returned an empty reply.',
+        runtime: {
+          pipeline: 'messenger_chat',
+          provider: messengerProvider,
+          model: messengerPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    await createMessengerMessage(sessionId, sceneId, {
+      order: baseOrder + 1,
+      sender: 'system',
+      content: reply,
+      type: 'response',
+      has_chat_ended: hasChatEnded
+    }, persistence);
+
+    const conversation = await buildMessengerConversationPayload(sessionId, sceneId, persistence);
+    return res.status(200).json({
+      ...conversation,
+      reply,
+      has_chat_ended: hasChatEnded,
+      mocked: shouldMock,
+      runtime: {
+        pipeline: 'messenger_chat',
+        provider: messengerProvider,
+        model: messengerPipeline.model || '',
+        mocked: shouldMock,
+        storage: persistence
+      }
+    });
+  } catch (error) {
+    if (error.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
+      return res.status(502).json({
+        message: resolveSchemaErrorMessage(error, 'Messenger chat schema validation failed.')
+      });
+    }
+    console.error('Error in POST /api/messenger/chat:', error);
+    return res.status(500).json({ message: 'Server error during messenger chat.' });
+  }
+}
+
+app.get('/api/messenger/chat', async (req, res) => {
+  try {
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
+    const sceneId = normalizeMessengerSceneId(req.query?.sceneId);
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const persistence = await resolveMessengerPersistenceMode();
+    const conversation = await buildMessengerConversationPayload(sessionId, sceneId, persistence);
+    return res.status(200).json(conversation);
+  } catch (error) {
+    console.error('Error in GET /api/messenger/chat:', error);
+    return res.status(500).json({ message: 'Server error while loading messenger chat.' });
+  }
+});
+
+app.post('/api/messenger/chat', handleMessengerChatPost);
+app.post('/api/sendMessage', handleMessengerChatPost);
+
+app.delete('/api/messenger/chat', async (req, res) => {
+  try {
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
+    const sceneId = normalizeMessengerSceneId(req.query?.sceneId);
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const persistence = await resolveMessengerPersistenceMode();
+    const deletion = await deleteMessengerConversation(sessionId, sceneId, persistence);
+    return res.status(200).json({
+      sessionId,
+      sceneId,
+      deletedCount: deletion?.deletedCount || 0,
+      storage: persistence
+    });
+  } catch (error) {
+    console.error('Error in DELETE /api/messenger/chat:', error);
+    return res.status(500).json({ message: 'Server error while clearing messenger chat.' });
+  }
+});
 
 app.post('/api/next_film_image', async (req, res) => {
   try {
@@ -567,20 +1104,35 @@ app.post('/api/shouldGenerateContinuation', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const wordCount = latestAddition.trim().split(/\s+/).filter(Boolean).length;
+    const wordCount = countWords(latestAddition);
     const goldenThreshold = Math.max(minWords, Math.floor((lastGhostwriterWordCount || 1) / goldenRatio));
     if (wordCount < goldenThreshold) {
       return res.status(200).json({ shouldGenerate: false });
     }
 
-    const totalLength = currentText.trim().split(/\s+/).filter(Boolean).length;
-    const basePause = 1.8;
-    const scaleFactor = Math.min(3, totalLength * 0.05);
-    const additionFactor = Math.min(1.5, wordCount * 0.2);
-    const randomness = Math.random() * 0.7 - 0.3;
-    const requiredPause = basePause + scaleFactor + additionFactor + randomness;
+    const totalLength = countWords(currentText);
+    const additionChars = String(latestAddition || '').trim().length;
 
-    return res.status(200).json({ shouldGenerate: latestPauseSeconds > requiredPause });
+    const hardMinimumPauseSeconds = 4.2;
+    if (latestPauseSeconds < hardMinimumPauseSeconds) {
+      return res.status(200).json({ shouldGenerate: false });
+    }
+
+    // Keep continuation from interrupting likely writing sprees.
+    if (wordCount >= 8 && latestPauseSeconds < 6.8) {
+      return res.status(200).json({ shouldGenerate: false });
+    }
+    if (wordCount >= 14 && latestPauseSeconds < 8.6) {
+      return res.status(200).json({ shouldGenerate: false });
+    }
+
+    const basePause = 5.4;
+    const narrativeFactor = clampValue(totalLength * 0.018, 0, 3.5);
+    const additionFactor = clampValue(wordCount * 0.11, 0, 2.2);
+    const densityFactor = clampValue(additionChars / 120, 0, 1.2);
+    const requiredPause = basePause + narrativeFactor + additionFactor + densityFactor;
+
+    return res.status(200).json({ shouldGenerate: latestPauseSeconds >= requiredPause });
   } catch (error) {
     console.error('Error in /api/shouldGenerateContinuation:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -602,29 +1154,97 @@ app.post('/api/typewriter/session/start', async (req, res) => {
   }
 });
 
+app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const { sessionId, playerId } = body;
+    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    await startTypewriterSession(sessionId);
+    const fragmentText = await getTypewriterSessionFragment(sessionId);
+    const narrativeWordCount = countWords(fragmentText);
+    const assignedStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
+    const nextAvailableSlot = findNextAvailableTypewriterStorytellerSlot(assignedStorytellers);
+    const currentAssignedCount = assignedStorytellers.length;
+    const currentThreshold = getTypewriterStorytellerThreshold(currentAssignedCount);
+    const shouldCreate = Boolean(nextAvailableSlot && currentThreshold !== null && narrativeWordCount >= currentThreshold);
+
+    let createdStoryteller = null;
+    if (shouldCreate && nextAvailableSlot) {
+      createdStoryteller = await generateTypewriterStorytellerForSlot({
+        sessionId,
+        playerId: resolvedPlayerId,
+        fragmentText,
+        slotDefinition: nextAvailableSlot,
+        req,
+        body
+      });
+    }
+
+    const storytellers = createdStoryteller
+      ? await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId)
+      : assignedStorytellers;
+    const filledCount = storytellers.length;
+    const nextThreshold = getTypewriterStorytellerThreshold(filledCount);
+
+    return res.status(200).json({
+      sessionId,
+      narrativeWordCount,
+      checkIntervalWords: TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS,
+      shouldCreate,
+      created: Boolean(createdStoryteller),
+      createdStoryteller: createdStoryteller ? buildStorytellerListItem(createdStoryteller) : null,
+      assignedStorytellerCount: filledCount,
+      nextThreshold,
+      slots: buildTypewriterStorytellerSlots(storytellers)
+    });
+  } catch (error) {
+    console.error('Error in /api/shouldCreateStorytellerKey:', error);
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      message: statusCode === 500 ? 'Server error during storyteller key creation check.' : error.message
+    });
+  }
+});
+
 app.post('/api/send_typewriter_text', async (req, res) => {
   try {
     const { sessionId, message } = req.body || {};
     if (!sessionId || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ error: 'Missing sessionId or message' });
     }
+    const requestedFadeTimingScale = toFiniteNumber(req.body?.fadeTimingScale);
 
     await startTypewriterSession(sessionId);
 
     const continuationPipeline = await getAiPipelineSettings('story_continuation');
+    const continuationProvider = typeof continuationPipeline?.provider === 'string'
+      ? continuationPipeline.provider
+      : 'openai';
     const shouldMock = resolveMockMode(req.body, continuationPipeline.useMock);
     if (shouldMock) {
       const mockMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
       const continuation = buildMockContinuation(message);
       const nextFragment = mergeTypewriterFragment(message, continuation);
+      const narrativeWordCount = countWords(message);
+      const continuationInsights = normalizeContinuationInsights({}, continuation, mockMetadata);
       await saveTypewriterSessionFragment(sessionId, nextFragment);
       return res.status(200).json({
-        ...createTypewriterResponse(continuation, mockMetadata, 3),
+        ...createTypewriterResponse(continuation, mockMetadata, null, {
+          narrativeWordCount,
+          fadeTimingScale: requestedFadeTimingScale
+        }),
+        continuation_insights: continuationInsights,
         sessionId,
         fragment: nextFragment,
         mocked: true,
         runtime: {
           pipeline: 'story_continuation',
+          provider: continuationProvider,
           model: continuationPipeline.model || '',
           mocked: true
         }
@@ -634,15 +1254,13 @@ app.post('/api/send_typewriter_text', async (req, res) => {
     try {
       const continuationPromptDoc = await getLatestPromptTemplate('story_continuation');
       const prompt = buildTypewriterPromptMessages(message, continuationPromptDoc?.promptTemplate || '');
-      const aiResponse = await directExternalApiCall(
-        prompt,
-        2500,
-        undefined,
-        undefined,
-        true,
-        true,
-        continuationPipeline.model
-      );
+      const aiResponse = await callJsonLlm({
+        prompts: prompt,
+        provider: continuationProvider,
+        model: continuationPipeline.model || '',
+        max_tokens: 2500,
+        explicitJsonObjectFormat: true
+      });
       const continuation = typeof aiResponse?.continuation === 'string' && aiResponse.continuation.trim()
         ? aiResponse.continuation.trim()
         : '';
@@ -651,6 +1269,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
           error: 'Live typewriter continuation did not return valid content.',
           runtime: {
             pipeline: 'story_continuation',
+            provider: continuationProvider,
             model: continuationPipeline.model || '',
             mocked: false
           }
@@ -660,16 +1279,23 @@ app.post('/api/send_typewriter_text', async (req, res) => {
         || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
         || TYPEWRITER_DEFAULT_FONTS[0];
       const nextFragment = mergeTypewriterFragment(message, continuation);
+      const narrativeWordCount = countWords(message);
+      const continuationInsights = normalizeContinuationInsights(aiResponse, continuation, metadata);
 
       await saveTypewriterSessionFragment(sessionId, nextFragment);
 
       return res.status(200).json({
-        ...createTypewriterResponse(continuation, metadata, 3),
+        ...createTypewriterResponse(continuation, metadata, null, {
+          narrativeWordCount,
+          fadeTimingScale: requestedFadeTimingScale
+        }),
+        continuation_insights: continuationInsights,
         sessionId,
         fragment: nextFragment,
         mocked: false,
         runtime: {
           pipeline: 'story_continuation',
+          provider: continuationProvider,
           model: continuationPipeline.model || '',
           mocked: false
         }
@@ -681,6 +1307,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
         details: aiError?.message || 'Unknown error',
         runtime: {
           pipeline: 'story_continuation',
+          provider: continuationProvider,
           model: continuationPipeline.model || '',
           mocked: false
         }
@@ -739,6 +1366,10 @@ const MOCK_STORYTELLER = {
   fragmentText: `it was getting dark. they have been going for almost 6 hours, no stop. none! she thought to herself. their morning began waking up at one of the empty halls in  the desolate monastery. it was the first nights in many, that they slept under any sort of roof, she much preferred ll the stern, straight pines. the empty halls made her shiver. she was so happy when they went back on the trail, up, climbing up, along the ravine, where the Yuradel was flowing to the Baruuya bay, like a glittering silver line. yes, they climbed up. to the pass. where they would finally reach the plateau. and maybe there the last monastery would still stand, and won't be desolate. where they finally might learn what happened, and what is to be expected.`,
   immediate_ghost_appearance:
     'A faint shimmer condenses into a travel-worn figure: wind-scoured cloak, pale hands stained with ink, edges of the body translucent like smoke in cold air.',
+  typewriter_key: {
+    symbol: 'ravine eye',
+    description: 'A weathered brass key veined with smoky lacquer and a dim silver gleam.'
+  },
   voice_creation: {
     style: 'measured',
     voice: 'low, smoky, almost whispered',
@@ -748,6 +1379,8 @@ const MOCK_STORYTELLER = {
     'Ashen Cantos',
     'Voyager Myths'
   ],
+  known_universes: ['Yuradel Pass', 'The Last Plateau'],
+  level: 9,
   illustration: MOCK_STORYTELLER_ILLUSTRATION_URL
 };
 
@@ -791,7 +1424,7 @@ function sanitizeRoomForPublic(room) {
 }
 
 function getFragmentText(body) {
-  return body?.text || body?.userText || body?.fragment || '';
+  return typeof body?.text === 'string' ? body.text : '';
 }
 
 function normalizeOptionalPlayerId(value) {
@@ -837,9 +1470,197 @@ function firstDefinedString(...values) {
   return '';
 }
 
+function getTypewriterStorytellerThreshold(activeCount = 0) {
+  if (!Number.isInteger(activeCount) || activeCount < 0) {
+    return null;
+  }
+  return TYPEWRITER_STORYTELLER_WORD_THRESHOLDS[activeCount] ?? null;
+}
+
+function buildTypewriterStorytellerKeyPayload(typewriterKey, slotDefinition) {
+  const safeTypewriterKey = typewriterKey && typeof typewriterKey === 'object' ? typewriterKey : {};
+  return {
+    ...safeTypewriterKey,
+    symbol: firstDefinedString(safeTypewriterKey.symbol) || 'ink sigil',
+    description:
+      firstDefinedString(safeTypewriterKey.description) || 'A weathered key carrying a strange narrative charge.',
+    key_shape: slotDefinition.keyShape,
+    blank_shape: slotDefinition.blankShape,
+    blank_texture_url: slotDefinition.blankTextureUrl,
+    shape_prompt_hint: slotDefinition.shapePromptHint
+  };
+}
+
+function getTypewriterStorytellerSlotDefinition(slotIndex) {
+  return TYPEWRITER_STORYTELLER_KEY_SLOTS.find((slot) => slot.slotIndex === slotIndex) || null;
+}
+
+function buildTypewriterStorytellerSlotState(slotDefinition, storyteller = null) {
+  const keyImageUrl = firstDefinedString(storyteller?.keyImageLocalUrl, storyteller?.keyImageUrl);
+  return {
+    slotIndex: slotDefinition.slotIndex,
+    slotKey: slotDefinition.slotKey,
+    keyShape: slotDefinition.keyShape,
+    blankTextureUrl: slotDefinition.blankTextureUrl,
+    blankShape: slotDefinition.blankShape,
+    filled: Boolean(storyteller && keyImageUrl),
+    storytellerId: storyteller?._id || '',
+    storytellerName: storyteller?.name || '',
+    keyImageUrl,
+    symbol: firstDefinedString(storyteller?.typewriter_key?.symbol),
+    description: firstDefinedString(storyteller?.typewriter_key?.description)
+  };
+}
+
+function buildTypewriterStorytellerSlots(storytellers = []) {
+  const storytellerBySlot = new Map();
+  for (const storyteller of storytellers) {
+    if (!Number.isInteger(storyteller?.keySlotIndex)) continue;
+    if (!TYPEWRITER_STORYTELLER_SLOT_INDICES.includes(storyteller.keySlotIndex)) continue;
+    if (!storytellerBySlot.has(storyteller.keySlotIndex)) {
+      storytellerBySlot.set(storyteller.keySlotIndex, storyteller);
+    }
+  }
+  return TYPEWRITER_STORYTELLER_KEY_SLOTS.map((slotDefinition) =>
+    buildTypewriterStorytellerSlotState(slotDefinition, storytellerBySlot.get(slotDefinition.slotIndex) || null)
+  );
+}
+
+function findNextAvailableTypewriterStorytellerSlot(storytellers = []) {
+  const assignedSlots = new Set(
+    storytellers
+      .map((storyteller) => storyteller?.keySlotIndex)
+      .filter((slotIndex) => Number.isInteger(slotIndex) && TYPEWRITER_STORYTELLER_SLOT_INDICES.includes(slotIndex))
+  );
+  return TYPEWRITER_STORYTELLER_KEY_SLOTS.find((slotDefinition) => !assignedSlots.has(slotDefinition.slotIndex)) || null;
+}
+
+async function listTypewriterSlotStorytellers(sessionId, playerId = '') {
+  if (!sessionId) return [];
+  return Storyteller.find(
+    applyOptionalPlayerId(
+      {
+        session_id: sessionId,
+        keySlotIndex: { $in: TYPEWRITER_STORYTELLER_SLOT_INDICES }
+      },
+      playerId
+    )
+  )
+    .sort({ keySlotIndex: 1, createdAt: 1 })
+    .exec();
+}
+
+async function generateTypewriterStorytellerForSlot({
+  sessionId,
+  playerId,
+  fragmentText,
+  slotDefinition,
+  req,
+  body = {}
+}) {
+  const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
+  const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
+  const storytellerProvider = typeof storytellerPipeline?.provider === 'string' ? storytellerPipeline.provider : 'openai';
+  const storytellerPromptDoc = await getLatestPromptTemplate('storyteller_creation');
+  const shouldMockStorytellers = resolveMockMode(body, storytellerPipeline.useMock);
+
+  let storytellerDataArray;
+  if (shouldMockStorytellers) {
+    storytellerDataArray = buildMockStorytellers(1, fragmentText);
+  } else {
+    let prompt = '';
+    if (storytellerPromptDoc?.promptTemplate) {
+      prompt = renderPromptTemplateString(storytellerPromptDoc.promptTemplate, {
+        fragmentText,
+        storytellerCount: 1
+      });
+    } else {
+      const routeConfig = await getRouteConfig('text_to_storyteller');
+      prompt = renderPrompt(routeConfig.promptTemplate, {
+        fragmentText,
+        storytellerCount: 1
+      });
+    }
+    storytellerDataArray = await callJsonLlm({
+      prompts: [{ role: 'system', content: prompt }],
+      provider: storytellerProvider,
+      model: storytellerPipeline.model || '',
+      max_tokens: 2500,
+      explicitJsonObjectFormat: true
+    });
+  }
+
+  const normalizedStorytellers = Array.isArray(storytellerDataArray)
+    ? storytellerDataArray
+    : Array.isArray(storytellerDataArray?.storytellers)
+      ? storytellerDataArray.storytellers
+      : [];
+  if (!normalizedStorytellers.length) {
+    const error = new Error('Storyteller generation failed.');
+    error.statusCode = 502;
+    throw error;
+  }
+
+  await validatePayloadForRoute('text_to_storyteller', { storytellers: normalizedStorytellers });
+
+  const storytellerData = normalizedStorytellers[0];
+  const payload = {
+    session_id: sessionId,
+    sessionId,
+    fragmentText,
+    ...storytellerData
+  };
+  if (playerId) {
+    payload.playerId = playerId;
+  }
+  payload.typewriter_key = buildTypewriterStorytellerKeyPayload(payload.typewriter_key, slotDefinition);
+  payload.keyShape = slotDefinition.keyShape;
+  payload.keyBlankTextureUrl = slotDefinition.blankTextureUrl;
+  payload.keySlotIndex = slotDefinition.slotIndex;
+
+  if (shouldMockStorytellers) {
+    payload.keyImageUrl = pickMockStorytellerKeyUrl(slotDefinition.slotIndex);
+    payload.keyImageLocalUrl = payload.keyImageUrl;
+    payload.keyImageLocalPath = '';
+  } else {
+    const keyImageResult = await createStoryTellerKey(
+      payload.typewriter_key,
+      sessionId,
+      payload.name,
+      false,
+      illustrationPipeline.model,
+      ''
+    );
+    if (!keyImageResult?.imageUrl && !keyImageResult?.localPath) {
+      const error = new Error('Storyteller key image generation failed.');
+      error.statusCode = 502;
+      throw error;
+    }
+    const localUrl = keyImageResult?.localPath
+      ? `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_keys/${path.basename(keyImageResult.localPath)}`
+      : '';
+    payload.keyImageUrl = keyImageResult?.imageUrl || localUrl;
+    payload.keyImageLocalUrl = localUrl || payload.keyImageUrl;
+    payload.keyImageLocalPath = keyImageResult?.localPath || '';
+  }
+
+  return Storyteller.findOneAndUpdate(
+    applyOptionalPlayerId(
+      {
+        session_id: sessionId,
+        keySlotIndex: slotDefinition.slotIndex
+      },
+      playerId
+    ),
+    payload,
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+}
+
 function buildStorytellerListItem(storyteller) {
   const illustration = firstDefinedString(storyteller?.illustration);
   const keyImageUrl = firstDefinedString(storyteller?.keyImageUrl);
+  const slotDefinition = getTypewriterStorytellerSlotDefinition(storyteller?.keySlotIndex);
   return {
     id: storyteller._id,
     name: storyteller.name,
@@ -848,6 +1669,13 @@ function buildStorytellerListItem(storyteller) {
     illustration,
     keyImageUrl,
     iconUrl: keyImageUrl || illustration,
+    keyShape: firstDefinedString(storyteller?.keyShape, storyteller?.typewriter_key?.key_shape),
+    keySlotIndex: Number.isInteger(storyteller?.keySlotIndex) ? storyteller.keySlotIndex : null,
+    keyBlankTextureUrl: firstDefinedString(
+      storyteller?.keyBlankTextureUrl,
+      storyteller?.typewriter_key?.blank_texture_url,
+      slotDefinition?.blankTextureUrl
+    ),
     lastMission: buildLastMissionSummary(storyteller)
   };
 }
@@ -1463,8 +2291,17 @@ app.get('/api/admin/openai/models', requireAdmin, async (req, res) => {
   try {
     const forceRefresh = parseBooleanFlag(req.query?.forceRefresh) === true
       || parseBooleanFlag(req.query?.refresh) === true;
-    const modelsPayload = await listAvailableOpenAiModels({ forceRefresh });
-    return res.status(200).json(modelsPayload);
+    const [openAiModelsPayload, anthropicModelsPayload] = await Promise.all([
+      listAvailableOpenAiModels({ forceRefresh }),
+      listAvailableAnthropicModels({ forceRefresh })
+    ]);
+    return res.status(200).json({
+      ...openAiModelsPayload,
+      providers: {
+        openai: openAiModelsPayload,
+        anthropic: anthropicModelsPayload
+      }
+    });
   } catch (error) {
     console.error('Error in GET /api/admin/openai/models:', error);
     return res.status(500).json({ message: 'Server error while loading OpenAI models.' });
@@ -1474,7 +2311,31 @@ app.get('/api/admin/openai/models', requireAdmin, async (req, res) => {
 app.get('/api/admin/typewriter/prompts', requireAdmin, async (req, res) => {
   try {
     const latest = await listLatestPromptTemplates();
-    return res.status(200).json(latest);
+    const currentTemplates = await getCurrentTypewriterPromptTemplates();
+    const mergedPipelines = {};
+
+    for (const [pipelineKey, definition] of Object.entries(currentTemplates)) {
+      mergedPipelines[pipelineKey] = latest?.pipelines?.[pipelineKey] || {
+        id: '',
+        pipelineKey,
+        version: 0,
+        promptTemplate: definition.promptTemplate,
+        isLatest: true,
+        createdBy: 'code-default',
+        createdAt: '',
+        updatedAt: '',
+        meta: {
+          source: definition.source,
+          variables: definition.variables,
+          fallbackFromCode: true
+        }
+      };
+    }
+
+    return res.status(200).json({
+      pipelines: mergedPipelines,
+      pipelinesMeta: getTypewriterPromptDefinitions()
+    });
   } catch (error) {
     console.error('Error in GET /api/admin/typewriter/prompts:', error);
     return res.status(500).json({ message: 'Server error while loading typewriter prompts.' });
@@ -1499,6 +2360,32 @@ app.get('/api/admin/typewriter/prompts/:pipelineKey/versions', requireAdmin, asy
   try {
     const { pipelineKey } = req.params;
     const versions = await listPromptTemplateVersions(pipelineKey, req.query?.limit);
+    if (versions.length === 0) {
+      const currentTemplates = await getCurrentTypewriterPromptTemplates();
+      const fallback = currentTemplates?.[pipelineKey];
+      if (fallback) {
+        return res.status(200).json({
+          pipelineKey,
+          versions: [
+            {
+              id: '',
+              pipelineKey,
+              version: 0,
+              promptTemplate: fallback.promptTemplate,
+              isLatest: true,
+              createdBy: 'code-default',
+              createdAt: '',
+              updatedAt: '',
+              meta: {
+                source: fallback.source,
+                variables: fallback.variables,
+                fallbackFromCode: true
+              }
+            }
+          ]
+        });
+      }
+    }
     return res.status(200).json({ pipelineKey, versions });
   } catch (error) {
     if (error.code === 'INVALID_PIPELINE_KEY') {
@@ -1575,6 +2462,66 @@ app.get('/api/admin/llm-config/:routeKey', requireAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/admin/llm-config/:routeKey/versions', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const { limit = 20 } = req.query || {};
+    const versions = await listRouteConfigVersions(routeKey, limit);
+    return res.status(200).json({
+      routeKey,
+      versions
+    });
+  } catch (error) {
+    if (error.code === 'INVALID_ROUTE_KEY') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in GET /api/admin/llm-config/:routeKey/versions:', error);
+    return res.status(500).json({ message: 'Server error while listing route config versions.' });
+  }
+});
+
+app.post('/api/admin/llm-config/:routeKey', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const {
+      promptMode,
+      promptTemplate,
+      promptCore,
+      responseSchema,
+      fieldDocs,
+      examplePayload,
+      outputRules,
+      updatedBy,
+      markLatest
+    } = req.body || {};
+
+    const config = await saveRouteConfigVersion(routeKey, {
+      promptMode,
+      promptTemplate,
+      promptCore,
+      responseSchema,
+      fieldDocs,
+      examplePayload,
+      outputRules,
+      meta: { updatedBy: updatedBy || 'admin' }
+    }, updatedBy || 'admin', {
+      markLatest: markLatest === undefined ? true : Boolean(markLatest)
+    });
+    return res.status(200).json(config);
+  } catch (error) {
+    if (
+      error.code === 'INVALID_ROUTE_KEY'
+      || error.code === 'INVALID_PROMPT_TEMPLATE'
+      || error.code === 'INVALID_RESPONSE_SCHEMA'
+      || error.code === 'INVALID_EXAMPLE_PAYLOAD'
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/admin/llm-config/:routeKey:', error);
+    return res.status(500).json({ message: 'Server error while saving route config version.' });
+  }
+});
+
 app.put('/api/admin/llm-config/:routeKey/prompt', requireAdmin, async (req, res) => {
   try {
     const { routeKey } = req.params;
@@ -1605,10 +2552,30 @@ app.put('/api/admin/llm-config/:routeKey/schema', requireAdmin, async (req, res)
   }
 });
 
+app.post('/api/admin/llm-config/:routeKey/latest', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const { id, version } = req.body || {};
+    const config = await setLatestRouteConfig(routeKey, { id, version });
+    return res.status(200).json(config);
+  } catch (error) {
+    if (
+      error.code === 'INVALID_ROUTE_KEY'
+      || error.code === 'INVALID_ROUTE_SELECTION'
+      || error.code === 'ROUTE_CONFIG_VERSION_NOT_FOUND'
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/admin/llm-config/:routeKey/latest:', error);
+    return res.status(500).json({ message: 'Server error while selecting latest route config.' });
+  }
+});
+
 app.post('/api/admin/llm-config/:routeKey/reset', requireAdmin, async (req, res) => {
   try {
     const { routeKey } = req.params;
-    const config = await resetRouteConfig(routeKey);
+    const { updatedBy } = req.body || {};
+    const config = await resetRouteConfig(routeKey, updatedBy || 'admin');
     return res.status(200).json(config);
   } catch (error) {
     if (error.code === 'INVALID_ROUTE_KEY') {
@@ -2116,6 +3083,7 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
     ].filter(Boolean).join('\n');
 
     const entityPipeline = await getAiPipelineSettings('entity_creation');
+    const entityProvider = typeof entityPipeline?.provider === 'string' ? entityPipeline.provider : 'openai';
     const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
     const shouldMock = resolveMockMode(body, entityPipeline.useMock);
     const subEntityResult = await textToEntityFromText({
@@ -2125,6 +3093,7 @@ app.post('/api/entities/:id/refresh', async (req, res) => {
       includeCards: false,
       debug: shouldMock,
       llmModel: entityPipeline.model,
+      llmProvider: entityProvider,
       entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
       mainEntityId: entity.externalId || String(entity._id),
       isSubEntity: true
@@ -2169,9 +3138,6 @@ app.post('/api/textToEntity', async (req, res) => {
       playerId,
       count,
       numberOfEntities,
-      text,
-      userText,
-      fragment,
       includeCards,
       includeFront,
       includeBack,
@@ -2190,6 +3156,8 @@ app.post('/api/textToEntity', async (req, res) => {
 
     const entityPipeline = await getAiPipelineSettings('entity_creation');
     const texturePipeline = await getAiPipelineSettings('texture_creation');
+    const entityProvider = typeof entityPipeline?.provider === 'string' ? entityPipeline.provider : 'openai';
+    const textureProvider = typeof texturePipeline?.provider === 'string' ? texturePipeline.provider : 'openai';
     const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
     const entityFrontPromptDoc = await getLatestPromptTemplate('entity_card_front');
     const texturePromptDoc = await getLatestPromptTemplate('texture_creation');
@@ -2209,6 +3177,7 @@ app.post('/api/textToEntity', async (req, res) => {
       includeBack: includeBack === undefined ? true : Boolean(includeBack),
       debug: shouldMockEntities,
       llmModel: entityPipeline.model,
+      llmProvider: entityProvider,
       textureModel: texturePipeline.model,
       mockTextures: shouldMockTextures,
       entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
@@ -2229,11 +3198,13 @@ app.post('/api/textToEntity', async (req, res) => {
       runtime: {
         generation: {
           pipeline: 'entity_creation',
+          provider: entityProvider,
           model: entityPipeline.model || '',
           mocked: shouldMockEntities
         },
         textures: {
           pipeline: 'texture_creation',
+          provider: textureProvider,
           model: texturePipeline.model || '',
           mocked: shouldMockTextures
         }
@@ -2280,6 +3251,8 @@ app.post('/api/textToStoryteller', async (req, res) => {
     const shouldGenerateKeyImages = generateKeyImages === undefined ? true : Boolean(generateKeyImages);
     const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
     const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
+    const storytellerProvider = typeof storytellerPipeline?.provider === 'string' ? storytellerPipeline.provider : 'openai';
+    const illustrationProvider = typeof illustrationPipeline?.provider === 'string' ? illustrationPipeline.provider : 'openai';
     const storytellerCount = normalizeStorytellerCount(
       count ?? numberOfStorytellers ?? storytellerPipeline.storytellerCount
     );
@@ -2306,15 +3279,13 @@ app.post('/api/textToStoryteller', async (req, res) => {
           storytellerCount
         });
       }
-      storytellerDataArray = await directExternalApiCall(
-        [{ role: 'system', content: prompt }],
-        2500,
-        undefined,
-        undefined,
-        true,
-        true,
-        storytellerPipeline.model
-      );
+      storytellerDataArray = await callJsonLlm({
+        prompts: [{ role: 'system', content: prompt }],
+        provider: storytellerProvider,
+        model: storytellerPipeline.model || '',
+        max_tokens: 2500,
+        explicitJsonObjectFormat: true
+      });
     }
 
     const normalizedStorytellers = Array.isArray(storytellerDataArray)
@@ -2449,11 +3420,13 @@ app.post('/api/textToStoryteller', async (req, res) => {
       runtime: {
         generation: {
           pipeline: 'storyteller_creation',
+          provider: storytellerProvider,
           model: storytellerPipeline.model || '',
           mocked: shouldMockStorytellers
         },
         illustrations: {
           pipeline: 'illustration_creation',
+          provider: illustrationProvider,
           model: illustrationPipeline.model || '',
           mocked: shouldMockIllustrations
         }
@@ -2517,10 +3490,15 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
     }
     storytellerDocIdForReset = storyteller._id;
 
-    const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
+    const storytellerMissionPipeline = await getAiPipelineSettings('storyteller_mission');
     const entityPipeline = await getAiPipelineSettings('entity_creation');
+    const storytellerProvider = typeof storytellerMissionPipeline?.provider === 'string'
+      ? storytellerMissionPipeline.provider
+      : 'openai';
+    const entityProvider = typeof entityPipeline?.provider === 'string' ? entityPipeline.provider : 'openai';
     const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
-    const shouldMockMission = resolveMockMode(body, storytellerPipeline.useMock);
+    const storytellerMissionPromptDoc = await getLatestPromptTemplate('storyteller_mission');
+    const shouldMockMission = resolveMockMode(body, storytellerMissionPipeline.useMock);
     const shouldMockSubEntities = resolveMockMode(body, entityPipeline.useMock);
     const durationDays = Number.isFinite(Number(duration)) ? Number(duration) : undefined;
 
@@ -2539,27 +3517,40 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
         subEntitySeed: `New sub-entities emerge around ${entity.name}: a revealing clue, a minor witness, and a tangible relic tied to the mission.`
       };
     } else {
-      const routeConfig = await getRouteConfig('storyteller_mission');
-      const prompt = renderPrompt(routeConfig.promptTemplate, {
-        storytellerName: storyteller?.name || '',
-        entityName: entity?.name || '',
-        entityType: entity?.type || entity?.ner_type || 'ENTITY',
-        entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
-        entityDescription: entity?.description || '',
-        entityLore: entity?.lore || '',
-        storytellingPoints,
-        message,
-        durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
+      let prompt = '';
+      if (storytellerMissionPromptDoc?.promptTemplate) {
+        prompt = renderPromptTemplateString(storytellerMissionPromptDoc.promptTemplate, {
+          storytellerName: storyteller?.name || '',
+          entityName: entity?.name || '',
+          entityType: entity?.type || entity?.ner_type || 'ENTITY',
+          entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
+          entityDescription: entity?.description || '',
+          entityLore: entity?.lore || '',
+          storytellingPoints,
+          message,
+          durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
+        });
+      } else {
+        const routeConfig = await getRouteConfig('storyteller_mission');
+        prompt = renderPrompt(routeConfig.promptTemplate, {
+          storytellerName: storyteller?.name || '',
+          entityName: entity?.name || '',
+          entityType: entity?.type || entity?.ner_type || 'ENTITY',
+          entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
+          entityDescription: entity?.description || '',
+          entityLore: entity?.lore || '',
+          storytellingPoints,
+          message,
+          durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
+        });
+      }
+      missionResult = await callJsonLlm({
+        prompts: [{ role: 'system', content: prompt }],
+        provider: storytellerProvider,
+        model: storytellerMissionPipeline.model || '',
+        max_tokens: 1200,
+        explicitJsonObjectFormat: true
       });
-      missionResult = await directExternalApiCall(
-        [{ role: 'system', content: prompt }],
-        1200,
-        undefined,
-        undefined,
-        true,
-        true,
-        storytellerPipeline.model
-      );
     }
 
     await validatePayloadForRoute('storyteller_mission', missionResult);
@@ -2576,6 +3567,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       includeCards: false,
       debug: shouldMockSubEntities,
       llmModel: entityPipeline.model,
+      llmProvider: entityProvider,
       entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
       mainEntityId: entity.externalId || String(entity._id),
       isSubEntity: true
@@ -2631,12 +3623,14 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       subEntities: savedSubEntities,
       runtime: {
         mission: {
-          pipeline: 'storyteller_creation',
-          model: storytellerPipeline.model || '',
+          pipeline: 'storyteller_mission',
+          provider: storytellerProvider,
+          model: storytellerMissionPipeline.model || '',
           mocked: shouldMockMission
         },
         subEntities: {
           pipeline: 'entity_creation',
+          provider: entityProvider,
           model: entityPipeline.model || '',
           mocked: shouldMockSubEntities
         }
@@ -2685,6 +3679,10 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       fastValidate: Boolean(relationship?.fastValidate || options?.fastValidate)
     };
     const relationshipPipeline = await getAiPipelineSettings('relationship_evaluation');
+    const relationshipProvider = typeof relationshipPipeline?.provider === 'string'
+      ? relationshipPipeline.provider
+      : 'openai';
+    const relationshipPromptDoc = await getLatestPromptTemplate('relationship_evaluation');
 
     // Validate required parameters
     if (!sessionId || !playerId) {
@@ -2755,7 +3753,9 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       existingEdges,
       shouldMock,
       clusterContext,
-      relationshipPipeline.model
+      relationshipPipeline.model,
+      relationshipProvider,
+      relationshipPromptDoc?.promptTemplate || ''
     );
 
     // Handle rejection
@@ -2768,6 +3768,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
         mocked: shouldMock,
         runtime: {
           pipeline: 'relationship_evaluation',
+          provider: relationshipProvider,
           model: relationshipPipeline.model || '',
           mocked: shouldMock
         }
@@ -2788,6 +3789,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
         mocked: shouldMock,
         runtime: {
           pipeline: 'relationship_evaluation',
+          provider: relationshipProvider,
           model: relationshipPipeline.model || '',
           mocked: shouldMock
         }
@@ -2906,6 +3908,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       fastValidate: evaluation.fastValidate,
       runtime: {
         pipeline: 'relationship_evaluation',
+        provider: relationshipProvider,
         model: relationshipPipeline.model || '',
         mocked: shouldMock
       }

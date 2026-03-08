@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { directExternalApiCall } from '../ai/openai/apiService.js';
+import { callJsonLlm } from '../ai/openai/apiService.js';
 import { generate_texture_by_fragment_and_conversation } from '../ai/openai/texturePrompts.js';
 import { getNArchetypes } from '../ai/openai/promptsUtils.js';
 import { generateEntitiesFromFragment, setEntitiesForSession, ensureDirectoryExists } from '../storyteller/utils.js';
@@ -95,7 +95,7 @@ function buildFallbackTexture(fragmentText, entityName) {
   };
 }
 
-async function generateTexturesForEntities(fragmentText, entities, llmModel = '', promptTemplate = '') {
+async function generateTexturesForEntities(fragmentText, entities, llmModel = '', promptTemplate = '', llmProvider = 'openai') {
   if (!Array.isArray(entities) || entities.length === 0) {
     return [];
   }
@@ -122,7 +122,14 @@ async function generateTexturesForEntities(fragmentText, entities, llmModel = ''
     prompts[0].content += `\n\nEntity names (use exactly for text_for_entity, one per texture):\n${entityNames}`;
   }
 
-  const response = await directExternalApiCall(prompts, 2500, 1.03, undefined, true, true, llmModel);
+  const response = await callJsonLlm({
+    prompts,
+    provider: llmProvider,
+    model: llmModel,
+    max_tokens: 2500,
+    temperature: 1.03,
+    explicitJsonObjectFormat: true
+  });
   const textures = response?.textures ?? response;
   if (!Array.isArray(textures)) {
     return [];
@@ -272,6 +279,7 @@ export async function textToEntityFromText({
   mainEntityId,
   isSubEntity = false,
   llmModel = '',
+  llmProvider = 'openai',
   textureModel = '',
   mockTextures = false,
   entityPromptTemplate = '',
@@ -332,6 +340,7 @@ export async function textToEntityFromText({
       playerId,
       maxEntities: safeEntityCount,
       llmModel,
+      llmProvider,
       entityPromptTemplate
     }
   );
@@ -339,7 +348,7 @@ export async function textToEntityFromText({
 
   if (includeCards) {
     const textures = includeBack && !shouldMockTextures
-      ? await generateTexturesForEntities(text, entities, llmModel, texturePromptTemplate)
+      ? await generateTexturesForEntities(text, entities, llmModel, texturePromptTemplate, llmProvider)
       : [];
     cards = await buildCardsForEntities({
       sessionId,
