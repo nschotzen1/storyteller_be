@@ -95,6 +95,12 @@ Each storyteller must include:
 - level (1-20)
 - voice_creation { voice, age, style }
 
+Rules for typewriter_key:
+- symbol must be a strange, visual icon concept in 1-3 words
+- symbol must never be a letter, number, or readable text
+- description should describe physical material, wear, mood, and aura of the key face
+- keep the icon bold and readable at small UI size
+
 Output JSON only.`,
     responseSchema: {
       type: 'object',

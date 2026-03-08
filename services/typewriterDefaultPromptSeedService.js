@@ -178,24 +178,46 @@ async function buildStorytellerCreationPromptTemplate() {
 }
 
 function buildStorytellerKeyPromptTemplate() {
-  return `A rugged, aged typewriter key rendered as a masked PNG on transparent background. The key has a unique silhouette tailored to the symbol: a form echoing the essence of "{{symbol}}". The base material reflects the description: {{description}}, marked by time and purpose.
+  return `Create a single isolated storyteller typewriter key replacement asset as a PNG with transparent background.
 
-At its center is a symbolic feature: a representation of the "{{symbol}}" - whether carved, inlaid, or raised - reflecting the key's specific lore. The symbol is worn, oxidized, or subtly glowing, depending on its material origin and thematic tone.
+Context:
+- Storyteller: "{{storyteller_name}}"
+- Central icon: "{{symbol}}"
+- Material / lore cue: "{{description}}"
+- Target slot silhouette: "{{blank_shape}}"
+- Reference blank texture: "{{blank_texture_url}}"
+- Geometry hint: "{{shape_prompt_hint}}"
 
-Engraving: There is no letter - only the central symbol. Around it, suggest faint glyphs, radial etchings, or runes that feel ancient and tied to navigation, memory, or storytelling - unique to the symbol's theme.
+This asset will directly replace an existing blank key in the Storyteller typewriter UI.
 
-Texture: The surface is weathered and physical - with fine cracks, pitting, tarnish, or erosion consistent with {{description}}. The rim is uneven, softly chipped, with wear patterns showing heavy use.
+Non-negotiable output rules:
+- Match the target silhouette and proportions exactly. Do not invent a new outer key shape.
+- One key only, centered, front-facing, near-orthographic.
+- Fully transparent outside the key silhouette, with clean compositing-ready edges.
+- No hands, no typewriter body, no table, no scene, no extra objects.
+- No letters, no numbers, no readable words.
+- The key must still read as a physical typewriter key, not a coin, badge, medallion, seal, or machine button from some other device.
 
-Effect: Add a subtle ambient effect appropriate to the {{symbol}}: a glow, pulse, shimmer, or faint movement - hinting that the key responds to narrative actions, like pressing or storytelling alignment.
+Icon direction:
+- The icon should feel strange, ancient, and narratively charged: a sign that this storyteller wants to enter the unfolding world.
+- Integrate the icon into the face of the key as engraving, inlay, raised relief, lacquer fill, fissure, smoky glass insert, or another physical construction.
+- Keep the icon bold and legible at small UI size.
+- Prefer one strong central mark over many tiny details.
 
-Feel: The key evokes a distinct mood - solemn, mythic, mysterious, or sacred - in line with the described tone. It should feel like an artifact passed through generations of narrators.
+Material and wear:
+- Treat "{{description}}" as the main material and mood guide.
+- Use tactile wear only: tarnish, chipped enamel, rubbed edges, hairline cracks, oxidized metal, soot, ivory staining, obsidian fractures, dried ink residue.
+- Add one subtle sign of long use: a notch, scar, dent, or worn thumb-polish area.
 
-Storyteller Society Infusion:
-- Subtle sigil of the Storyteller Society (an eye, quill, and flame) integrated into the design - either hidden beneath the main symbol, faded into the rim, or reversed as a wax-stamp impression.
-- Optional runic ring around the edge with fragmented words or glyphs.
-- A mark or scar that shows the key's bond to narrative authority.
+Storyteller Society trace:
+- Hide a tiny eye-quill-flame sigil somewhere in the rim or face wear.
+- Optional faint unreadable radial marks are allowed, but they must never become readable text.
 
-Lighting should emphasize realism: catching brass tarnish, glass shimmer, or obsidian fractures. Shadows help isolate the symbol, while the overall look is that of a physical, analog artifact - part of a magical typewriter from a secret order of storytellers.`;
+Lighting:
+- Studio-isolated asset lighting, crisp silhouette separation, realistic highlights, restrained ambient magic.
+
+Goal:
+The final image should feel like a production-ready replacement texture for the blank slot: uncanny, analog, weathered, and immediately readable as "{{storyteller_name}}" entering the narrative.`;
 }
 
 function buildIllustrationPromptTemplate() {
@@ -303,7 +325,14 @@ export async function getCurrentTypewriterPromptTemplates() {
       pipelineKey: 'storyteller_key_creation',
       promptTemplate: buildStorytellerKeyPromptTemplate(),
       source: 'services/storytellerService.js:createStoryTellerKey',
-      variables: ['symbol', 'description', 'storyteller_name']
+      variables: [
+        'symbol',
+        'description',
+        'storyteller_name',
+        'blank_shape',
+        'blank_texture_url',
+        'shape_prompt_hint'
+      ]
     },
     illustration_creation: {
       pipelineKey: 'illustration_creation',

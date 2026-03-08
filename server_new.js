@@ -129,6 +129,35 @@ const MOCK_STORYTELLER_KEY_URLS = [
   '/assets/mocks/storyteller_keys/veil_cartographer_key.png'
 ];
 const MOCK_STORYTELLER_ILLUSTRATION_URL = MOCK_STORYTELLER_ILLUSTRATION_URLS[0];
+const TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS = 5;
+const TYPEWRITER_STORYTELLER_WORD_THRESHOLDS = [30, 50, 100];
+const TYPEWRITER_STORYTELLER_KEY_SLOTS = [
+  {
+    slotIndex: 0,
+    slotKey: 'STORYTELLER_SLOT_HORIZONTAL',
+    keyShape: 'horizontal',
+    blankShape: 'wide horizontal storyteller key slot',
+    blankTextureUrl: '/textures/keys/blank_horizontal_1.png',
+    shapePromptHint: 'wide, low horizontal typewriter key face with a centered strange icon and comfortable edge margins'
+  },
+  {
+    slotIndex: 1,
+    slotKey: 'STORYTELLER_SLOT_VERTICAL',
+    keyShape: 'vertical',
+    blankShape: 'tall vertical storyteller key slot',
+    blankTextureUrl: '/textures/keys/blank_vertical_1.png',
+    shapePromptHint: 'tall narrow typewriter key face with a vertically balanced icon that reads clearly at small size'
+  },
+  {
+    slotIndex: 2,
+    slotKey: 'STORYTELLER_SLOT_RECT_HORIZONTAL',
+    keyShape: 'rect_horizontal',
+    blankShape: 'rectangular horizontal storyteller key slot',
+    blankTextureUrl: '/textures/keys/blank_rect_horizontal_1.png',
+    shapePromptHint: 'broad rectangular typewriter key face with a compact centered emblem and a grounded analog feel'
+  }
+];
+const TYPEWRITER_STORYTELLER_SLOT_INDICES = TYPEWRITER_STORYTELLER_KEY_SLOTS.map((slot) => slot.slotIndex);
 const OPEN_API_SPEC = buildOpenApiSpec();
 const TYPEWRITER_PAGE_IMAGES_SUBDIR = 'typewriter_page_images';
 const TYPEWRITER_ALLOWED_PAGE_IMAGE_EXTENSIONS = new Set(['.png']);
@@ -796,6 +825,63 @@ app.post('/api/typewriter/session/start', async (req, res) => {
   }
 });
 
+app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const { sessionId, playerId } = body;
+    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    await startTypewriterSession(sessionId);
+    const fragmentText = await getTypewriterSessionFragment(sessionId);
+    const narrativeWordCount = countWords(fragmentText);
+    const assignedStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
+    const nextAvailableSlot = findNextAvailableTypewriterStorytellerSlot(assignedStorytellers);
+    const currentAssignedCount = assignedStorytellers.length;
+    const currentThreshold = getTypewriterStorytellerThreshold(currentAssignedCount);
+    const shouldCreate = Boolean(nextAvailableSlot && currentThreshold !== null && narrativeWordCount >= currentThreshold);
+
+    let createdStoryteller = null;
+    if (shouldCreate && nextAvailableSlot) {
+      createdStoryteller = await generateTypewriterStorytellerForSlot({
+        sessionId,
+        playerId: resolvedPlayerId,
+        fragmentText,
+        slotDefinition: nextAvailableSlot,
+        req,
+        body
+      });
+    }
+
+    const storytellers = createdStoryteller
+      ? await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId)
+      : assignedStorytellers;
+    const filledCount = storytellers.length;
+    const nextThreshold = getTypewriterStorytellerThreshold(filledCount);
+
+    return res.status(200).json({
+      sessionId,
+      narrativeWordCount,
+      checkIntervalWords: TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS,
+      shouldCreate,
+      created: Boolean(createdStoryteller),
+      createdStoryteller: createdStoryteller ? buildStorytellerListItem(createdStoryteller) : null,
+      assignedStorytellerCount: filledCount,
+      nextThreshold,
+      slots: buildTypewriterStorytellerSlots(storytellers)
+    });
+  } catch (error) {
+    console.error('Error in /api/shouldCreateStorytellerKey:', error);
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      message: statusCode === 500 ? 'Server error during storyteller key creation check.' : error.message
+    });
+  }
+});
+
 app.post('/api/send_typewriter_text', async (req, res) => {
   try {
     const { sessionId, message } = req.body || {};
@@ -951,6 +1037,10 @@ const MOCK_STORYTELLER = {
   fragmentText: `it was getting dark. they have been going for almost 6 hours, no stop. none! she thought to herself. their morning began waking up at one of the empty halls in  the desolate monastery. it was the first nights in many, that they slept under any sort of roof, she much preferred ll the stern, straight pines. the empty halls made her shiver. she was so happy when they went back on the trail, up, climbing up, along the ravine, where the Yuradel was flowing to the Baruuya bay, like a glittering silver line. yes, they climbed up. to the pass. where they would finally reach the plateau. and maybe there the last monastery would still stand, and won't be desolate. where they finally might learn what happened, and what is to be expected.`,
   immediate_ghost_appearance:
     'A faint shimmer condenses into a travel-worn figure: wind-scoured cloak, pale hands stained with ink, edges of the body translucent like smoke in cold air.',
+  typewriter_key: {
+    symbol: 'ravine eye',
+    description: 'A weathered brass key veined with smoky lacquer and a dim silver gleam.'
+  },
   voice_creation: {
     style: 'measured',
     voice: 'low, smoky, almost whispered',
@@ -960,6 +1050,8 @@ const MOCK_STORYTELLER = {
     'Ashen Cantos',
     'Voyager Myths'
   ],
+  known_universes: ['Yuradel Pass', 'The Last Plateau'],
+  level: 9,
   illustration: MOCK_STORYTELLER_ILLUSTRATION_URL
 };
 
@@ -1049,9 +1141,197 @@ function firstDefinedString(...values) {
   return '';
 }
 
+function getTypewriterStorytellerThreshold(activeCount = 0) {
+  if (!Number.isInteger(activeCount) || activeCount < 0) {
+    return null;
+  }
+  return TYPEWRITER_STORYTELLER_WORD_THRESHOLDS[activeCount] ?? null;
+}
+
+function buildTypewriterStorytellerKeyPayload(typewriterKey, slotDefinition) {
+  const safeTypewriterKey = typewriterKey && typeof typewriterKey === 'object' ? typewriterKey : {};
+  return {
+    ...safeTypewriterKey,
+    symbol: firstDefinedString(safeTypewriterKey.symbol) || 'ink sigil',
+    description:
+      firstDefinedString(safeTypewriterKey.description) || 'A weathered key carrying a strange narrative charge.',
+    key_shape: slotDefinition.keyShape,
+    blank_shape: slotDefinition.blankShape,
+    blank_texture_url: slotDefinition.blankTextureUrl,
+    shape_prompt_hint: slotDefinition.shapePromptHint
+  };
+}
+
+function getTypewriterStorytellerSlotDefinition(slotIndex) {
+  return TYPEWRITER_STORYTELLER_KEY_SLOTS.find((slot) => slot.slotIndex === slotIndex) || null;
+}
+
+function buildTypewriterStorytellerSlotState(slotDefinition, storyteller = null) {
+  const keyImageUrl = firstDefinedString(storyteller?.keyImageLocalUrl, storyteller?.keyImageUrl);
+  return {
+    slotIndex: slotDefinition.slotIndex,
+    slotKey: slotDefinition.slotKey,
+    keyShape: slotDefinition.keyShape,
+    blankTextureUrl: slotDefinition.blankTextureUrl,
+    blankShape: slotDefinition.blankShape,
+    filled: Boolean(storyteller && keyImageUrl),
+    storytellerId: storyteller?._id || '',
+    storytellerName: storyteller?.name || '',
+    keyImageUrl,
+    symbol: firstDefinedString(storyteller?.typewriter_key?.symbol),
+    description: firstDefinedString(storyteller?.typewriter_key?.description)
+  };
+}
+
+function buildTypewriterStorytellerSlots(storytellers = []) {
+  const storytellerBySlot = new Map();
+  for (const storyteller of storytellers) {
+    if (!Number.isInteger(storyteller?.keySlotIndex)) continue;
+    if (!TYPEWRITER_STORYTELLER_SLOT_INDICES.includes(storyteller.keySlotIndex)) continue;
+    if (!storytellerBySlot.has(storyteller.keySlotIndex)) {
+      storytellerBySlot.set(storyteller.keySlotIndex, storyteller);
+    }
+  }
+  return TYPEWRITER_STORYTELLER_KEY_SLOTS.map((slotDefinition) =>
+    buildTypewriterStorytellerSlotState(slotDefinition, storytellerBySlot.get(slotDefinition.slotIndex) || null)
+  );
+}
+
+function findNextAvailableTypewriterStorytellerSlot(storytellers = []) {
+  const assignedSlots = new Set(
+    storytellers
+      .map((storyteller) => storyteller?.keySlotIndex)
+      .filter((slotIndex) => Number.isInteger(slotIndex) && TYPEWRITER_STORYTELLER_SLOT_INDICES.includes(slotIndex))
+  );
+  return TYPEWRITER_STORYTELLER_KEY_SLOTS.find((slotDefinition) => !assignedSlots.has(slotDefinition.slotIndex)) || null;
+}
+
+async function listTypewriterSlotStorytellers(sessionId, playerId = '') {
+  if (!sessionId) return [];
+  return Storyteller.find(
+    applyOptionalPlayerId(
+      {
+        session_id: sessionId,
+        keySlotIndex: { $in: TYPEWRITER_STORYTELLER_SLOT_INDICES }
+      },
+      playerId
+    )
+  )
+    .sort({ keySlotIndex: 1, createdAt: 1 })
+    .exec();
+}
+
+async function generateTypewriterStorytellerForSlot({
+  sessionId,
+  playerId,
+  fragmentText,
+  slotDefinition,
+  req,
+  body = {}
+}) {
+  const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
+  const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
+  const storytellerProvider = typeof storytellerPipeline?.provider === 'string' ? storytellerPipeline.provider : 'openai';
+  const storytellerPromptDoc = await getLatestPromptTemplate('storyteller_creation');
+  const shouldMockStorytellers = resolveMockMode(body, storytellerPipeline.useMock);
+
+  let storytellerDataArray;
+  if (shouldMockStorytellers) {
+    storytellerDataArray = buildMockStorytellers(1, fragmentText);
+  } else {
+    let prompt = '';
+    if (storytellerPromptDoc?.promptTemplate) {
+      prompt = renderPromptTemplateString(storytellerPromptDoc.promptTemplate, {
+        fragmentText,
+        storytellerCount: 1
+      });
+    } else {
+      const routeConfig = await getRouteConfig('text_to_storyteller');
+      prompt = renderPrompt(routeConfig.promptTemplate, {
+        fragmentText,
+        storytellerCount: 1
+      });
+    }
+    storytellerDataArray = await callJsonLlm({
+      prompts: [{ role: 'system', content: prompt }],
+      provider: storytellerProvider,
+      model: storytellerPipeline.model || '',
+      max_tokens: 2500,
+      explicitJsonObjectFormat: true
+    });
+  }
+
+  const normalizedStorytellers = Array.isArray(storytellerDataArray)
+    ? storytellerDataArray
+    : Array.isArray(storytellerDataArray?.storytellers)
+      ? storytellerDataArray.storytellers
+      : [];
+  if (!normalizedStorytellers.length) {
+    const error = new Error('Storyteller generation failed.');
+    error.statusCode = 502;
+    throw error;
+  }
+
+  await validatePayloadForRoute('text_to_storyteller', { storytellers: normalizedStorytellers });
+
+  const storytellerData = normalizedStorytellers[0];
+  const payload = {
+    session_id: sessionId,
+    sessionId,
+    fragmentText,
+    ...storytellerData
+  };
+  if (playerId) {
+    payload.playerId = playerId;
+  }
+  payload.typewriter_key = buildTypewriterStorytellerKeyPayload(payload.typewriter_key, slotDefinition);
+  payload.keyShape = slotDefinition.keyShape;
+  payload.keyBlankTextureUrl = slotDefinition.blankTextureUrl;
+  payload.keySlotIndex = slotDefinition.slotIndex;
+
+  if (shouldMockStorytellers) {
+    payload.keyImageUrl = pickMockStorytellerKeyUrl(slotDefinition.slotIndex);
+    payload.keyImageLocalUrl = payload.keyImageUrl;
+    payload.keyImageLocalPath = '';
+  } else {
+    const keyImageResult = await createStoryTellerKey(
+      payload.typewriter_key,
+      sessionId,
+      payload.name,
+      false,
+      illustrationPipeline.model,
+      ''
+    );
+    if (!keyImageResult?.imageUrl && !keyImageResult?.localPath) {
+      const error = new Error('Storyteller key image generation failed.');
+      error.statusCode = 502;
+      throw error;
+    }
+    const localUrl = keyImageResult?.localPath
+      ? `${req.protocol}://${req.get('host')}/assets/${sessionId}/storyteller_keys/${path.basename(keyImageResult.localPath)}`
+      : '';
+    payload.keyImageUrl = keyImageResult?.imageUrl || localUrl;
+    payload.keyImageLocalUrl = localUrl || payload.keyImageUrl;
+    payload.keyImageLocalPath = keyImageResult?.localPath || '';
+  }
+
+  return Storyteller.findOneAndUpdate(
+    applyOptionalPlayerId(
+      {
+        session_id: sessionId,
+        keySlotIndex: slotDefinition.slotIndex
+      },
+      playerId
+    ),
+    payload,
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+}
+
 function buildStorytellerListItem(storyteller) {
   const illustration = firstDefinedString(storyteller?.illustration);
   const keyImageUrl = firstDefinedString(storyteller?.keyImageUrl);
+  const slotDefinition = getTypewriterStorytellerSlotDefinition(storyteller?.keySlotIndex);
   return {
     id: storyteller._id,
     name: storyteller.name,
@@ -1060,6 +1340,13 @@ function buildStorytellerListItem(storyteller) {
     illustration,
     keyImageUrl,
     iconUrl: keyImageUrl || illustration,
+    keyShape: firstDefinedString(storyteller?.keyShape, storyteller?.typewriter_key?.key_shape),
+    keySlotIndex: Number.isInteger(storyteller?.keySlotIndex) ? storyteller.keySlotIndex : null,
+    keyBlankTextureUrl: firstDefinedString(
+      storyteller?.keyBlankTextureUrl,
+      storyteller?.typewriter_key?.blank_texture_url,
+      slotDefinition?.blankTextureUrl
+    ),
     lastMission: buildLastMissionSummary(storyteller)
   };
 }
