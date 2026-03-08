@@ -23,6 +23,13 @@ describe('story admin API metadata', () => {
   test('documents story admin and typewriter routes in OpenAPI', () => {
     const spec = buildOpenApiSpec();
     const expectedPaths = [
+      '/api/admin/llm-config',
+      '/api/admin/llm-config/{routeKey}',
+      '/api/admin/llm-config/{routeKey}/versions',
+      '/api/admin/llm-config/{routeKey}/prompt',
+      '/api/admin/llm-config/{routeKey}/schema',
+      '/api/admin/llm-config/{routeKey}/latest',
+      '/api/admin/llm-config/{routeKey}/reset',
       '/api/admin/openai/models',
       '/api/admin/typewriter/ai-settings',
       '/api/admin/typewriter/ai-settings/reset',

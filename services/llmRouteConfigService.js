@@ -1,17 +1,21 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import Ajv from 'ajv';
+import { LlmRouteConfigVersion } from '../models/models.js';
 import { FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA } from '../contracts/fragmentMemoryContract.js';
 import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const CONFIG_DIR = path.resolve(__dirname, '..', 'config');
-const OVERRIDES_PATH = path.join(CONFIG_DIR, 'llm_route_overrides.json');
+import { ensureMongoConnection } from './mongoConnectionService.js';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validatorCache = new Map();
+const DEFAULT_VERSION_LIMIT = 20;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CONFIG_DIR = path.resolve(__dirname, '..', 'config');
+const ROUTE_CONFIG_STORE_PATH = process.env.LLM_ROUTE_CONFIG_STORE_PATH
+  || path.join(CONFIG_DIR, 'llm_route_config_versions.json');
 
 const DEFAULT_ROUTE_CONFIGS = {
   worlds_create: {
@@ -19,12 +23,17 @@ const DEFAULT_ROUTE_CONFIGS = {
     routePath: '/api/worlds',
     method: 'POST',
     description: 'Create a world from a seed fragment.',
+    promptMode: 'manual',
     promptTemplate: `You are a worldbuilding designer. Return JSON only.
 Create a setting for a cooperative narrative game.
 Seed: "{{seedText}}"
 World name hint: "{{name}}"
 Return JSON with keys:
 name, summary (1-2 sentences), tone (3-6 words), pillars (3-5), themes (3-5), palette (3-5 evocative color or texture phrases).`,
+    promptCore: '',
+    fieldDocs: {},
+    examplePayload: null,
+    outputRules: [],
     responseSchema: {
       type: 'object',
       required: ['name', 'summary'],
@@ -44,6 +53,7 @@ name, summary (1-2 sentences), tone (3-6 words), pillars (3-5), themes (3-5), pa
     routePath: '/api/worlds/:worldId/(factions|locations|rumors|lore)',
     method: 'POST',
     description: 'Generate world elements for a world.',
+    promptMode: 'manual',
     promptTemplate: `You are a worldbuilding designer. Return JSON only.
 World name: "{{worldName}}"
 World tone: "{{worldTone}}"
@@ -53,6 +63,10 @@ Element type: "{{elementType}}"
 Generate {{count}} entries.
 Return JSON object with key "elements". Each item should include:
 name, description, tags (array), traits (array), hooks (array).`,
+    promptCore: '',
+    fieldDocs: {},
+    examplePayload: null,
+    outputRules: [],
     responseSchema: {
       type: 'object',
       required: ['elements'],
@@ -82,6 +96,7 @@ name, description, tags (array), traits (array), hooks (array).`,
     routePath: '/api/textToStoryteller',
     method: 'POST',
     description: 'Generate storyteller personas from a fragment.',
+    promptMode: 'manual',
     promptTemplate: `You are the keeper of the Storyteller Society.
 Summon {{storytellerCount}} distinct storytellers for this fragment:
 "{{fragmentText}}"
@@ -103,6 +118,10 @@ Rules for typewriter_key:
 - keep the icon bold and readable at small UI size
 
 Output JSON only.`,
+    promptCore: '',
+    fieldDocs: {},
+    examplePayload: null,
+    outputRules: [],
     responseSchema: {
       type: 'object',
       required: ['storytellers'],
@@ -149,7 +168,12 @@ Output JSON only.`,
     routePath: '/api/messenger/chat',
     method: 'POST',
     description: 'Drive the eerie typewriter-delivery messenger conversation.',
+    promptMode: 'manual',
     promptTemplate: buildInitialChatPromptText(),
+    promptCore: '',
+    fieldDocs: {},
+    examplePayload: null,
+    outputRules: [],
     responseSchema: {
       type: 'object',
       required: ['has_chat_ended', 'message_assistant'],
@@ -165,6 +189,7 @@ Output JSON only.`,
     routePath: '/api/sendStorytellerToEntity',
     method: 'POST',
     description: 'Generate mission outcome for a storyteller/entity assignment.',
+    promptMode: 'manual',
     promptTemplate: `You are the Storyteller Society mission desk.
 Assign "{{storytellerName}}" to investigate "{{entityName}}".
 
@@ -183,6 +208,10 @@ Rules:
 - userText and gmNote should be concise
 - always include subEntitySeed
 Output JSON only.`,
+    promptCore: '',
+    fieldDocs: {},
+    examplePayload: null,
+    outputRules: [],
     responseSchema: {
       type: 'object',
       required: ['outcome', 'userText', 'gmNote', 'subEntitySeed'],
@@ -200,6 +229,7 @@ Output JSON only.`,
     routePath: '/api/fragmentToMemories',
     method: 'POST',
     description: 'Generate memory flashes from a narrative fragment.',
+    promptMode: 'manual',
     promptTemplate: `You are the **Storyteller Seer**, the last guardian of a fragmented and almost-lost storytelling universe. Your task is to tap into moments in time and space, encapsulating the gritty reality of this world. Each memory represents a specific individual immersed in a moment of action, situated in a broader context that connects to the fragment or the universe at large. These moments are deeply physical, rooted in the rhythm of life, and seen through the stream of consciousness of their observer.
 
 You recover a surviving fragment—the only one left of this rich and vibrant world—and bring it to the **Storyteller’s Observatory**. This is the fragment: {{fragmentText}}
@@ -279,6 +309,10 @@ Output shape:
 }
 
 Make the miseenscene first-person, sensory, specific, and paced to the memory itself (fast moments fragmented, slow moments reflective). Return only JSON.`,
+    promptCore: '',
+    fieldDocs: {},
+    examplePayload: null,
+    outputRules: [],
     responseSchema: FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA
   }
 };
@@ -291,35 +325,210 @@ function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-function mergeConfig(defaultConfig, overrideConfig) {
-  const merged = deepClone(defaultConfig);
-  if (typeof overrideConfig?.promptTemplate === 'string') {
-    merged.promptTemplate = overrideConfig.promptTemplate;
-  }
-  if (overrideConfig?.responseSchema && typeof overrideConfig.responseSchema === 'object') {
-    merged.responseSchema = overrideConfig.responseSchema;
-  }
-  if (overrideConfig?.meta && typeof overrideConfig.meta === 'object') {
-    merged.meta = overrideConfig.meta;
-  }
-  return merged;
+async function shouldUseMongoRouteConfigStore() {
+  return ensureMongoConnection({ allowFailure: true });
 }
 
-async function readOverridesFile() {
+async function readRouteConfigStoreFile() {
   try {
-    const raw = await fs.readFile(OVERRIDES_PATH, 'utf8');
-    return asObject(JSON.parse(raw));
+    const raw = await fs.readFile(ROUTE_CONFIG_STORE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    return {
+      routes: asObject(parsed.routes)
+    };
   } catch (error) {
     if (error.code === 'ENOENT') {
-      return {};
+      return { routes: {} };
     }
     throw error;
   }
 }
 
-async function writeOverridesFile(overrides) {
-  await fs.mkdir(CONFIG_DIR, { recursive: true });
-  await fs.writeFile(OVERRIDES_PATH, JSON.stringify(overrides, null, 2), 'utf8');
+async function writeRouteConfigStoreFile(store) {
+  await fs.mkdir(path.dirname(ROUTE_CONFIG_STORE_PATH), { recursive: true });
+  await fs.writeFile(ROUTE_CONFIG_STORE_PATH, JSON.stringify(store, null, 2), 'utf8');
+}
+
+function sortRouteConfigDocs(docs) {
+  return [...docs].sort((left, right) => {
+    const versionDiff = (Number(right?.version) || 0) - (Number(left?.version) || 0);
+    if (versionDiff !== 0) return versionDiff;
+    return String(right?.createdAt || '').localeCompare(String(left?.createdAt || ''));
+  });
+}
+
+function normalizeString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizePromptMode(value) {
+  return value === 'contract' ? 'contract' : 'manual';
+}
+
+function normalizeOutputRules(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => `${entry || ''}`.trim())
+      .filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split('\n')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeFieldDocs(value) {
+  const source = asObject(value);
+  const normalized = {};
+  for (const [key, entry] of Object.entries(source)) {
+    const normalizedKey = `${key || ''}`.trim();
+    if (!normalizedKey) continue;
+    if (typeof entry === 'string') {
+      const note = entry.trim();
+      if (note) normalized[normalizedKey] = note;
+      continue;
+    }
+    if (entry && typeof entry === 'object') {
+      const note = `${entry.description || entry.note || ''}`.trim();
+      if (note) normalized[normalizedKey] = note;
+    }
+  }
+  return normalized;
+}
+
+function normalizeJsonValue(value, fallback) {
+  if (value === undefined) return deepClone(fallback);
+  if (value === null) return null;
+  if (typeof value !== 'object') {
+    return deepClone(fallback);
+  }
+  return deepClone(value);
+}
+
+function normalizeStoredRouteConfigDoc(routeKey, doc) {
+  return {
+    id: typeof doc?.id === 'string' && doc.id ? doc.id : randomUUID(),
+    routeKey,
+    version: Number(doc?.version) || 1,
+    promptMode: normalizePromptMode(doc?.promptMode),
+    promptTemplate: normalizeString(doc?.promptTemplate),
+    promptCore: normalizeString(doc?.promptCore),
+    responseSchema: normalizeJsonValue(doc?.responseSchema, {}),
+    fieldDocs: normalizeFieldDocs(doc?.fieldDocs),
+    examplePayload: normalizeJsonValue(doc?.examplePayload, null),
+    outputRules: normalizeOutputRules(doc?.outputRules),
+    isLatest: Boolean(doc?.isLatest),
+    createdBy: typeof doc?.createdBy === 'string' && doc.createdBy.trim() ? doc.createdBy.trim() : 'admin',
+    createdAt: typeof doc?.createdAt === 'string' && doc.createdAt ? doc.createdAt : new Date().toISOString(),
+    updatedAt: typeof doc?.updatedAt === 'string' && doc.updatedAt ? doc.updatedAt : new Date().toISOString(),
+    meta: asObject(doc?.meta),
+    _storageSource: 'file'
+  };
+}
+
+async function getStoredRouteConfigVersions(routeKey) {
+  const store = await readRouteConfigStoreFile();
+  const docs = Array.isArray(store.routes[routeKey]) ? store.routes[routeKey] : [];
+  return sortRouteConfigDocs(docs.map((doc) => normalizeStoredRouteConfigDoc(routeKey, doc)));
+}
+
+function buildFieldDocsText(fieldDocs = {}) {
+  const entries = Object.entries(normalizeFieldDocs(fieldDocs));
+  if (!entries.length) return '';
+  return entries.map(([fieldName, note]) => `- ${fieldName}: ${note}`).join('\n');
+}
+
+function buildOutputRulesText(outputRules = []) {
+  const rules = normalizeOutputRules(outputRules);
+  if (!rules.length) return '';
+  return rules.map((rule) => `- ${rule}`).join('\n');
+}
+
+function buildContractPromptTemplate({
+  promptCore = '',
+  responseSchema = {},
+  fieldDocs = {},
+  examplePayload = null,
+  outputRules = []
+} = {}) {
+  const sections = [];
+  const base = normalizeString(promptCore);
+  if (base) {
+    sections.push(base);
+  }
+
+  sections.push('Return JSON only.');
+  sections.push(`Output must validate against this JSON Schema:\n${JSON.stringify(responseSchema || {}, null, 2)}`);
+
+  const fieldDocsText = buildFieldDocsText(fieldDocs);
+  if (fieldDocsText) {
+    sections.push(`Field guidance:\n${fieldDocsText}`);
+  }
+
+  const rulesText = buildOutputRulesText(outputRules);
+  if (rulesText) {
+    sections.push(`Additional output rules:\n${rulesText}`);
+  }
+
+  if (examplePayload !== null && examplePayload !== undefined) {
+    sections.push(`Example valid JSON:\n${JSON.stringify(examplePayload, null, 2)}`);
+  }
+
+  return sections.filter(Boolean).join('\n\n').trim();
+}
+
+function toRouteConfigPayload(source, defaultConfig) {
+  const defaults = deepClone(defaultConfig);
+  const doc = source && typeof source === 'object' ? source : null;
+  const docMeta = asObject(doc?.meta);
+  const storageSource = normalizeString(doc?._storageSource)
+    || normalizeString(docMeta.source)
+    || (doc ? 'mongo' : 'code-default');
+  const promptMode = normalizePromptMode(doc?.promptMode || defaults.promptMode);
+  const promptCore = normalizeString(doc?.promptCore ?? defaults.promptCore);
+  const fieldDocs = normalizeFieldDocs(doc?.fieldDocs ?? defaults.fieldDocs);
+  const outputRules = normalizeOutputRules(doc?.outputRules ?? defaults.outputRules);
+  const responseSchema = normalizeJsonValue(doc?.responseSchema, defaults.responseSchema || {});
+  const examplePayload = normalizeJsonValue(doc?.examplePayload, defaults.examplePayload);
+  const storedPromptTemplate = normalizeString(doc?.promptTemplate ?? defaults.promptTemplate);
+  const compiledPromptTemplate = promptMode === 'contract'
+    ? buildContractPromptTemplate({
+      promptCore,
+      responseSchema,
+      fieldDocs,
+      examplePayload,
+      outputRules
+    })
+    : storedPromptTemplate;
+
+  return {
+    id: String(doc?._id || doc?.id || ''),
+    routeKey: defaults.routeKey,
+    routePath: defaults.routePath,
+    method: defaults.method,
+    description: defaults.description,
+    promptMode,
+    promptTemplate: compiledPromptTemplate,
+    compiledPromptTemplate,
+    promptCore,
+    fieldDocs,
+    examplePayload,
+    outputRules,
+    responseSchema,
+    version: doc?.version || 0,
+    isLatest: doc ? Boolean(doc.isLatest) : true,
+    createdBy: doc?.createdBy || 'code-default',
+    createdAt: doc?.createdAt || null,
+    updatedAt: doc?.updatedAt || null,
+    meta: {
+      ...asObject(defaults.meta),
+      ...docMeta,
+      source: storageSource
+    }
+  };
 }
 
 function ensureRouteKey(routeKey) {
@@ -331,39 +540,216 @@ function ensureRouteKey(routeKey) {
   }
 }
 
+function buildValidator(schema) {
+  const cacheKey = JSON.stringify(schema);
+  if (!validatorCache.has(cacheKey)) {
+    validatorCache.set(cacheKey, ajv.compile(schema));
+  }
+  return validatorCache.get(cacheKey);
+}
+
+function validateSchema(schema) {
+  try {
+    ajv.compile(schema);
+  } catch (schemaError) {
+    const error = new Error(`Invalid JSON Schema: ${schemaError.message}`);
+    error.code = 'INVALID_RESPONSE_SCHEMA';
+    throw error;
+  }
+}
+
+function validateExamplePayloadAgainstSchema(examplePayload, schema) {
+  if (examplePayload === null || examplePayload === undefined) return;
+  const validate = buildValidator(schema);
+  const valid = validate(examplePayload);
+  if (!valid) {
+    const details = (validate.errors || []).map((entry) => `${entry.instancePath || '(root)'} ${entry.message}`.trim());
+    const error = new Error(`Example payload does not match responseSchema: ${details.join('; ')}`);
+    error.code = 'INVALID_EXAMPLE_PAYLOAD';
+    throw error;
+  }
+}
+
+async function findLatestRouteDoc(routeKey) {
+  if (await shouldUseMongoRouteConfigStore()) {
+    return LlmRouteConfigVersion.findOne({ routeKey, isLatest: true })
+      .sort({ version: -1, createdAt: -1 })
+      .lean();
+  }
+
+  const docs = await getStoredRouteConfigVersions(routeKey);
+  return docs.find((doc) => doc.isLatest) || docs[0] || null;
+}
+
 export function getSupportedRouteKeys() {
   return Object.keys(DEFAULT_ROUTE_CONFIGS);
 }
 
 export async function listRouteConfigs() {
-  const overrides = await readOverridesFile();
-  const merged = {};
+  const hasMongo = await shouldUseMongoRouteConfigStore();
+  const docs = hasMongo ? await LlmRouteConfigVersion.find({ isLatest: true }).lean() : [];
+  const byRouteKey = {};
   for (const routeKey of getSupportedRouteKeys()) {
-    merged[routeKey] = mergeConfig(DEFAULT_ROUTE_CONFIGS[routeKey], overrides[routeKey]);
+    let latestDoc;
+    if (hasMongo) {
+      latestDoc = docs
+        .filter((doc) => doc.routeKey === routeKey)
+        .sort((left, right) => (right.version || 0) - (left.version || 0))[0];
+    } else {
+      const storedDocs = await getStoredRouteConfigVersions(routeKey);
+      latestDoc = storedDocs.find((doc) => doc.isLatest) || storedDocs[0] || null;
+    }
+    byRouteKey[routeKey] = toRouteConfigPayload(latestDoc, DEFAULT_ROUTE_CONFIGS[routeKey]);
   }
-  return merged;
+  return byRouteKey;
 }
 
 export async function getRouteConfig(routeKey) {
   ensureRouteKey(routeKey);
-  const overrides = await readOverridesFile();
-  return mergeConfig(DEFAULT_ROUTE_CONFIGS[routeKey], overrides[routeKey]);
+  const latestDoc = await findLatestRouteDoc(routeKey);
+  return toRouteConfigPayload(latestDoc, DEFAULT_ROUTE_CONFIGS[routeKey]);
 }
 
-async function updateOverride(routeKey, patch) {
+export async function listRouteConfigVersions(routeKey, limit = DEFAULT_VERSION_LIMIT) {
   ensureRouteKey(routeKey);
-  const overrides = await readOverridesFile();
-  const current = asObject(overrides[routeKey]);
-  overrides[routeKey] = {
-    ...current,
-    ...patch,
+  const safeLimit = Number.isFinite(Number(limit))
+    ? Math.max(1, Math.min(100, Number(limit)))
+    : DEFAULT_VERSION_LIMIT;
+
+  if (await shouldUseMongoRouteConfigStore()) {
+    const docs = await LlmRouteConfigVersion.find({ routeKey })
+      .sort({ version: -1, createdAt: -1 })
+      .limit(safeLimit)
+      .lean();
+    return docs.map((doc) => toRouteConfigPayload(doc, DEFAULT_ROUTE_CONFIGS[routeKey]));
+  }
+
+  const docs = await getStoredRouteConfigVersions(routeKey);
+  return docs.slice(0, safeLimit).map((doc) => toRouteConfigPayload(doc, DEFAULT_ROUTE_CONFIGS[routeKey]));
+}
+
+export async function saveRouteConfigVersion(
+  routeKey,
+  patch = {},
+  createdBy = 'admin',
+  { markLatest = true } = {}
+) {
+  ensureRouteKey(routeKey);
+
+  const current = await getRouteConfig(routeKey);
+  const nextPromptMode = normalizePromptMode(patch.promptMode ?? current.promptMode);
+  const nextPromptCore = patch.promptCore !== undefined
+    ? normalizeString(patch.promptCore)
+    : normalizeString(current.promptCore);
+  const nextResponseSchema = patch.responseSchema !== undefined
+    ? normalizeJsonValue(patch.responseSchema, current.responseSchema || {})
+    : normalizeJsonValue(current.responseSchema, {});
+  const nextFieldDocs = patch.fieldDocs !== undefined
+    ? normalizeFieldDocs(patch.fieldDocs)
+    : normalizeFieldDocs(current.fieldDocs);
+  const nextExamplePayload = patch.examplePayload !== undefined
+    ? normalizeJsonValue(patch.examplePayload, null)
+    : normalizeJsonValue(current.examplePayload, null);
+  const nextOutputRules = patch.outputRules !== undefined
+    ? normalizeOutputRules(patch.outputRules)
+    : normalizeOutputRules(current.outputRules);
+  let nextPromptTemplate = patch.promptTemplate !== undefined
+    ? normalizeString(patch.promptTemplate)
+    : normalizeString(current.promptTemplate);
+
+  validateSchema(nextResponseSchema);
+  validateExamplePayloadAgainstSchema(nextExamplePayload, nextResponseSchema);
+
+  if (nextPromptMode === 'contract') {
+    if (!nextPromptCore) {
+      const error = new Error('promptCore must be a non-empty string when promptMode is "contract".');
+      error.code = 'INVALID_PROMPT_TEMPLATE';
+      throw error;
+    }
+    nextPromptTemplate = buildContractPromptTemplate({
+      promptCore: nextPromptCore,
+      responseSchema: nextResponseSchema,
+      fieldDocs: nextFieldDocs,
+      examplePayload: nextExamplePayload,
+      outputRules: nextOutputRules
+    });
+  }
+
+  if (!nextPromptTemplate) {
+    const error = new Error('promptTemplate must be a non-empty string.');
+    error.code = 'INVALID_PROMPT_TEMPLATE';
+    throw error;
+  }
+
+  if (await shouldUseMongoRouteConfigStore()) {
+    const latestDoc = await LlmRouteConfigVersion.findOne({ routeKey })
+      .sort({ version: -1 })
+      .lean();
+    const nextVersion = (latestDoc?.version || 0) + 1;
+
+    if (markLatest) {
+      await LlmRouteConfigVersion.updateMany(
+        { routeKey, isLatest: true },
+        { $set: { isLatest: false } }
+      );
+    }
+
+    await LlmRouteConfigVersion.create({
+      routeKey,
+      version: nextVersion,
+      promptMode: nextPromptMode,
+      promptTemplate: nextPromptTemplate,
+      promptCore: nextPromptCore,
+      responseSchema: nextResponseSchema,
+      fieldDocs: nextFieldDocs,
+      examplePayload: nextExamplePayload,
+      outputRules: nextOutputRules,
+      isLatest: Boolean(markLatest),
+      createdBy: typeof createdBy === 'string' && createdBy.trim() ? createdBy.trim() : 'admin',
+      meta: {
+        ...asObject(current.meta),
+        ...asObject(patch.meta),
+        source: 'mongo'
+      }
+    });
+
+    return getRouteConfig(routeKey);
+  }
+
+  const store = await readRouteConfigStoreFile();
+  const docs = Array.isArray(store.routes[routeKey]) ? store.routes[routeKey] : [];
+  const normalizedDocs = docs.map((doc) => normalizeStoredRouteConfigDoc(routeKey, doc));
+  const nextVersion = normalizedDocs.reduce((maxVersion, doc) => Math.max(maxVersion, doc.version || 0), 0) + 1;
+  const now = new Date().toISOString();
+  const nextDocs = normalizedDocs.map((doc) => ({
+    ...doc,
+    isLatest: markLatest ? false : Boolean(doc.isLatest)
+  }));
+
+  nextDocs.push({
+    id: randomUUID(),
+    routeKey,
+    version: nextVersion,
+    promptMode: nextPromptMode,
+    promptTemplate: nextPromptTemplate,
+    promptCore: nextPromptCore,
+    responseSchema: nextResponseSchema,
+    fieldDocs: nextFieldDocs,
+    examplePayload: nextExamplePayload,
+    outputRules: nextOutputRules,
+    isLatest: Boolean(markLatest),
+    createdBy: typeof createdBy === 'string' && createdBy.trim() ? createdBy.trim() : 'admin',
+    createdAt: now,
+    updatedAt: now,
     meta: {
       ...asObject(current.meta),
       ...asObject(patch.meta),
-      updatedAt: new Date().toISOString()
+      source: 'file'
     }
-  };
-  await writeOverridesFile(overrides);
+  });
+
+  store.routes[routeKey] = sortRouteConfigDocs(nextDocs);
+  await writeRouteConfigStoreFile(store);
   return getRouteConfig(routeKey);
 }
 
@@ -373,10 +759,11 @@ export async function updateRoutePrompt(routeKey, promptTemplate, updatedBy = 'a
     error.code = 'INVALID_PROMPT_TEMPLATE';
     throw error;
   }
-  return updateOverride(routeKey, {
+  return saveRouteConfigVersion(routeKey, {
+    promptMode: 'manual',
     promptTemplate,
     meta: { updatedBy }
-  });
+  }, updatedBy);
 }
 
 export async function updateRouteSchema(routeKey, responseSchema, updatedBy = 'admin') {
@@ -385,27 +772,81 @@ export async function updateRouteSchema(routeKey, responseSchema, updatedBy = 'a
     error.code = 'INVALID_RESPONSE_SCHEMA';
     throw error;
   }
-  try {
-    ajv.compile(responseSchema);
-  } catch (schemaError) {
-    const error = new Error(`Invalid JSON Schema: ${schemaError.message}`);
-    error.code = 'INVALID_RESPONSE_SCHEMA';
-    throw error;
-  }
-  return updateOverride(routeKey, {
+  return saveRouteConfigVersion(routeKey, {
     responseSchema,
     meta: { updatedBy }
-  });
+  }, updatedBy);
 }
 
-export async function resetRouteConfig(routeKey) {
+export async function setLatestRouteConfig(routeKey, { id, version } = {}) {
   ensureRouteKey(routeKey);
-  const overrides = await readOverridesFile();
-  if (overrides[routeKey]) {
-    delete overrides[routeKey];
-    await writeOverridesFile(overrides);
+  if (await shouldUseMongoRouteConfigStore()) {
+    const query = { routeKey };
+    if (id) {
+      query._id = id;
+    } else if (Number.isFinite(Number(version))) {
+      query.version = Number(version);
+    } else {
+      const error = new Error('Provide id or version to set latest route config.');
+      error.code = 'INVALID_ROUTE_SELECTION';
+      throw error;
+    }
+
+    const selected = await LlmRouteConfigVersion.findOne(query);
+    if (!selected) {
+      const error = new Error('Route config version not found.');
+      error.code = 'ROUTE_CONFIG_VERSION_NOT_FOUND';
+      throw error;
+    }
+
+    await LlmRouteConfigVersion.updateMany(
+      { routeKey, isLatest: true },
+      { $set: { isLatest: false } }
+    );
+    selected.isLatest = true;
+    await selected.save();
+    return getRouteConfig(routeKey);
   }
+
+  const store = await readRouteConfigStoreFile();
+  const docs = Array.isArray(store.routes[routeKey]) ? store.routes[routeKey] : [];
+  const normalizedDocs = docs.map((doc) => normalizeStoredRouteConfigDoc(routeKey, doc));
+  const selectedIndex = normalizedDocs.findIndex((doc) =>
+    (id && doc.id === id) || (!id && Number.isFinite(Number(version)) && doc.version === Number(version))
+  );
+
+  if (selectedIndex < 0) {
+    const error = new Error('Route config version not found.');
+    error.code = 'ROUTE_CONFIG_VERSION_NOT_FOUND';
+    throw error;
+  }
+
+  const now = new Date().toISOString();
+  store.routes[routeKey] = sortRouteConfigDocs(normalizedDocs.map((doc, index) => ({
+    ...doc,
+    isLatest: index === selectedIndex,
+    updatedAt: index === selectedIndex ? now : doc.updatedAt
+  })));
+  await writeRouteConfigStoreFile(store);
   return getRouteConfig(routeKey);
+}
+
+export async function resetRouteConfig(routeKey, updatedBy = 'admin') {
+  ensureRouteKey(routeKey);
+  const defaults = DEFAULT_ROUTE_CONFIGS[routeKey];
+  return saveRouteConfigVersion(routeKey, {
+    promptMode: defaults.promptMode,
+    promptTemplate: defaults.promptTemplate,
+    promptCore: defaults.promptCore,
+    responseSchema: defaults.responseSchema,
+    fieldDocs: defaults.fieldDocs,
+    examplePayload: defaults.examplePayload,
+    outputRules: defaults.outputRules,
+    meta: {
+      updatedBy,
+      resetToDefaults: true
+    }
+  }, updatedBy);
 }
 
 function normalizeTokenValue(value) {
@@ -427,14 +868,6 @@ function normalizeTokenValue(value) {
 export function renderPrompt(template, tokens = {}) {
   if (typeof template !== 'string') return '';
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => normalizeTokenValue(tokens[key]));
-}
-
-function buildValidator(schema) {
-  const cacheKey = JSON.stringify(schema);
-  if (!validatorCache.has(cacheKey)) {
-    validatorCache.set(cacheKey, ajv.compile(schema));
-  }
-  return validatorCache.get(cacheKey);
 }
 
 function formatAjvErrors(errors = []) {

@@ -37,8 +37,11 @@ import { buildOpenApiSpec } from './openapi.js';
 import {
   listRouteConfigs,
   getRouteConfig,
+  listRouteConfigVersions,
+  saveRouteConfigVersion,
   updateRoutePrompt,
   updateRouteSchema,
+  setLatestRouteConfig,
   resetRouteConfig,
   renderPrompt,
   validatePayloadForRoute
@@ -60,8 +63,18 @@ import {
   setLatestPromptTemplate,
   renderPromptTemplateString
 } from './services/typewriterPromptConfigService.js';
-import { seedCurrentTypewriterPromptTemplates } from './services/typewriterDefaultPromptSeedService.js';
+import {
+  getCurrentTypewriterPromptTemplates,
+  seedCurrentTypewriterPromptTemplates
+} from './services/typewriterDefaultPromptSeedService.js';
 import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefinitionsService.js';
+import { ensureMongoConnection } from './services/mongoConnectionService.js';
+import {
+  appendStoredMessengerMessage,
+  deleteStoredMessengerConversation,
+  findStoredMessengerMessage,
+  listStoredMessengerMessages
+} from './services/messengerConversationStore.js';
 import {
   getTypewriterSessionFragment,
   mergeTypewriterFragment,
@@ -741,6 +754,11 @@ function buildMockContinuation(message) {
   return 'as the pass fell quiet and every footstep sounded borrowed.';
 }
 
+async function resolveMessengerPersistenceMode() {
+  const hasMongo = await ensureMongoConnection({ allowFailure: true });
+  return hasMongo ? 'mongo' : 'file';
+}
+
 function normalizeMessengerSceneId(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_MESSENGER_SCENE_ID;
 }
@@ -765,15 +783,30 @@ function toMessengerMessagePayload(doc) {
   };
 }
 
-async function ensureMessengerIntroMessage(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID) {
-  const existing = await ChatMessage.findOne({ sessionId, sceneId, type: 'initial' }).sort({ order: 1 });
+async function ensureMessengerIntroMessage(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID, persistence = 'mongo') {
+  if (persistence === 'mongo') {
+    const existing = await ChatMessage.findOne({ sessionId, sceneId, type: 'initial' }).sort({ order: 1 });
+    if (existing) {
+      return existing;
+    }
+
+    return ChatMessage.create({
+      sessionId,
+      sceneId,
+      order: Date.now(),
+      sender: 'system',
+      content: MESSENGER_INITIAL_MESSAGE,
+      type: 'initial',
+      has_chat_ended: false
+    });
+  }
+
+  const existing = await findStoredMessengerMessage(sessionId, sceneId, (message) => message.type === 'initial');
   if (existing) {
     return existing;
   }
 
-  return ChatMessage.create({
-    sessionId,
-    sceneId,
+  return appendStoredMessengerMessage(sessionId, sceneId, {
     order: Date.now(),
     sender: 'system',
     content: MESSENGER_INITIAL_MESSAGE,
@@ -782,8 +815,30 @@ async function ensureMessengerIntroMessage(sessionId, sceneId = DEFAULT_MESSENGE
   });
 }
 
-async function loadMessengerHistoryDocs(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID) {
-  return ChatMessage.find({ sessionId, sceneId }).sort({ order: 1, createdAt: 1 });
+async function loadMessengerHistoryDocs(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID, persistence = 'mongo') {
+  if (persistence === 'mongo') {
+    return ChatMessage.find({ sessionId, sceneId }).sort({ order: 1, createdAt: 1 });
+  }
+  return listStoredMessengerMessages(sessionId, sceneId);
+}
+
+async function createMessengerMessage(sessionId, sceneId, doc, persistence = 'mongo') {
+  if (persistence === 'mongo') {
+    return ChatMessage.create({
+      sessionId,
+      sceneId,
+      ...doc
+    });
+  }
+  return appendStoredMessengerMessage(sessionId, sceneId, doc);
+}
+
+async function deleteMessengerConversation(sessionId, sceneId, persistence = 'mongo') {
+  if (persistence === 'mongo') {
+    return ChatMessage.deleteMany({ sessionId, sceneId });
+  }
+  const deletedCount = await deleteStoredMessengerConversation(sessionId, sceneId);
+  return { deletedCount };
 }
 
 function buildMessengerPromptMessages(historyDocs, promptTemplate, maxHistoryMessages = DEFAULT_MESSENGER_HISTORY_LIMIT) {
@@ -843,16 +898,21 @@ function buildMockMessengerResponse(message, historyDocs = []) {
   };
 }
 
-async function buildMessengerConversationPayload(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID) {
-  await ensureMessengerIntroMessage(sessionId, sceneId);
-  const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId);
+async function buildMessengerConversationPayload(
+  sessionId,
+  sceneId = DEFAULT_MESSENGER_SCENE_ID,
+  persistence = 'mongo'
+) {
+  await ensureMessengerIntroMessage(sessionId, sceneId, persistence);
+  const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId, persistence);
   const messages = historyDocs.map(toMessengerMessagePayload);
   return {
     sessionId,
     sceneId,
     count: messages.length,
     hasChatEnded: messages.some((message) => message.hasChatEnded),
-    messages
+    messages,
+    storage: persistence
   };
 }
 
@@ -867,20 +927,19 @@ async function handleMessengerChatPost(req, res) {
       return res.status(400).json({ message: 'Missing required parameters: sessionId or message.' });
     }
 
-    await ensureMessengerIntroMessage(sessionId, sceneId);
+    const persistence = await resolveMessengerPersistenceMode();
+    await ensureMessengerIntroMessage(sessionId, sceneId, persistence);
 
     const baseOrder = Date.now();
-    await ChatMessage.create({
-      sessionId,
-      sceneId,
+    await createMessengerMessage(sessionId, sceneId, {
       order: baseOrder,
       sender: 'user',
       content: message,
       type: 'user',
       has_chat_ended: false
-    });
+    }, persistence);
 
-    const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId);
+    const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId, persistence);
     const messengerPipeline = await getAiPipelineSettings('messenger_chat');
     const messengerProvider = typeof messengerPipeline?.provider === 'string'
       ? messengerPipeline.provider
@@ -931,17 +990,15 @@ async function handleMessengerChatPost(req, res) {
       });
     }
 
-    await ChatMessage.create({
-      sessionId,
-      sceneId,
+    await createMessengerMessage(sessionId, sceneId, {
       order: baseOrder + 1,
       sender: 'system',
       content: reply,
       type: 'response',
       has_chat_ended: hasChatEnded
-    });
+    }, persistence);
 
-    const conversation = await buildMessengerConversationPayload(sessionId, sceneId);
+    const conversation = await buildMessengerConversationPayload(sessionId, sceneId, persistence);
     return res.status(200).json({
       ...conversation,
       reply,
@@ -951,7 +1008,8 @@ async function handleMessengerChatPost(req, res) {
         pipeline: 'messenger_chat',
         provider: messengerProvider,
         model: messengerPipeline.model || '',
-        mocked: shouldMock
+        mocked: shouldMock,
+        storage: persistence
       }
     });
   } catch (error) {
@@ -973,7 +1031,8 @@ app.get('/api/messenger/chat', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
 
-    const conversation = await buildMessengerConversationPayload(sessionId, sceneId);
+    const persistence = await resolveMessengerPersistenceMode();
+    const conversation = await buildMessengerConversationPayload(sessionId, sceneId, persistence);
     return res.status(200).json(conversation);
   } catch (error) {
     console.error('Error in GET /api/messenger/chat:', error);
@@ -992,11 +1051,13 @@ app.delete('/api/messenger/chat', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
 
-    const deletion = await ChatMessage.deleteMany({ sessionId, sceneId });
+    const persistence = await resolveMessengerPersistenceMode();
+    const deletion = await deleteMessengerConversation(sessionId, sceneId, persistence);
     return res.status(200).json({
       sessionId,
       sceneId,
-      deletedCount: deletion?.deletedCount || 0
+      deletedCount: deletion?.deletedCount || 0,
+      storage: persistence
     });
   } catch (error) {
     console.error('Error in DELETE /api/messenger/chat:', error);
@@ -2250,8 +2311,29 @@ app.get('/api/admin/openai/models', requireAdmin, async (req, res) => {
 app.get('/api/admin/typewriter/prompts', requireAdmin, async (req, res) => {
   try {
     const latest = await listLatestPromptTemplates();
+    const currentTemplates = await getCurrentTypewriterPromptTemplates();
+    const mergedPipelines = {};
+
+    for (const [pipelineKey, definition] of Object.entries(currentTemplates)) {
+      mergedPipelines[pipelineKey] = latest?.pipelines?.[pipelineKey] || {
+        id: '',
+        pipelineKey,
+        version: 0,
+        promptTemplate: definition.promptTemplate,
+        isLatest: true,
+        createdBy: 'code-default',
+        createdAt: '',
+        updatedAt: '',
+        meta: {
+          source: definition.source,
+          variables: definition.variables,
+          fallbackFromCode: true
+        }
+      };
+    }
+
     return res.status(200).json({
-      ...latest,
+      pipelines: mergedPipelines,
       pipelinesMeta: getTypewriterPromptDefinitions()
     });
   } catch (error) {
@@ -2278,6 +2360,32 @@ app.get('/api/admin/typewriter/prompts/:pipelineKey/versions', requireAdmin, asy
   try {
     const { pipelineKey } = req.params;
     const versions = await listPromptTemplateVersions(pipelineKey, req.query?.limit);
+    if (versions.length === 0) {
+      const currentTemplates = await getCurrentTypewriterPromptTemplates();
+      const fallback = currentTemplates?.[pipelineKey];
+      if (fallback) {
+        return res.status(200).json({
+          pipelineKey,
+          versions: [
+            {
+              id: '',
+              pipelineKey,
+              version: 0,
+              promptTemplate: fallback.promptTemplate,
+              isLatest: true,
+              createdBy: 'code-default',
+              createdAt: '',
+              updatedAt: '',
+              meta: {
+                source: fallback.source,
+                variables: fallback.variables,
+                fallbackFromCode: true
+              }
+            }
+          ]
+        });
+      }
+    }
     return res.status(200).json({ pipelineKey, versions });
   } catch (error) {
     if (error.code === 'INVALID_PIPELINE_KEY') {
@@ -2354,6 +2462,66 @@ app.get('/api/admin/llm-config/:routeKey', requireAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/admin/llm-config/:routeKey/versions', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const { limit = 20 } = req.query || {};
+    const versions = await listRouteConfigVersions(routeKey, limit);
+    return res.status(200).json({
+      routeKey,
+      versions
+    });
+  } catch (error) {
+    if (error.code === 'INVALID_ROUTE_KEY') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in GET /api/admin/llm-config/:routeKey/versions:', error);
+    return res.status(500).json({ message: 'Server error while listing route config versions.' });
+  }
+});
+
+app.post('/api/admin/llm-config/:routeKey', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const {
+      promptMode,
+      promptTemplate,
+      promptCore,
+      responseSchema,
+      fieldDocs,
+      examplePayload,
+      outputRules,
+      updatedBy,
+      markLatest
+    } = req.body || {};
+
+    const config = await saveRouteConfigVersion(routeKey, {
+      promptMode,
+      promptTemplate,
+      promptCore,
+      responseSchema,
+      fieldDocs,
+      examplePayload,
+      outputRules,
+      meta: { updatedBy: updatedBy || 'admin' }
+    }, updatedBy || 'admin', {
+      markLatest: markLatest === undefined ? true : Boolean(markLatest)
+    });
+    return res.status(200).json(config);
+  } catch (error) {
+    if (
+      error.code === 'INVALID_ROUTE_KEY'
+      || error.code === 'INVALID_PROMPT_TEMPLATE'
+      || error.code === 'INVALID_RESPONSE_SCHEMA'
+      || error.code === 'INVALID_EXAMPLE_PAYLOAD'
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/admin/llm-config/:routeKey:', error);
+    return res.status(500).json({ message: 'Server error while saving route config version.' });
+  }
+});
+
 app.put('/api/admin/llm-config/:routeKey/prompt', requireAdmin, async (req, res) => {
   try {
     const { routeKey } = req.params;
@@ -2384,10 +2552,30 @@ app.put('/api/admin/llm-config/:routeKey/schema', requireAdmin, async (req, res)
   }
 });
 
+app.post('/api/admin/llm-config/:routeKey/latest', requireAdmin, async (req, res) => {
+  try {
+    const { routeKey } = req.params;
+    const { id, version } = req.body || {};
+    const config = await setLatestRouteConfig(routeKey, { id, version });
+    return res.status(200).json(config);
+  } catch (error) {
+    if (
+      error.code === 'INVALID_ROUTE_KEY'
+      || error.code === 'INVALID_ROUTE_SELECTION'
+      || error.code === 'ROUTE_CONFIG_VERSION_NOT_FOUND'
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/admin/llm-config/:routeKey/latest:', error);
+    return res.status(500).json({ message: 'Server error while selecting latest route config.' });
+  }
+});
+
 app.post('/api/admin/llm-config/:routeKey/reset', requireAdmin, async (req, res) => {
   try {
     const { routeKey } = req.params;
-    const config = await resetRouteConfig(routeKey);
+    const { updatedBy } = req.body || {};
+    const config = await resetRouteConfig(routeKey, updatedBy || 'admin');
     return res.status(200).json(config);
   } catch (error) {
     if (error.code === 'INVALID_ROUTE_KEY') {

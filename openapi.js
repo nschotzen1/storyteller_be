@@ -24,11 +24,26 @@ Summon {{storytellerCount}} distinct storytellers for this fragment:
 "{{fragmentText}}"`;
 
 const LLM_ROUTE_CONFIG_EXAMPLE = {
+  id: '67ce00000000000000000001',
   routeKey: 'text_to_storyteller',
   routePath: '/api/textToStoryteller',
   method: 'POST',
   description: 'Generate storyteller personas from a fragment.',
-  promptTemplate: STORYTELLER_PROMPT_EXAMPLE,
+  promptMode: 'contract',
+  promptTemplate: `${STORYTELLER_PROMPT_EXAMPLE}\n\nReturn JSON only.`,
+  compiledPromptTemplate: `${STORYTELLER_PROMPT_EXAMPLE}\n\nReturn JSON only.`,
+  promptCore: STORYTELLER_PROMPT_EXAMPLE,
+  fieldDocs: {
+    'storytellers[].name': 'Distinct, evocative name.'
+  },
+  examplePayload: {
+    storytellers: [
+      {
+        name: 'The Veil Cartographer'
+      }
+    ]
+  },
+  outputRules: ['Do not use readable text in typewriter_key.symbol.'],
   responseSchema: {
     type: 'object',
     required: ['storytellers'],
@@ -36,9 +51,15 @@ const LLM_ROUTE_CONFIG_EXAMPLE = {
       storytellers: { type: 'array' }
     }
   },
+  version: 4,
+  isLatest: true,
+  createdBy: 'story-admin-ui',
+  createdAt: '2026-03-08T12:00:00.000Z',
+  updatedAt: '2026-03-08T12:00:00.000Z',
   meta: {
-    updatedBy: 'admin',
-    updatedAt: '2026-02-11T12:00:00.000Z'
+    source: 'mongo',
+    updatedBy: 'story-admin-ui',
+    updatedAt: '2026-03-08T12:00:00.000Z'
   }
 };
 
@@ -116,16 +137,28 @@ export function buildOpenApiSpec() {
           type: 'object',
           required: ['routeKey', 'routePath', 'method', 'description', 'promptTemplate', 'responseSchema'],
           properties: {
+            id: { type: 'string' },
             routeKey: { type: 'string' },
             routePath: { type: 'string' },
             method: { type: 'string' },
             description: { type: 'string' },
+            promptMode: { type: 'string', enum: ['manual', 'contract'] },
             promptTemplate: {
               type: 'string',
               description: 'Route-level LLM system prompt template with {{token}} placeholders.',
               example: STORYTELLER_PROMPT_EXAMPLE
             },
+            compiledPromptTemplate: { type: 'string' },
+            promptCore: { type: 'string' },
+            fieldDocs: { type: 'object', additionalProperties: { type: 'string' } },
+            examplePayload: { type: 'object', additionalProperties: true },
+            outputRules: { type: 'array', items: { type: 'string' } },
             responseSchema: { type: 'object', additionalProperties: true },
+            version: { type: 'number' },
+            isLatest: { type: 'boolean' },
+            createdBy: { type: 'string' },
+            createdAt: { type: 'string' },
+            updatedAt: { type: 'string' },
             meta: { type: 'object', additionalProperties: true }
           },
           example: LLM_ROUTE_CONFIG_EXAMPLE
@@ -497,6 +530,67 @@ export function buildOpenApiSpec() {
             },
             '400': { description: 'Unknown routeKey.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
+        }),
+        post: op({
+          tags: ['Admin'],
+          summary: 'Save full route config version',
+          importance: 'Critical',
+          flow: 'Primary structured-output contract save path used by Story Admin.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [pathParam('routeKey', 'Configured route key.')],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    promptMode: { type: 'string', enum: ['manual', 'contract'] },
+                    promptTemplate: { type: 'string' },
+                    promptCore: { type: 'string' },
+                    responseSchema: { type: 'object', additionalProperties: true },
+                    fieldDocs: { type: 'object', additionalProperties: { type: 'string' } },
+                    examplePayload: { type: 'object', additionalProperties: true },
+                    outputRules: { type: 'array', items: { type: 'string' } },
+                    updatedBy: { type: 'string' },
+                    markLatest: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Structured route config version saved.', ...jsonResponse({ $ref: '#/components/schemas/LlmRouteConfig' }) },
+            '400': { description: 'Invalid request.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/llm-config/{routeKey}/versions': {
+        get: op({
+          tags: ['Admin'],
+          summary: 'List route config versions',
+          importance: 'High',
+          flow: 'Used by Story Admin to inspect structured-contract history before rollback.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [
+            pathParam('routeKey', 'Configured route key.'),
+            queryParam('limit', false, 'Maximum number of versions to return.')
+          ],
+          responses: {
+            '200': {
+              description: 'Version list returned.',
+              ...jsonResponse({
+                type: 'object',
+                properties: {
+                  routeKey: { type: 'string' },
+                  versions: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/LlmRouteConfig' }
+                  }
+                }
+              })
+            }
+          }
         })
       },
       '/api/admin/llm-config/{routeKey}/prompt': {
@@ -557,6 +651,34 @@ export function buildOpenApiSpec() {
           responses: {
             '200': { description: 'Schema updated.', ...jsonResponse({ $ref: '#/components/schemas/LlmRouteConfig' }) },
             '400': { description: 'Schema invalid.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/llm-config/{routeKey}/latest': {
+        post: op({
+          tags: ['Admin'],
+          summary: 'Set latest route config version',
+          importance: 'High',
+          flow: 'Story Admin rollback control for structured-output contracts stored in Mongo.',
+          security: [{ AdminApiKey: [] }],
+          parameters: [pathParam('routeKey', 'Configured route key.')],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    version: { type: 'number' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Selected version promoted to latest.', ...jsonResponse({ $ref: '#/components/schemas/LlmRouteConfig' }) },
+            '400': { description: 'Invalid request.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },

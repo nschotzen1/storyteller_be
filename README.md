@@ -24,10 +24,13 @@ These focus on the important gameplay/worldbuilding/admin routes so the route su
 
 ## Admin LLM Config
 
-The backend now supports editable prompt templates and response schemas (JSON Schema) for key LLM-backed routes.
+The backend now supports versioned structured-output contracts for key LLM-backed routes.
 
 - List configs: `GET /api/admin/llm-config`
 - Get one route config: `GET /api/admin/llm-config/:routeKey`
+- Save full contract version: `POST /api/admin/llm-config/:routeKey`
+- List contract versions: `GET /api/admin/llm-config/:routeKey/versions`
+- Set latest contract version: `POST /api/admin/llm-config/:routeKey/latest`
 - Update prompt template: `PUT /api/admin/llm-config/:routeKey/prompt`
 - Update response schema: `PUT /api/admin/llm-config/:routeKey/schema`
 - Reset route config to defaults: `POST /api/admin/llm-config/:routeKey/reset`
@@ -43,7 +46,8 @@ Route config keys currently available:
 Persistence:
 
 - Defaults are in code (`services/llmRouteConfigService.js`)
-- Overrides are stored in `config/llm_route_overrides.json`
+- Versioned overrides are stored in Mongo (`LlmRouteConfigVersion`)
+- Each contract can store `promptMode`, `promptCore`, `responseSchema`, `fieldDocs`, `examplePayload`, and `outputRules`
 
 Optional admin auth:
 

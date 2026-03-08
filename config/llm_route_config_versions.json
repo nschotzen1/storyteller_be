@@ -1,0 +1,41 @@
+{
+  "routes": {
+    "messenger_chat": [
+      {
+        "id": "4e80d535-50c7-42f6-8a93-ca874f5ed964",
+        "routeKey": "messenger_chat",
+        "version": 1,
+        "promptMode": "manual",
+        "promptTemplate": "You are the Society courier. Return JSON only.",
+        "promptCore": "",
+        "responseSchema": {
+          "type": "object",
+          "required": [
+            "has_chat_ended",
+            "message_assistant"
+          ],
+          "properties": {
+            "has_chat_ended": {
+              "type": "boolean"
+            },
+            "message_assistant": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "fieldDocs": {},
+        "examplePayload": null,
+        "outputRules": [],
+        "isLatest": true,
+        "createdBy": "fallback-test",
+        "createdAt": "2026-03-08T12:50:55.709Z",
+        "updatedAt": "2026-03-08T12:50:55.709Z",
+        "meta": {
+          "source": "file",
+          "updatedBy": "fallback-test"
+        }
+      }
+    ]
+  }
+}
