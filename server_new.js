@@ -11,7 +11,7 @@ import {
   listAvailableAnthropicModels,
   listAvailableOpenAiModels
 } from './ai/openai/apiService.js';
-import { Storyteller, SessionPlayer, Arena, World, WorldElement, QuestScreenGraph } from './models/models.js';
+import { ChatMessage, Storyteller, SessionPlayer, Arena, World, WorldElement, QuestScreenGraph } from './models/models.js';
 import {
   createStoryTellerKey,
   createStorytellerIllustration
@@ -61,6 +61,7 @@ import {
   renderPromptTemplateString
 } from './services/typewriterPromptConfigService.js';
 import { seedCurrentTypewriterPromptTemplates } from './services/typewriterDefaultPromptSeedService.js';
+import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefinitionsService.js';
 import {
   getTypewriterSessionFragment,
   mergeTypewriterFragment,
@@ -166,6 +167,10 @@ const TYPEWRITER_DEFAULT_SERVER_BACKGROUNDS = [
   '/assets/mocks/memory_cards/memory_front_02.png',
   '/assets/mocks/memory_cards/memory_front_03.png'
 ];
+const DEFAULT_MESSENGER_SCENE_ID = 'messanger';
+const DEFAULT_MESSENGER_HISTORY_LIMIT = 14;
+const MESSENGER_INITIAL_MESSAGE =
+  'We are pleased to inform you that the typewriter, as discussed, is ready for dispatch. The Society spares no expense in ensuring that our esteemed members receive only the finest instruments for their craft. We trust you are still expecting it? Of course you are. Just a quick confirmation before we proceed. Where shall we send it?';
 const TYPEWRITER_DEFAULT_FONTS = [
   { font: "'Uncial Antiqua', serif", font_size: '1.8rem', font_color: '#3b1d15' },
   { font: "'IM Fell English SC', serif", font_size: '1.9rem', font_color: '#2a120f' },
@@ -735,6 +740,269 @@ function buildMockContinuation(message) {
   if (words <= 12) return 'and the trail answered with bells buried under ash.';
   return 'as the pass fell quiet and every footstep sounded borrowed.';
 }
+
+function normalizeMessengerSceneId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_MESSENGER_SCENE_ID;
+}
+
+function normalizeMessengerHistoryLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_MESSENGER_HISTORY_LIMIT;
+  }
+  return Math.max(4, Math.min(40, Math.floor(parsed)));
+}
+
+function toMessengerMessagePayload(doc) {
+  return {
+    id: String(doc?._id || ''),
+    order: Number(doc?.order) || 0,
+    type: typeof doc?.type === 'string' ? doc.type : 'response',
+    sender: typeof doc?.sender === 'string' ? doc.sender : 'system',
+    text: typeof doc?.content === 'string' ? doc.content : '',
+    hasChatEnded: Boolean(doc?.has_chat_ended),
+    createdAt: doc?.createdAt || null
+  };
+}
+
+async function ensureMessengerIntroMessage(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID) {
+  const existing = await ChatMessage.findOne({ sessionId, sceneId, type: 'initial' }).sort({ order: 1 });
+  if (existing) {
+    return existing;
+  }
+
+  return ChatMessage.create({
+    sessionId,
+    sceneId,
+    order: Date.now(),
+    sender: 'system',
+    content: MESSENGER_INITIAL_MESSAGE,
+    type: 'initial',
+    has_chat_ended: false
+  });
+}
+
+async function loadMessengerHistoryDocs(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID) {
+  return ChatMessage.find({ sessionId, sceneId }).sort({ order: 1, createdAt: 1 });
+}
+
+function buildMessengerPromptMessages(historyDocs, promptTemplate, maxHistoryMessages = DEFAULT_MESSENGER_HISTORY_LIMIT) {
+  const safePrompt = typeof promptTemplate === 'string' && promptTemplate.trim()
+    ? promptTemplate.trim()
+    : 'You are a strange but professional courier for the Storyteller Society. Return JSON only.';
+  const safeLimit = normalizeMessengerHistoryLimit(maxHistoryMessages);
+  const formattedHistory = (Array.isArray(historyDocs) ? historyDocs : []).map((doc) => ({
+    role: doc?.sender === 'user' ? 'user' : 'assistant',
+    content: typeof doc?.content === 'string' ? doc.content : ''
+  }));
+
+  if (formattedHistory.length <= safeLimit + 1) {
+    return [{ role: 'system', content: safePrompt }, ...formattedHistory];
+  }
+
+  const [initialMessage, ...rest] = formattedHistory;
+  return [{ role: 'system', content: safePrompt }, initialMessage, ...rest.slice(-safeLimit)];
+}
+
+function buildMockMessengerResponse(message, historyDocs = []) {
+  const normalizedMessage = typeof message === 'string' ? message.trim() : '';
+  const lowerMessage = normalizedMessage.toLowerCase();
+  const priorUserTurns = (Array.isArray(historyDocs) ? historyDocs : []).filter((entry) => entry?.sender === 'user').length;
+  const mentionsLocation = /(window|bay|attic|apartment|room|woods|forest|desert|plateau|harbor|house|flat|studio|tower|lane|street|road|courtyard|monastery|pass|cellar|basement)/i.test(normalizedMessage);
+  const mentionsHiding = /(hide|hiding|closet|cupboard|cabinet|wardrobe|locker|crate|cellar|under|beneath|false wall|safe|chest|trunk|crawlspace)/i.test(normalizedMessage);
+  const shouldEnd = (mentionsLocation && mentionsHiding) || priorUserTurns >= 2;
+
+  if (shouldEnd) {
+    return {
+      has_chat_ended: true,
+      message_assistant:
+        'Splendid. That will do very nicely. I have noted the room, the atmosphere, and the discreet means by which the machine may disappear should the need arise. The Society shall make its arrangements, and if anyone asks, we were never here.'
+    };
+  }
+
+  if (mentionsLocation || priorUserTurns >= 1) {
+    return {
+      has_chat_ended: false,
+      message_assistant:
+        'Excellent. We are beginning to see the room properly now. One final practical matter: if the typewriter had to vanish at short notice, where exactly would you conceal it, and what in that place would keep it safe from idle hands?'
+    };
+  }
+
+  if (/address|send|deliver|dispatch|ship|post/i.test(lowerMessage)) {
+    return {
+      has_chat_ended: false,
+      message_assistant:
+        'Quite. But an address alone is such a blunt instrument. We require the atmosphere as well: the table, the light, the weather at the window, the noises in the corridor, and the sort of room in which the keys will learn your habits.'
+    };
+  }
+
+  return {
+    has_chat_ended: false,
+    message_assistant:
+      'Yes, yes, but where will it actually live once it reaches you? We need the physical truth of it: the room, the surface, the view, the air, and any nearby place in which a very precious typewriter might be hidden without remark.'
+  };
+}
+
+async function buildMessengerConversationPayload(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID) {
+  await ensureMessengerIntroMessage(sessionId, sceneId);
+  const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId);
+  const messages = historyDocs.map(toMessengerMessagePayload);
+  return {
+    sessionId,
+    sceneId,
+    count: messages.length,
+    hasChatEnded: messages.some((message) => message.hasChatEnded),
+    messages
+  };
+}
+
+async function handleMessengerChatPost(req, res) {
+  try {
+    const body = req.body || {};
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+    const sceneId = normalizeMessengerSceneId(body.sceneId);
+
+    if (!sessionId || !message) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or message.' });
+    }
+
+    await ensureMessengerIntroMessage(sessionId, sceneId);
+
+    const baseOrder = Date.now();
+    await ChatMessage.create({
+      sessionId,
+      sceneId,
+      order: baseOrder,
+      sender: 'user',
+      content: message,
+      type: 'user',
+      has_chat_ended: false
+    });
+
+    const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId);
+    const messengerPipeline = await getAiPipelineSettings('messenger_chat');
+    const messengerProvider = typeof messengerPipeline?.provider === 'string'
+      ? messengerPipeline.provider
+      : 'openai';
+    const shouldMock = resolveMockMode(body, messengerPipeline.useMock);
+
+    let aiResponse;
+    if (shouldMock) {
+      aiResponse = buildMockMessengerResponse(message, historyDocs);
+    } else {
+      const promptDoc = await getLatestPromptTemplate('messenger_chat');
+      const routeConfig = await getRouteConfig('messenger_chat');
+      const promptTemplate = promptDoc?.promptTemplate || routeConfig?.promptTemplate || '';
+      aiResponse = await callJsonLlm({
+        prompts: buildMessengerPromptMessages(historyDocs, promptTemplate, body.maxHistoryMessages),
+        provider: messengerProvider,
+        model: messengerPipeline.model || '',
+        max_tokens: 1200,
+        explicitJsonObjectFormat: true
+      });
+    }
+
+    if (!aiResponse || typeof aiResponse !== 'object') {
+      return res.status(502).json({
+        message: 'Messenger generation failed.',
+        runtime: {
+          pipeline: 'messenger_chat',
+          provider: messengerProvider,
+          model: messengerPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    await validatePayloadForRoute('messenger_chat', aiResponse);
+
+    const reply = typeof aiResponse.message_assistant === 'string' ? aiResponse.message_assistant.trim() : '';
+    const hasChatEnded = Boolean(aiResponse.has_chat_ended);
+    if (!reply) {
+      return res.status(502).json({
+        message: 'Messenger generation returned an empty reply.',
+        runtime: {
+          pipeline: 'messenger_chat',
+          provider: messengerProvider,
+          model: messengerPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    await ChatMessage.create({
+      sessionId,
+      sceneId,
+      order: baseOrder + 1,
+      sender: 'system',
+      content: reply,
+      type: 'response',
+      has_chat_ended: hasChatEnded
+    });
+
+    const conversation = await buildMessengerConversationPayload(sessionId, sceneId);
+    return res.status(200).json({
+      ...conversation,
+      reply,
+      has_chat_ended: hasChatEnded,
+      mocked: shouldMock,
+      runtime: {
+        pipeline: 'messenger_chat',
+        provider: messengerProvider,
+        model: messengerPipeline.model || '',
+        mocked: shouldMock
+      }
+    });
+  } catch (error) {
+    if (error.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
+      return res.status(502).json({
+        message: resolveSchemaErrorMessage(error, 'Messenger chat schema validation failed.')
+      });
+    }
+    console.error('Error in POST /api/messenger/chat:', error);
+    return res.status(500).json({ message: 'Server error during messenger chat.' });
+  }
+}
+
+app.get('/api/messenger/chat', async (req, res) => {
+  try {
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
+    const sceneId = normalizeMessengerSceneId(req.query?.sceneId);
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const conversation = await buildMessengerConversationPayload(sessionId, sceneId);
+    return res.status(200).json(conversation);
+  } catch (error) {
+    console.error('Error in GET /api/messenger/chat:', error);
+    return res.status(500).json({ message: 'Server error while loading messenger chat.' });
+  }
+});
+
+app.post('/api/messenger/chat', handleMessengerChatPost);
+app.post('/api/sendMessage', handleMessengerChatPost);
+
+app.delete('/api/messenger/chat', async (req, res) => {
+  try {
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
+    const sceneId = normalizeMessengerSceneId(req.query?.sceneId);
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const deletion = await ChatMessage.deleteMany({ sessionId, sceneId });
+    return res.status(200).json({
+      sessionId,
+      sceneId,
+      deletedCount: deletion?.deletedCount || 0
+    });
+  } catch (error) {
+    console.error('Error in DELETE /api/messenger/chat:', error);
+    return res.status(500).json({ message: 'Server error while clearing messenger chat.' });
+  }
+});
 
 app.post('/api/next_film_image', async (req, res) => {
   try {
@@ -1982,7 +2250,10 @@ app.get('/api/admin/openai/models', requireAdmin, async (req, res) => {
 app.get('/api/admin/typewriter/prompts', requireAdmin, async (req, res) => {
   try {
     const latest = await listLatestPromptTemplates();
-    return res.status(200).json(latest);
+    return res.status(200).json({
+      ...latest,
+      pipelinesMeta: getTypewriterPromptDefinitions()
+    });
   } catch (error) {
     console.error('Error in GET /api/admin/typewriter/prompts:', error);
     return res.status(500).json({ message: 'Server error while loading typewriter prompts.' });
@@ -3031,12 +3302,15 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
     }
     storytellerDocIdForReset = storyteller._id;
 
-    const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
+    const storytellerMissionPipeline = await getAiPipelineSettings('storyteller_mission');
     const entityPipeline = await getAiPipelineSettings('entity_creation');
-    const storytellerProvider = typeof storytellerPipeline?.provider === 'string' ? storytellerPipeline.provider : 'openai';
+    const storytellerProvider = typeof storytellerMissionPipeline?.provider === 'string'
+      ? storytellerMissionPipeline.provider
+      : 'openai';
     const entityProvider = typeof entityPipeline?.provider === 'string' ? entityPipeline.provider : 'openai';
     const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
-    const shouldMockMission = resolveMockMode(body, storytellerPipeline.useMock);
+    const storytellerMissionPromptDoc = await getLatestPromptTemplate('storyteller_mission');
+    const shouldMockMission = resolveMockMode(body, storytellerMissionPipeline.useMock);
     const shouldMockSubEntities = resolveMockMode(body, entityPipeline.useMock);
     const durationDays = Number.isFinite(Number(duration)) ? Number(duration) : undefined;
 
@@ -3055,22 +3329,37 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
         subEntitySeed: `New sub-entities emerge around ${entity.name}: a revealing clue, a minor witness, and a tangible relic tied to the mission.`
       };
     } else {
-      const routeConfig = await getRouteConfig('storyteller_mission');
-      const prompt = renderPrompt(routeConfig.promptTemplate, {
-        storytellerName: storyteller?.name || '',
-        entityName: entity?.name || '',
-        entityType: entity?.type || entity?.ner_type || 'ENTITY',
-        entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
-        entityDescription: entity?.description || '',
-        entityLore: entity?.lore || '',
-        storytellingPoints,
-        message,
-        durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
-      });
+      let prompt = '';
+      if (storytellerMissionPromptDoc?.promptTemplate) {
+        prompt = renderPromptTemplateString(storytellerMissionPromptDoc.promptTemplate, {
+          storytellerName: storyteller?.name || '',
+          entityName: entity?.name || '',
+          entityType: entity?.type || entity?.ner_type || 'ENTITY',
+          entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
+          entityDescription: entity?.description || '',
+          entityLore: entity?.lore || '',
+          storytellingPoints,
+          message,
+          durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
+        });
+      } else {
+        const routeConfig = await getRouteConfig('storyteller_mission');
+        prompt = renderPrompt(routeConfig.promptTemplate, {
+          storytellerName: storyteller?.name || '',
+          entityName: entity?.name || '',
+          entityType: entity?.type || entity?.ner_type || 'ENTITY',
+          entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
+          entityDescription: entity?.description || '',
+          entityLore: entity?.lore || '',
+          storytellingPoints,
+          message,
+          durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
+        });
+      }
       missionResult = await callJsonLlm({
         prompts: [{ role: 'system', content: prompt }],
         provider: storytellerProvider,
-        model: storytellerPipeline.model || '',
+        model: storytellerMissionPipeline.model || '',
         max_tokens: 1200,
         explicitJsonObjectFormat: true
       });
@@ -3146,9 +3435,9 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       subEntities: savedSubEntities,
       runtime: {
         mission: {
-          pipeline: 'storyteller_creation',
+          pipeline: 'storyteller_mission',
           provider: storytellerProvider,
-          model: storytellerPipeline.model || '',
+          model: storytellerMissionPipeline.model || '',
           mocked: shouldMockMission
         },
         subEntities: {
@@ -3205,6 +3494,7 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
     const relationshipProvider = typeof relationshipPipeline?.provider === 'string'
       ? relationshipPipeline.provider
       : 'openai';
+    const relationshipPromptDoc = await getLatestPromptTemplate('relationship_evaluation');
 
     // Validate required parameters
     if (!sessionId || !playerId) {
@@ -3276,7 +3566,8 @@ async function handleArenaRelationship(req, res, { forceDryRun = false } = {}) {
       shouldMock,
       clusterContext,
       relationshipPipeline.model,
-      relationshipProvider
+      relationshipProvider,
+      relationshipPromptDoc?.promptTemplate || ''
     );
 
     // Handle rejection

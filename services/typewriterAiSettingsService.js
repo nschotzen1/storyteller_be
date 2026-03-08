@@ -14,6 +14,7 @@ const PIPELINE_DEFINITIONS = {
   story_continuation: {
     key: 'story_continuation',
     label: 'Story Continuation',
+    description: '/api/send_typewriter_text',
     modelKind: 'text',
     defaultUseMock: process.env.TYPEWRITER_MOCK_MODE === 'true',
     defaultModel: process.env.TYPEWRITER_CONTINUATION_MODEL || 'gpt-5-mini',
@@ -23,12 +24,16 @@ const PIPELINE_DEFINITIONS = {
   memory_creation: {
     key: 'memory_creation',
     label: 'Memory Creation',
+    description: '/api/fragmentToMemories',
     modelKind: 'text',
     defaultUseMock: false,
     defaultModel: process.env.OPENAI_MEMORY_MODEL || 'gpt-5-mini',
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: DEFAULT_PROVIDER,
     countProperty: 'memoryCount',
+    countLabel: 'Default memory count',
+    minCount: 1,
+    maxCount: 10,
     defaultCount: Number.isFinite(Number(process.env.OPENAI_MEMORY_COUNT))
       ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_MEMORY_COUNT))), 10)
       : 3
@@ -36,12 +41,16 @@ const PIPELINE_DEFINITIONS = {
   entity_creation: {
     key: 'entity_creation',
     label: 'Entity Creation',
+    description: '/api/textToEntity',
     modelKind: 'text',
     defaultUseMock: false,
     defaultModel: process.env.OPENAI_ENTITY_MODEL || 'gpt-5-mini',
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: DEFAULT_PROVIDER,
     countProperty: 'entityCount',
+    countLabel: 'Default entity count',
+    minCount: 1,
+    maxCount: 12,
     defaultCount: Number.isFinite(Number(process.env.OPENAI_ENTITY_COUNT))
       ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_ENTITY_COUNT))), 12)
       : 8
@@ -49,19 +58,46 @@ const PIPELINE_DEFINITIONS = {
   storyteller_creation: {
     key: 'storyteller_creation',
     label: 'Storyteller Creation',
+    description: '/api/textToStoryteller (persona stage)',
     modelKind: 'text',
     defaultUseMock: false,
     defaultModel: process.env.OPENAI_STORYTELLER_MODEL || 'gpt-5-mini',
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: DEFAULT_PROVIDER,
     countProperty: 'storytellerCount',
+    countLabel: 'Default storyteller count',
+    minCount: 1,
+    maxCount: 10,
     defaultCount: Number.isFinite(Number(process.env.OPENAI_STORYTELLER_COUNT))
       ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_STORYTELLER_COUNT))), 10)
       : 4
   },
+  messenger_chat: {
+    key: 'messenger_chat',
+    label: 'Messenger Chat',
+    description: '/api/messenger/chat',
+    modelKind: 'text',
+    defaultUseMock: process.env.CHAT_MOCK_MODE === 'true',
+    defaultModel: process.env.OPENAI_MESSENGER_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_MESSENGER_PROVIDER || DEFAULT_PROVIDER
+  },
+  storyteller_mission: {
+    key: 'storyteller_mission',
+    label: 'Storyteller Mission',
+    description: '/api/sendStorytellerToEntity',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_STORYTELLER_MISSION_MODEL
+      || process.env.OPENAI_STORYTELLER_MODEL
+      || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_STORYTELLER_MISSION_PROVIDER || DEFAULT_PROVIDER
+  },
   relationship_evaluation: {
     key: 'relationship_evaluation',
     label: 'Relationship Evaluation',
+    description: '/api/arena/relationships/propose',
     modelKind: 'text',
     defaultUseMock: false,
     defaultModel: process.env.OPENAI_RELATIONSHIP_MODEL || 'gpt-5-mini',
@@ -71,6 +107,7 @@ const PIPELINE_DEFINITIONS = {
   texture_creation: {
     key: 'texture_creation',
     label: 'Texture Creation',
+    description: 'Card/front/back image generation',
     modelKind: 'image',
     defaultUseMock: false,
     defaultModel: process.env.OPENAI_TEXTURE_MODEL || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1',
@@ -80,6 +117,7 @@ const PIPELINE_DEFINITIONS = {
   illustration_creation: {
     key: 'illustration_creation',
     label: 'Illustration Creation',
+    description: '/api/textToStoryteller (illustration stage)',
     modelKind: 'image',
     defaultUseMock: false,
     defaultModel: process.env.OPENAI_ILLUSTRATION_MODEL || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1',
@@ -243,6 +281,7 @@ export function getTypewriterPipelineDefinitions() {
   return Object.values(PIPELINE_DEFINITIONS).map((definition) => ({
     key: definition.key,
     label: definition.label,
+    description: definition.description || '',
     modelKind: definition.modelKind,
     supportedProviders: [...(definition.supportedProviders || OPENAI_ONLY_PROVIDERS)],
     defaultProvider: normalizeProvider(
@@ -251,7 +290,15 @@ export function getTypewriterPipelineDefinitions() {
       definition.supportedProviders || OPENAI_ONLY_PROVIDERS
     ),
     countProperty: definition.countProperty || '',
-    supportsCount: typeof definition.defaultCount === 'number'
+    supportsCount: typeof definition.defaultCount === 'number',
+    countLabel: definition.countLabel || '',
+    minCount: Number.isFinite(Number(definition.minCount)) ? Number(definition.minCount) : 1,
+    maxCount: Number.isFinite(Number(definition.maxCount))
+      ? Number(definition.maxCount)
+      : definition.countProperty === 'entityCount'
+        ? 12
+        : 10,
+    defaultCount: typeof definition.defaultCount === 'number' ? definition.defaultCount : undefined
   }));
 }
 

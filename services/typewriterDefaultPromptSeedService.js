@@ -8,6 +8,7 @@ import {
   generate_entities_by_fragment,
   getNArchetypes
 } from '../ai/openai/promptsUtils.js';
+import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
 
 const DEFAULT_ENTITY_COUNT = 4;
 const DEFAULT_MAX_ENTITIES = 8;
@@ -177,6 +178,39 @@ async function buildStorytellerCreationPromptTemplate() {
   return routeConfig?.promptTemplate || '';
 }
 
+function buildMessengerChatPromptTemplate() {
+  return buildInitialChatPromptText();
+}
+
+async function buildStorytellerMissionPromptTemplate() {
+  const routeConfig = await getRouteConfig('storyteller_mission');
+  return routeConfig?.promptTemplate || '';
+}
+
+function buildRelationshipEvaluationPromptTemplate() {
+  return `You are a worldbuilding judge for a collaborative storytelling game.
+
+A player proposes a relationship between entities in an arena:
+- Source: {{source_json}}
+- Targets: {{targets_json}}
+- Proposed relationship: "{{relationship_surface_text}}"
+- Existing direct connections: {{existing_edges_json}}{{cluster_context_section}}
+
+Evaluate this relationship on:
+1. Type coherence (does it make sense for these entity types?)
+2. Specificity (is it descriptive, not vague?)
+3. Non-redundancy (is it different from existing edges?)
+4. Narrative grounding (does it feel plausible in this world?)
+5. Cluster coherence (does it fit with the broader network of relationships?)
+
+Return JSON:
+{
+  "verdict": "accepted" or "rejected",
+  "quality": { "score": 0-1, "confidence": 0-1, "reasons": ["..."] },
+  "suggestions": [{ "predicate": "...", "surfaceText": "..." }] // only if rejected
+}`;
+}
+
 function buildStorytellerKeyPromptTemplate() {
   return `Create a single isolated storyteller typewriter key replacement asset as a PNG with transparent background.
 
@@ -320,6 +354,40 @@ export async function getCurrentTypewriterPromptTemplates() {
       promptTemplate: await buildStorytellerCreationPromptTemplate(),
       source: 'services/llmRouteConfigService.js:text_to_storyteller.promptTemplate',
       variables: ['fragmentText', 'storytellerCount']
+    },
+    messenger_chat: {
+      pipelineKey: 'messenger_chat',
+      promptTemplate: buildMessengerChatPromptTemplate(),
+      source: 'ai/openai/personaChatPrompts.js:buildInitialChatPromptText',
+      variables: []
+    },
+    storyteller_mission: {
+      pipelineKey: 'storyteller_mission',
+      promptTemplate: await buildStorytellerMissionPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:storyteller_mission.promptTemplate',
+      variables: [
+        'storytellerName',
+        'entityName',
+        'entityType',
+        'entitySubtype',
+        'entityDescription',
+        'entityLore',
+        'storytellingPoints',
+        'message',
+        'durationDays'
+      ]
+    },
+    relationship_evaluation: {
+      pipelineKey: 'relationship_evaluation',
+      promptTemplate: buildRelationshipEvaluationPromptTemplate(),
+      source: 'services/arenaService.js:evaluateRelationship',
+      variables: [
+        'source_json',
+        'targets_json',
+        'relationship_surface_text',
+        'existing_edges_json',
+        'cluster_context_section'
+      ]
     },
     storyteller_key_creation: {
       pipelineKey: 'storyteller_key_creation',

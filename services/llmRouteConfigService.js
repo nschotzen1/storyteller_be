@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import Ajv from 'ajv';
 import { FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA } from '../contracts/fragmentMemoryContract.js';
+import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -139,6 +140,22 @@ Output JSON only.`,
             additionalProperties: true
           }
         }
+      },
+      additionalProperties: true
+    }
+  },
+  messenger_chat: {
+    routeKey: 'messenger_chat',
+    routePath: '/api/messenger/chat',
+    method: 'POST',
+    description: 'Drive the eerie typewriter-delivery messenger conversation.',
+    promptTemplate: buildInitialChatPromptText(),
+    responseSchema: {
+      type: 'object',
+      required: ['has_chat_ended', 'message_assistant'],
+      properties: {
+        has_chat_ended: { type: 'boolean' },
+        message_assistant: { type: 'string', minLength: 1 }
       },
       additionalProperties: true
     }
