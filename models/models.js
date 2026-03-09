@@ -16,6 +16,23 @@ const chatMessageSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+const messengerSceneBriefSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, index: true },
+  sceneId: { type: String, required: true, index: true },
+  subject: { type: String, default: '', index: true },
+  placeName: { type: String, default: '' },
+  placeSummary: { type: String, default: '' },
+  typewriterHidingSpot: { type: String, default: '' },
+  sensoryDetails: { type: [String], default: [] },
+  notableFeatures: { type: [String], default: [] },
+  sceneEstablished: { type: Boolean, default: false },
+  assistantReply: { type: String, default: '' },
+  source: { type: String, default: 'unknown' },
+  meta: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { timestamps: true });
+
+messengerSceneBriefSchema.index({ sessionId: 1, sceneId: 1 }, { unique: true });
+
 const narrativeFragmentSchema = new mongoose.Schema({
   session_id: { type: String, required: true },
   fragment: { type: mongoose.Schema.Types.Mixed, required: true },
@@ -62,6 +79,7 @@ if (process.env.NODE_ENV !== 'test') {
 
 
 export const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
+export const MessengerSceneBrief = mongoose.model('MessengerSceneBrief', messengerSceneBriefSchema);
 export const NarrativeFragment = mongoose.model('NarrativeFragment', narrativeFragmentSchema);
 export const SessionVector = mongoose.model('SessionVector', SessionVectorSchema);
 
@@ -141,6 +159,9 @@ const StorytellerSchema = new mongoose.Schema({
   keyShape: { type: String },
   keyBlankTextureUrl: { type: String },
   keySlotIndex: { type: Number },
+  introducedInTypewriter: { type: Boolean, default: false },
+  lastTypewriterInterventionAt: { type: Date, default: null },
+  typewriterInterventionsCount: { type: Number, default: 0 },
   status: { type: String, enum: ['active', 'in_mission'], default: 'active' },
   missions: {
     type: [

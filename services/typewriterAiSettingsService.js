@@ -72,6 +72,18 @@ const PIPELINE_DEFINITIONS = {
       ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_STORYTELLER_COUNT))), 10)
       : 4
   },
+  storyteller_intervention: {
+    key: 'storyteller_intervention',
+    label: 'Storyteller Intervention',
+    description: '/api/send_storyteller_typewriter_text',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_STORYTELLER_INTERVENTION_MODEL
+      || process.env.OPENAI_STORYTELLER_MODEL
+      || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_STORYTELLER_INTERVENTION_PROVIDER || DEFAULT_PROVIDER
+  },
   messenger_chat: {
     key: 'messenger_chat',
     label: 'Messenger Chat',

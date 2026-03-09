@@ -17,6 +17,76 @@ const CONFIG_DIR = path.resolve(__dirname, '..', 'config');
 const ROUTE_CONFIG_STORE_PATH = process.env.LLM_ROUTE_CONFIG_STORE_PATH
   || path.join(CONFIG_DIR, 'llm_route_config_versions.json');
 
+const STORYTELLER_TYPEWRITER_KEY_SCHEMA = {
+  type: 'object',
+  required: ['symbol', 'description', 'key_shape', 'shape_prompt_hint'],
+  properties: {
+    symbol: { type: 'string', minLength: 1 },
+    description: { type: 'string', minLength: 1 },
+    key_shape: {
+      type: 'string',
+      enum: ['horizontal', 'vertical', 'rect_horizontal']
+    },
+    shape_prompt_hint: { type: 'string', minLength: 1 }
+  },
+  additionalProperties: true
+};
+
+const STORYTELLER_INTERVENTION_STYLE_SCHEMA = {
+  type: 'object',
+  properties: {
+    font: { type: 'string' },
+    font_size: { type: 'string' },
+    font_color: { type: 'string' }
+  },
+  additionalProperties: true
+};
+
+const STORYTELLER_INTERVENTION_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['continuation', 'entity'],
+  properties: {
+    continuation: { type: 'string', minLength: 1 },
+    entity: {
+      type: 'object',
+      required: ['name', 'key_text', 'summary', 'type', 'subtype'],
+      properties: {
+        name: { type: 'string', minLength: 1 },
+        key_text: { type: 'string', minLength: 1 },
+        summary: { type: 'string', minLength: 1 },
+        type: { type: 'string', minLength: 1 },
+        subtype: { type: 'string', minLength: 1 },
+        lore: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } }
+      },
+      additionalProperties: true
+    },
+    style: STORYTELLER_INTERVENTION_STYLE_SCHEMA
+  },
+  additionalProperties: true
+};
+
+const MESSENGER_SCENE_BRIEF_SCHEMA = {
+  type: 'object',
+  required: ['subject', 'place_name', 'place_summary', 'typewriter_hiding_spot', 'sensory_details', 'notable_features', 'scene_established'],
+  properties: {
+    subject: { type: 'string' },
+    place_name: { type: 'string' },
+    place_summary: { type: 'string' },
+    typewriter_hiding_spot: { type: 'string' },
+    sensory_details: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    notable_features: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    scene_established: { type: 'boolean' }
+  },
+  additionalProperties: true
+};
+
 const DEFAULT_ROUTE_CONFIGS = {
   worlds_create: {
     routeKey: 'worlds_create',
@@ -105,7 +175,7 @@ Return JSON object with key "storytellers" containing {{storytellerCount}} entri
 Each storyteller must include:
 - name
 - immediate_ghost_appearance
-- typewriter_key { symbol, description }
+- typewriter_key { symbol, description, key_shape, shape_prompt_hint }
 - influences (array)
 - known_universes (array)
 - level (1-20)
@@ -115,6 +185,8 @@ Rules for typewriter_key:
 - symbol must be a strange, visual icon concept in 1-3 words
 - symbol must never be a letter, number, or readable text
 - description should describe physical material, wear, mood, and aura of the key face
+- key_shape must be one of: horizontal, vertical, rect_horizontal
+- shape_prompt_hint must be a short phrase explaining how the symbol should sit within the silhouette
 - keep the icon bold and readable at small UI size
 
 Output JSON only.`,
@@ -135,14 +207,7 @@ Output JSON only.`,
             properties: {
               name: { type: 'string', minLength: 1 },
               immediate_ghost_appearance: { type: 'string' },
-              typewriter_key: {
-                type: 'object',
-                properties: {
-                  symbol: { type: 'string' },
-                  description: { type: 'string' }
-                },
-                additionalProperties: true
-              },
+              typewriter_key: STORYTELLER_TYPEWRITER_KEY_SCHEMA,
               influences: { type: 'array', items: { type: 'string' } },
               known_universes: { type: 'array', items: { type: 'string' } },
               level: { type: 'number' },
@@ -163,6 +228,96 @@ Output JSON only.`,
       additionalProperties: true
     }
   },
+  storyteller_typewriter_intervention: {
+    routeKey: 'storyteller_typewriter_intervention',
+    routePath: '/api/send_storyteller_typewriter_text',
+    method: 'POST',
+    description: 'Generate a short storyteller entrance/intervention plus one new entity key.',
+    promptMode: 'manual',
+    promptTemplate: `You are a hidden storyteller joining an already-unfolding scene.
+
+You are:
+- Name: {{storyteller_name}}
+- Immediate appearance: {{storyteller_immediate_ghost_appearance}}
+- Typewriter key symbol: {{storyteller_symbol}}
+- Typewriter key description: {{storyteller_key_description}}
+- Voice: {{storyteller_voice}}
+- Age: {{storyteller_age}}
+- Style: {{storyteller_style}}
+- Influences: {{storyteller_influences}}
+- Known universes: {{storyteller_known_universes}}
+- Already introduced in this typewriter session: {{storyteller_already_introduced}}
+
+Current narrative fragment:
+"""
+{{fragment_text}}
+"""
+
+Your task:
+- Write a short storyteller intervention that enters the scene seamlessly, as if you had been there all along.
+- If you were not introduced before, briefly introduce yourself in-world without breaking tone.
+- Notice one specific thing in the fragment, investigate it, enrich the world with one fresh entity, and then drift back out.
+- The intervention must feel enchanting, observant, and precise rather than loud or expository.
+- Keep it concise: about 45-110 words.
+- Do not summarize the whole fragment.
+- Do not explain mechanics or mention players, prompts, APIs, JSON, or typewriters.
+
+You must also define one new entity discovered during this intervention.
+
+Style rules:
+- If you include style.font_color, it must be a dark, clearly legible CSS hex color suited for parchment.
+- Prefer one of these strong dark tones: #2a120f, #3b1d15, #5a1f17, #1f3558, #253f33, #43233d.
+- Never return white, pale gray, pastel, neon, or low-contrast colors.
+
+Return JSON only in this exact shape:
+{
+  "continuation": "String",
+  "entity": {
+    "name": "String",
+    "key_text": "1-3 words, suitable for a small textual typewriter key",
+    "summary": "Short vivid description",
+    "type": "String",
+    "subtype": "String",
+    "lore": "Optional short lore note",
+    "tags": ["String"]
+  },
+  "style": {
+    "font": "Optional font family",
+    "font_size": "Optional CSS size",
+    "font_color": "Optional dark CSS hex color"
+  }
+}`,
+    promptCore: '',
+    fieldDocs: {
+      continuation: '45-110 words, in-world, seamless entrance and exit.',
+      'entity.key_text': '1-3 words, compact enough for the typewriter entity key rail.',
+      'style.font_color': 'Use only dark, legible CSS hex colors suitable for parchment.'
+    },
+    examplePayload: {
+      continuation:
+        'It was then that I, Elias Rhode, allowed myself into the margin of the watchman\'s vigil and followed the slow intelligence nested in the blue light.',
+      entity: {
+        name: 'Buraha Light-Wake',
+        key_text: 'Buraha Light',
+        summary: 'A slow intelligence hiding inside the blue sea-lights, felt before it is understood.',
+        type: 'omen',
+        subtype: 'marine anomaly',
+        lore: 'It moves like weather pretending to be thought.',
+        tags: ['sea', 'light', 'witness']
+      },
+      style: {
+        font: "'EB Garamond', serif",
+        font_size: '1.95rem',
+        font_color: '#1f3558'
+      }
+    },
+    outputRules: [
+      'continuation must remain in-world and cannot mention gameplay or interfaces',
+      'entity.key_text must be concise and readable at small UI size',
+      'style.font_color must be dark and highly legible on parchment'
+    ],
+    responseSchema: STORYTELLER_INTERVENTION_RESPONSE_SCHEMA
+  },
   messenger_chat: {
     routeKey: 'messenger_chat',
     routePath: '/api/messenger/chat',
@@ -171,15 +326,37 @@ Output JSON only.`,
     promptMode: 'manual',
     promptTemplate: buildInitialChatPromptText(),
     promptCore: '',
-    fieldDocs: {},
-    examplePayload: null,
-    outputRules: [],
+    fieldDocs: {
+      message_assistant: 'The next in-character reply shown in the messenger thread.',
+      scene_brief: 'Running structured capture of the destination scene and the typewriter hideaway.',
+      'scene_brief.subject': 'Short browsable label for the place.',
+      'scene_brief.place_summary': 'Vivid establishing description of the room/place.',
+      'scene_brief.typewriter_hiding_spot': 'Concrete concealment location and why it works.'
+    },
+    examplePayload: {
+      has_chat_ended: true,
+      message_assistant: 'Excellent. The Society has what it needs. We know the room, the harbor weather, and the wardrobe where the machine may vanish without gossip.',
+      scene_brief: {
+        subject: 'Harbor attic watchroom',
+        place_name: 'Attic room above the harbor',
+        place_summary: 'A salt-stained attic room leans above the harbor, with a rain-marked window, a narrow oak worktable, and the low groan of rigging below. The air smells of damp rope, dust, and cold metal, making it immediately stageable as a place where a secret machine could begin its work.',
+        typewriter_hiding_spot: 'Inside the cedar wardrobe with a false back, high enough to stay dry and ordinary enough to escape notice.',
+        sensory_details: ['salt wind through the sash', 'harbor bells below', 'cedar dust in the wardrobe'],
+        notable_features: ['oak worktable', 'rain-marked window', 'cedar wardrobe with false back'],
+        scene_established: true
+      }
+    },
+    outputRules: [
+      'Do not end the chat until the place is vivid enough to stage a scene and the typewriter hiding place is concrete.',
+      'scene_brief.subject must be concise and easy to browse later in Mongo.'
+    ],
     responseSchema: {
       type: 'object',
-      required: ['has_chat_ended', 'message_assistant'],
+      required: ['has_chat_ended', 'message_assistant', 'scene_brief'],
       properties: {
         has_chat_ended: { type: 'boolean' },
-        message_assistant: { type: 'string', minLength: 1 }
+        message_assistant: { type: 'string', minLength: 1 },
+        scene_brief: MESSENGER_SCENE_BRIEF_SCHEMA
       },
       additionalProperties: true
     }

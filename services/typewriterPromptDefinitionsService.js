@@ -47,6 +47,12 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/textToStoryteller persona generation',
     settingsKey: 'storyteller_creation'
   },
+  storyteller_intervention: {
+    key: 'storyteller_intervention',
+    label: 'Storyteller intervention',
+    description: '/api/send_storyteller_typewriter_text storyteller entrance continuation',
+    settingsKey: 'storyteller_intervention'
+  },
   messenger_chat: {
     key: 'messenger_chat',
     label: 'Messenger chat',

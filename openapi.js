@@ -274,17 +274,53 @@ export function buildOpenApiSpec() {
             createdAt: { type: 'string', format: 'date-time', nullable: true }
           }
         },
+        MessengerSceneBrief: {
+          type: 'object',
+          required: ['subject', 'placeSummary', 'typewriterHidingSpot', 'sensoryDetails', 'notableFeatures', 'sceneEstablished'],
+          properties: {
+            id: { type: 'string' },
+            subject: { type: 'string', example: 'Harbor attic watchroom' },
+            placeName: { type: 'string', example: 'Attic room above the harbor' },
+            placeSummary: {
+              type: 'string',
+              example: 'A salt-stained attic room leans above the harbor with a rain-marked window, a narrow oak worktable, and the low groan of rigging below.'
+            },
+            typewriterHidingSpot: {
+              type: 'string',
+              example: 'Inside the cedar wardrobe with a false back, high enough to stay dry and ordinary enough to escape notice.'
+            },
+            sensoryDetails: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            notableFeatures: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            sceneEstablished: { type: 'boolean' },
+            assistantReply: { type: 'string' },
+            source: { type: 'string' },
+            createdAt: { type: 'string', format: 'date-time', nullable: true },
+            updatedAt: { type: 'string', format: 'date-time', nullable: true },
+            meta: { type: 'object', additionalProperties: true }
+          }
+        },
         MessengerConversationResponse: {
           type: 'object',
-          required: ['sessionId', 'sceneId', 'count', 'hasChatEnded', 'messages'],
+          required: ['sessionId', 'sceneId', 'count', 'hasChatEnded', 'messages', 'storage'],
           properties: {
             sessionId: { type: 'string' },
             sceneId: { type: 'string' },
             count: { type: 'integer', minimum: 0 },
             hasChatEnded: { type: 'boolean' },
+            storage: { type: 'string', enum: ['mongo', 'file'] },
             messages: {
               type: 'array',
               items: { $ref: '#/components/schemas/MessengerChatMessage' }
+            },
+            sceneBrief: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/MessengerSceneBrief' }]
             }
           }
         },
@@ -304,7 +340,8 @@ export function buildOpenApiSpec() {
                     pipeline: { type: 'string' },
                     provider: { type: 'string' },
                     model: { type: 'string' },
-                    mocked: { type: 'boolean' }
+                    mocked: { type: 'boolean' },
+                    storage: { type: 'string', enum: ['mongo', 'file'] }
                   },
                   additionalProperties: true
                 }
@@ -427,7 +464,23 @@ export function buildOpenApiSpec() {
           type: 'object',
           properties: {
             sessionId: { type: 'string' },
-            fragment: { type: 'string' }
+            fragment: { type: 'string' },
+            entityKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
+            }
+          }
+        },
+        TypewriterStoryEntityKey: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            entityName: { type: 'string' },
+            keyText: { type: 'string' },
+            summary: { type: 'string' },
+            storytellerId: { type: 'string' },
+            storytellerName: { type: 'string' },
+            createdAt: { type: 'string', format: 'date-time', nullable: true }
           }
         },
         TypewriterStorytellerSlot: {
@@ -460,8 +513,41 @@ export function buildOpenApiSpec() {
             slots: {
               type: 'array',
               items: { $ref: '#/components/schemas/TypewriterStorytellerSlot' }
+            },
+            entityKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
             }
           }
+        },
+        TypewriterStorytellerInterventionResponse: {
+          allOf: [
+            { $ref: '#/components/schemas/TypewriterResponse' },
+            {
+              type: 'object',
+              properties: {
+                sessionId: { type: 'string' },
+                fragment: { type: 'string' },
+                storyteller: { type: 'object', additionalProperties: true },
+                entityKey: { $ref: '#/components/schemas/TypewriterStoryEntityKey' },
+                entityKeys: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
+                },
+                mocked: { type: 'boolean' },
+                runtime: {
+                  type: 'object',
+                  properties: {
+                    pipeline: { type: 'string' },
+                    provider: { type: 'string' },
+                    model: { type: 'string' },
+                    mocked: { type: 'boolean' }
+                  },
+                  additionalProperties: true
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -987,7 +1073,8 @@ export function buildOpenApiSpec() {
                   type: 'object',
                   properties: {
                     sessionId: { type: 'string' },
-                    fragment: { type: 'string' }
+                    fragment: { type: 'string' },
+                    playerId: { type: 'string' }
                   }
                 }
               }
@@ -1032,6 +1119,44 @@ export function buildOpenApiSpec() {
               ...jsonResponse({ $ref: '#/components/schemas/TypewriterStorytellerKeyCheckResponse' })
             },
             '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/send_storyteller_typewriter_text': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Let a storyteller enter the page and briefly continue the narrative',
+          importance: 'High',
+          flow: 'Pressed storyteller keys trigger this route to perform a short intervention and surface one new textual entity key.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    storytellerId: { type: 'string' },
+                    slotIndex: { type: 'integer' },
+                    playerId: { type: 'string' },
+                    fadeTimingScale: { type: 'number' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Storyteller intervention sequence plus the newly surfaced entity key.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterStorytellerInterventionResponse' })
+            },
+            '400': { description: 'Missing storyteller target.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Storyteller not found for session.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },

@@ -150,7 +150,13 @@ const entitySchema = new mongoose.Schema({
   turn: { type: mongoose.Schema.Types.Mixed },
   skillsAndRolls: { type: mongoose.Schema.Types.Mixed },
   evolutionState: { type: String },
-  evolutionNotes: { type: String }
+  evolutionNotes: { type: String },
+  typewriterKeyText: { type: String, index: true },
+  typewriterSource: { type: String },
+  introducedByStorytellerId: { type: String, index: true },
+  introducedByStorytellerName: { type: String },
+  sourceStorytellerKeySlot: { type: Number },
+  activeInTypewriter: { type: Boolean, default: false }
 });
 
 export const NarrativeEntity = mongoose.model('NarrativeEntity', entitySchema);
