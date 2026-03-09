@@ -127,6 +127,7 @@ const PIPELINE_DEFINITIONS = {
 };
 
 let cachedSettings = null;
+let cachedSettingsMtimeMs = -1;
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -247,6 +248,18 @@ async function readSettingsFile() {
   }
 }
 
+async function readSettingsFileMtimeMs() {
+  try {
+    const stat = await fs.stat(SETTINGS_PATH);
+    return Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : -1;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return -1;
+    }
+    throw error;
+  }
+}
+
 async function writeSettingsFile(settings) {
   await fs.mkdir(CONFIG_DIR, { recursive: true });
   await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf8');
@@ -303,12 +316,14 @@ export function getTypewriterPipelineDefinitions() {
 }
 
 export async function getTypewriterAiSettings() {
-  if (cachedSettings) {
+  const currentMtimeMs = await readSettingsFileMtimeMs();
+  if (cachedSettings && cachedSettingsMtimeMs === currentMtimeMs) {
     return deepClone(cachedSettings);
   }
 
   const fromDisk = await readSettingsFile();
   cachedSettings = normalizeSettings(fromDisk || {});
+  cachedSettingsMtimeMs = currentMtimeMs;
   return deepClone(cachedSettings);
 }
 
@@ -372,6 +387,7 @@ export async function updateTypewriterAiSettings(payload = {}, updatedBy = 'admi
 
   cachedSettings = normalizeSettings(next);
   await writeSettingsFile(cachedSettings);
+  cachedSettingsMtimeMs = await readSettingsFileMtimeMs();
   return deepClone(cachedSettings);
 }
 
@@ -381,5 +397,6 @@ export async function resetTypewriterAiSettings(updatedBy = 'admin') {
   resetValue.updatedBy = typeof updatedBy === 'string' ? updatedBy : 'admin';
   cachedSettings = normalizeSettings(resetValue);
   await writeSettingsFile(cachedSettings);
+  cachedSettingsMtimeMs = await readSettingsFileMtimeMs();
   return deepClone(cachedSettings);
 }

@@ -1167,9 +1167,17 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
     await startTypewriterSession(sessionId);
     const fragmentText = await getTypewriterSessionFragment(sessionId);
     const narrativeWordCount = countWords(fragmentText);
+    const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
+    const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
+    const shouldMockStorytellers = resolveMockMode(body, storytellerPipeline.useMock);
+    const shouldMockIllustrations = resolveMockMode(body, illustrationPipeline.useMock);
+    const allowMockSlots = shouldMockStorytellers || shouldMockIllustrations;
     const assignedStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
-    const nextAvailableSlot = findNextAvailableTypewriterStorytellerSlot(assignedStorytellers);
-    const currentAssignedCount = assignedStorytellers.length;
+    const effectiveAssignedStorytellers = filterAssignedTypewriterStorytellers(assignedStorytellers, {
+      allowMockSlots
+    });
+    const nextAvailableSlot = findNextAvailableTypewriterStorytellerSlot(effectiveAssignedStorytellers);
+    const currentAssignedCount = effectiveAssignedStorytellers.length;
     const currentThreshold = getTypewriterStorytellerThreshold(currentAssignedCount);
     const shouldCreate = Boolean(nextAvailableSlot && currentThreshold !== null && narrativeWordCount >= currentThreshold);
 
@@ -1187,8 +1195,9 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
 
     const storytellers = createdStoryteller
       ? await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId)
-      : assignedStorytellers;
-    const filledCount = storytellers.length;
+      : effectiveAssignedStorytellers;
+    const visibleStorytellers = filterAssignedTypewriterStorytellers(storytellers, { allowMockSlots });
+    const filledCount = visibleStorytellers.length;
     const nextThreshold = getTypewriterStorytellerThreshold(filledCount);
 
     return res.status(200).json({
@@ -1200,7 +1209,7 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
       createdStoryteller: createdStoryteller ? buildStorytellerListItem(createdStoryteller) : null,
       assignedStorytellerCount: filledCount,
       nextThreshold,
-      slots: buildTypewriterStorytellerSlots(storytellers)
+      slots: buildTypewriterStorytellerSlots(visibleStorytellers)
     });
   } catch (error) {
     console.error('Error in /api/shouldCreateStorytellerKey:', error);
@@ -1524,6 +1533,21 @@ function buildTypewriterStorytellerSlots(storytellers = []) {
   return TYPEWRITER_STORYTELLER_KEY_SLOTS.map((slotDefinition) =>
     buildTypewriterStorytellerSlotState(slotDefinition, storytellerBySlot.get(slotDefinition.slotIndex) || null)
   );
+}
+
+function isMockStorytellerKeyUrl(value) {
+  return typeof value === 'string' && value.includes('/assets/mocks/storyteller_keys/');
+}
+
+function isReplaceableMockTypewriterStoryteller(storyteller) {
+  const keyImageUrl = firstDefinedString(storyteller?.keyImageLocalUrl, storyteller?.keyImageUrl);
+  return isMockStorytellerKeyUrl(keyImageUrl);
+}
+
+function filterAssignedTypewriterStorytellers(storytellers = [], options = {}) {
+  const allowMockSlots = options.allowMockSlots !== false;
+  if (allowMockSlots) return storytellers;
+  return storytellers.filter((storyteller) => !isReplaceableMockTypewriterStoryteller(storyteller));
 }
 
 function findNextAvailableTypewriterStorytellerSlot(storytellers = []) {

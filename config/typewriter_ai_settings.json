@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-08T13:16:28.823Z",
+  "updatedAt": "2026-03-09T01:14:39.180Z",
   "updatedBy": "story-admin-ui",
   "pipelines": {
     "story_continuation": {
@@ -32,7 +32,7 @@
       "key": "storyteller_creation",
       "label": "Storyteller Creation",
       "modelKind": "text",
-      "useMock": true,
+      "useMock": false,
       "model": "gpt-5-mini",
       "provider": "openai",
       "storytellerCount": 4
@@ -42,8 +42,8 @@
       "label": "Messenger Chat",
       "modelKind": "text",
       "useMock": false,
-      "model": "gpt-5-mini",
-      "provider": "openai"
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic"
     },
     "storyteller_mission": {
       "key": "storyteller_mission",
@@ -73,7 +73,7 @@
       "key": "illustration_creation",
       "label": "Illustration Creation",
       "modelKind": "image",
-      "useMock": true,
+      "useMock": false,
       "model": "gpt-image-1-mini",
       "provider": "openai"
     }
