@@ -4,6 +4,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 
 let app;
 let ChatMessage;
+let MessengerSceneBrief;
 let TypewriterPromptTemplate;
 let mongoServer;
 
@@ -106,7 +107,7 @@ beforeAll(async () => {
   const mongoUri = mongoServer.getUri();
 
   ({ app } = await import('./server_new.js'));
-  ({ ChatMessage, TypewriterPromptTemplate } = await import('./models/models.js'));
+  ({ ChatMessage, MessengerSceneBrief, TypewriterPromptTemplate } = await import('./models/models.js'));
 
   if (mongoose.connection.readyState !== 0) {
     await mongoose.disconnect();
@@ -120,6 +121,9 @@ beforeAll(async () => {
 afterEach(async () => {
   if (ChatMessage) {
     await ChatMessage.deleteMany({});
+  }
+  if (MessengerSceneBrief) {
+    await MessengerSceneBrief.deleteMany({});
   }
   if (TypewriterPromptTemplate) {
     await TypewriterPromptTemplate.deleteMany({});
@@ -150,6 +154,7 @@ describe('messenger chat routes and admin exposure', () => {
       })
     );
     expect(initialHistory.body.messages[0].text).toContain('typewriter');
+    expect(initialHistory.body.sceneBrief).toBeNull();
 
     const firstReply = await invokeRoute('post', '/api/messenger/chat', {
       body: {
@@ -169,6 +174,13 @@ describe('messenger chat routes and admin exposure', () => {
     );
     expect(firstReply.body.messages.filter((message) => message.sender === 'user')).toHaveLength(1);
     expect(firstReply.body.has_chat_ended).toBe(false);
+    expect(firstReply.body.sceneBrief).toEqual(
+      expect.objectContaining({
+        subject: expect.any(String),
+        placeSummary: expect.stringMatching(/harbor|attic/i),
+        sceneEstablished: false
+      })
+    );
 
     const legacyAliasReply = await invokeRoute('post', '/api/sendMessage', {
       body: {
@@ -181,16 +193,27 @@ describe('messenger chat routes and admin exposure', () => {
     expect(legacyAliasReply.status).toBe(200);
     expect(legacyAliasReply.body.messages.filter((message) => message.type === 'initial')).toHaveLength(1);
     expect(legacyAliasReply.body.has_chat_ended).toBe(true);
+    expect(legacyAliasReply.body.sceneBrief).toEqual(
+      expect.objectContaining({
+        subject: expect.any(String),
+        typewriterHidingSpot: expect.stringMatching(/wardrobe|false back/i),
+        sceneEstablished: true
+      })
+    );
 
     const storedCount = await ChatMessage.countDocuments({ sessionId, sceneId: 'messanger' });
     expect(storedCount).toBe(5);
+    const sceneBriefCount = await MessengerSceneBrief.countDocuments({ sessionId, sceneId: 'messanger' });
+    expect(sceneBriefCount).toBe(1);
 
     const deletion = await invokeRoute('delete', '/api/messenger/chat', {
       query: { sessionId }
     });
 
     expect(deletion.status).toBe(200);
-    expect(deletion.body.deletedCount).toBe(5);
+    expect(deletion.body.deletedMessagesCount).toBe(5);
+    expect(deletion.body.deletedSceneBriefCount).toBe(1);
+    expect(deletion.body.deletedCount).toBe(6);
 
     const reloadedHistory = await invokeRoute('get', '/api/messenger/chat', {
       query: { sessionId }
@@ -199,6 +222,7 @@ describe('messenger chat routes and admin exposure', () => {
     expect(reloadedHistory.status).toBe(200);
     expect(reloadedHistory.body.messages).toHaveLength(1);
     expect(reloadedHistory.body.hasChatEnded).toBe(false);
+    expect(reloadedHistory.body.sceneBrief).toBeNull();
   });
 
   test('exposes messenger controls through story admin and swagger', async () => {

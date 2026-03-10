@@ -72,6 +72,18 @@ const PIPELINE_DEFINITIONS = {
       ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_STORYTELLER_COUNT))), 10)
       : 4
   },
+  storyteller_intervention: {
+    key: 'storyteller_intervention',
+    label: 'Storyteller Intervention',
+    description: '/api/send_storyteller_typewriter_text',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_STORYTELLER_INTERVENTION_MODEL
+      || process.env.OPENAI_STORYTELLER_MODEL
+      || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_STORYTELLER_INTERVENTION_PROVIDER || DEFAULT_PROVIDER
+  },
   messenger_chat: {
     key: 'messenger_chat',
     label: 'Messenger Chat',
@@ -81,6 +93,16 @@ const PIPELINE_DEFINITIONS = {
     defaultModel: process.env.OPENAI_MESSENGER_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_MESSENGER_PROVIDER || DEFAULT_PROVIDER
+  },
+  immersive_rpg_gm: {
+    key: 'immersive_rpg_gm',
+    label: 'Immersive RPG GM',
+    description: '/api/immersive-rpg/chat',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_IMMERSIVE_RPG_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_IMMERSIVE_RPG_PROVIDER || DEFAULT_PROVIDER
   },
   storyteller_mission: {
     key: 'storyteller_mission',
@@ -127,6 +149,7 @@ const PIPELINE_DEFINITIONS = {
 };
 
 let cachedSettings = null;
+let cachedSettingsMtimeMs = -1;
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -247,6 +270,18 @@ async function readSettingsFile() {
   }
 }
 
+async function readSettingsFileMtimeMs() {
+  try {
+    const stat = await fs.stat(SETTINGS_PATH);
+    return Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : -1;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return -1;
+    }
+    throw error;
+  }
+}
+
 async function writeSettingsFile(settings) {
   await fs.mkdir(CONFIG_DIR, { recursive: true });
   await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf8');
@@ -303,12 +338,14 @@ export function getTypewriterPipelineDefinitions() {
 }
 
 export async function getTypewriterAiSettings() {
-  if (cachedSettings) {
+  const currentMtimeMs = await readSettingsFileMtimeMs();
+  if (cachedSettings && cachedSettingsMtimeMs === currentMtimeMs) {
     return deepClone(cachedSettings);
   }
 
   const fromDisk = await readSettingsFile();
   cachedSettings = normalizeSettings(fromDisk || {});
+  cachedSettingsMtimeMs = currentMtimeMs;
   return deepClone(cachedSettings);
 }
 
@@ -372,6 +409,7 @@ export async function updateTypewriterAiSettings(payload = {}, updatedBy = 'admi
 
   cachedSettings = normalizeSettings(next);
   await writeSettingsFile(cachedSettings);
+  cachedSettingsMtimeMs = await readSettingsFileMtimeMs();
   return deepClone(cachedSettings);
 }
 
@@ -381,5 +419,6 @@ export async function resetTypewriterAiSettings(updatedBy = 'admin') {
   resetValue.updatedBy = typeof updatedBy === 'string' ? updatedBy : 'admin';
   cachedSettings = normalizeSettings(resetValue);
   await writeSettingsFile(cachedSettings);
+  cachedSettingsMtimeMs = await readSettingsFileMtimeMs();
   return deepClone(cachedSettings);
 }

@@ -47,11 +47,23 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/textToStoryteller persona generation',
     settingsKey: 'storyteller_creation'
   },
+  storyteller_intervention: {
+    key: 'storyteller_intervention',
+    label: 'Storyteller intervention',
+    description: '/api/send_storyteller_typewriter_text storyteller entrance continuation',
+    settingsKey: 'storyteller_intervention'
+  },
   messenger_chat: {
     key: 'messenger_chat',
     label: 'Messenger chat',
     description: '/api/messenger/chat assistant prompt',
     settingsKey: 'messenger_chat'
+  },
+  immersive_rpg_gm: {
+    key: 'immersive_rpg_gm',
+    label: 'Immersive RPG GM',
+    description: '/api/immersive-rpg/chat GM orchestration prompt',
+    settingsKey: 'immersive_rpg_gm'
   },
   storyteller_mission: {
     key: 'storyteller_mission',

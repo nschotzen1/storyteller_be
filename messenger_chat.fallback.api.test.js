@@ -7,7 +7,9 @@ let app;
 
 process.env.NODE_ENV = 'test';
 process.env.MESSENGER_CONVERSATION_STORE_PATH = path.join(TEMP_DIR, 'messenger_conversations.json');
+process.env.MESSENGER_SCENE_BRIEF_STORE_PATH = path.join(TEMP_DIR, 'messenger_scene_briefs.json');
 process.env.TYPEWRITER_PROMPT_STORE_PATH = path.join(TEMP_DIR, 'typewriter_prompt_templates.json');
+process.env.LLM_ROUTE_CONFIG_STORE_PATH = path.join(TEMP_DIR, 'llm_route_config_versions.json');
 
 beforeAll(async () => {
   ({ app } = await import('./server_new.js'));
@@ -112,7 +114,9 @@ beforeEach(async () => {
 afterAll(async () => {
   await fs.rm(TEMP_DIR, { recursive: true, force: true });
   delete process.env.MESSENGER_CONVERSATION_STORE_PATH;
+  delete process.env.MESSENGER_SCENE_BRIEF_STORE_PATH;
   delete process.env.TYPEWRITER_PROMPT_STORE_PATH;
+  delete process.env.LLM_ROUTE_CONFIG_STORE_PATH;
 });
 
 describe('messenger chat fallback without mongo', () => {
@@ -132,6 +136,7 @@ describe('messenger chat fallback without mongo', () => {
         type: 'initial'
       })
     );
+    expect(initialHistory.body.sceneBrief).toBeNull();
 
     const promptIndex = await invokeRoute('get', '/api/admin/typewriter/prompts');
 
@@ -201,10 +206,24 @@ describe('messenger chat fallback without mongo', () => {
         promptTemplate: 'You are the Society courier. Return JSON only.',
         responseSchema: {
           type: 'object',
-          required: ['has_chat_ended', 'message_assistant'],
+          required: ['has_chat_ended', 'message_assistant', 'scene_brief'],
           properties: {
             has_chat_ended: { type: 'boolean' },
-            message_assistant: { type: 'string' }
+            message_assistant: { type: 'string' },
+            scene_brief: {
+              type: 'object',
+              required: ['subject', 'place_name', 'place_summary', 'typewriter_hiding_spot', 'sensory_details', 'notable_features', 'scene_established'],
+              properties: {
+                subject: { type: 'string' },
+                place_name: { type: 'string' },
+                place_summary: { type: 'string' },
+                typewriter_hiding_spot: { type: 'string' },
+                sensory_details: { type: 'array', items: { type: 'string' } },
+                notable_features: { type: 'array', items: { type: 'string' } },
+                scene_established: { type: 'boolean' }
+              },
+              additionalProperties: true
+            }
           },
           additionalProperties: true
         },
@@ -257,6 +276,13 @@ describe('messenger chat fallback without mongo', () => {
       })
     );
     expect(reply.body.messages).toHaveLength(3);
+    expect(reply.body.sceneBrief).toEqual(
+      expect.objectContaining({
+        subject: expect.any(String),
+        placeSummary: expect.stringMatching(/harbor/i),
+        sceneEstablished: false
+      })
+    );
 
     const deletion = await invokeRoute('delete', '/api/messenger/chat', {
       query: { sessionId }
@@ -265,7 +291,9 @@ describe('messenger chat fallback without mongo', () => {
     expect(deletion.status).toBe(200);
     expect(deletion.body).toEqual(
       expect.objectContaining({
-        deletedCount: 3,
+        deletedMessagesCount: 3,
+        deletedSceneBriefCount: 1,
+        deletedCount: 4,
         storage: 'file'
       })
     );

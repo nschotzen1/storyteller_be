@@ -9,6 +9,7 @@ import {
   getNArchetypes
 } from '../ai/openai/promptsUtils.js';
 import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
+import { getDefaultImmersiveRpgGmPromptTemplate } from './immersiveRpgService.js';
 
 const DEFAULT_ENTITY_COUNT = 4;
 const DEFAULT_MAX_ENTITIES = 8;
@@ -178,8 +179,73 @@ async function buildStorytellerCreationPromptTemplate() {
   return routeConfig?.promptTemplate || '';
 }
 
+async function buildStorytellerInterventionPromptTemplate() {
+  const routeConfig = await getRouteConfig('storyteller_typewriter_intervention');
+  if (routeConfig?.promptTemplate) {
+    return routeConfig.promptTemplate;
+  }
+
+  return `You are a hidden storyteller joining an already-unfolding scene.
+
+You are:
+- Name: {{storyteller_name}}
+- Immediate appearance: {{storyteller_immediate_ghost_appearance}}
+- Typewriter key symbol: {{storyteller_symbol}}
+- Typewriter key description: {{storyteller_key_description}}
+- Voice: {{storyteller_voice}}
+- Age: {{storyteller_age}}
+- Style: {{storyteller_style}}
+- Influences: {{storyteller_influences}}
+- Known universes: {{storyteller_known_universes}}
+- Already introduced in this typewriter session: {{storyteller_already_introduced}}
+
+Current narrative fragment:
+"""
+{{fragment_text}}
+"""
+
+Your task:
+- Write a short storyteller intervention that enters the scene seamlessly, as if you had been there all along.
+- If you were not introduced before, briefly introduce yourself in-world without breaking tone.
+- Notice one specific thing in the fragment, investigate it, enrich the world with one fresh entity, and then drift back out.
+- The intervention must feel enchanting, observant, and precise rather than loud or expository.
+- Keep it concise: about 45-110 words.
+- Do not summarize the whole fragment.
+- Do not explain mechanics or mention players, prompts, APIs, JSON, or typewriters.
+
+You must also define one new entity discovered during this intervention.
+
+Style rules:
+- If you include style.font_color, it must be a dark, clearly legible CSS hex color suited for parchment.
+- Prefer one of these strong dark tones: #2a120f, #3b1d15, #5a1f17, #1f3558, #253f33, #43233d.
+- Never return white, pale gray, pastel, neon, or low-contrast colors.
+
+Return JSON only in this exact shape:
+{
+  "continuation": "String",
+  "entity": {
+    "name": "String",
+    "key_text": "1-3 words, suitable for a small textual typewriter key",
+    "summary": "Short vivid description",
+    "type": "String",
+    "subtype": "String",
+    "lore": "Optional short lore note",
+    "tags": ["String"]
+  },
+  "style": {
+    "font": "Optional font family",
+    "font_size": "Optional CSS size",
+    "font_color": "Optional dark CSS hex color"
+  }
+}`;
+}
+
 function buildMessengerChatPromptTemplate() {
   return buildInitialChatPromptText();
+}
+
+function buildImmersiveRpgGmPromptTemplate() {
+  return getDefaultImmersiveRpgGmPromptTemplate();
 }
 
 async function buildStorytellerMissionPromptTemplate() {
@@ -355,10 +421,34 @@ export async function getCurrentTypewriterPromptTemplates() {
       source: 'services/llmRouteConfigService.js:text_to_storyteller.promptTemplate',
       variables: ['fragmentText', 'storytellerCount']
     },
+    storyteller_intervention: {
+      pipelineKey: 'storyteller_intervention',
+      promptTemplate: await buildStorytellerInterventionPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:storyteller_typewriter_intervention.promptTemplate',
+      variables: [
+        'storyteller_name',
+        'storyteller_immediate_ghost_appearance',
+        'storyteller_symbol',
+        'storyteller_key_description',
+        'storyteller_voice',
+        'storyteller_age',
+        'storyteller_style',
+        'storyteller_influences',
+        'storyteller_known_universes',
+        'storyteller_already_introduced',
+        'fragment_text'
+      ]
+    },
     messenger_chat: {
       pipelineKey: 'messenger_chat',
       promptTemplate: buildMessengerChatPromptTemplate(),
       source: 'ai/openai/personaChatPrompts.js:buildInitialChatPromptText',
+      variables: []
+    },
+    immersive_rpg_gm: {
+      pipelineKey: 'immersive_rpg_gm',
+      promptTemplate: buildImmersiveRpgGmPromptTemplate(),
+      source: 'services/immersiveRpgService.js:getDefaultImmersiveRpgGmPromptTemplate',
       variables: []
     },
     storyteller_mission: {

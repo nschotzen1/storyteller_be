@@ -11,12 +11,22 @@ import {
   listAvailableAnthropicModels,
   listAvailableOpenAiModels
 } from './ai/openai/apiService.js';
-import { ChatMessage, Storyteller, SessionPlayer, Arena, World, WorldElement, QuestScreenGraph } from './models/models.js';
+import {
+  ChatMessage,
+  Storyteller,
+  SessionPlayer,
+  Arena,
+  World,
+  WorldElement,
+  QuestScreenGraph,
+  ImmersiveRpgSceneSession,
+  ImmersiveRpgCharacterSheet
+} from './models/models.js';
 import {
   createStoryTellerKey,
   createStorytellerIllustration
 } from './services/storytellerService.js';
-import { NarrativeEntity } from './storyteller/utils.js';
+import { NarrativeEntity, upsertNarrativeEntity } from './storyteller/utils.js';
 import { textToEntityFromText } from './services/textToEntityService.js';
 import {
   normalizePredicate,
@@ -76,11 +86,34 @@ import {
   listStoredMessengerMessages
 } from './services/messengerConversationStore.js';
 import {
+  deleteMessengerSceneBrief,
+  getMessengerSceneBrief,
+  saveMessengerSceneBrief
+} from './services/messengerSceneBriefService.js';
+import {
   getTypewriterSessionFragment,
   mergeTypewriterFragment,
   saveTypewriterSessionFragment,
   startTypewriterSession
 } from './services/typewriterSessionService.js';
+import {
+  DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID,
+  DEFAULT_IMMERSIVE_RPG_PLAYER_ID,
+  DEFAULT_IMMERSIVE_RPG_PLAYER_NAME,
+  buildImmersiveRpgPromptMessages,
+  buildCharacterSheetSkeleton,
+  buildCompiledScenePrompt,
+  buildSceneBootstrap,
+  buildSkeletonSceneTurn,
+  createTranscriptEntry,
+  hasEnoughMessengerSceneBriefForRpg,
+  normalizeImmersiveRpgChatResponse,
+  normalizeMessengerSceneBriefForRpg,
+  resolveRollOutcome,
+  simulateDicePoolRoll,
+  toImmersiveRpgCharacterSheetPayload,
+  toImmersiveRpgScenePayload
+} from './services/immersiveRpgService.js';
 
 
 const app = express();
@@ -188,6 +221,16 @@ const TYPEWRITER_DEFAULT_FONTS = [
   { font: "'Uncial Antiqua', serif", font_size: '1.8rem', font_color: '#3b1d15' },
   { font: "'IM Fell English SC', serif", font_size: '1.9rem', font_color: '#2a120f' },
   { font: "'EB Garamond', serif", font_size: '2rem', font_color: '#1f0e08' }
+];
+const TYPEWRITER_MAX_FONT_COLOR_LUMINANCE = 0.24;
+const TYPEWRITER_FONT_COLOR_FALLBACK = '#2a120f';
+const TYPEWRITER_FONT_COLOR_KEYWORD_MAP = [
+  { keywords: ['red', 'crimson', 'scarlet', 'ember', 'rust', 'wine', 'oxblood', 'garnet'], color: '#5a1f17' },
+  { keywords: ['blue', 'azure', 'indigo', 'navy', 'storm', 'sea', 'cobalt'], color: '#1f3558' },
+  { keywords: ['green', 'moss', 'verdigris', 'jade', 'pine', 'forest'], color: '#253f33' },
+  { keywords: ['violet', 'plum', 'amethyst', 'mulberry'], color: '#43233d' },
+  { keywords: ['brown', 'sepia', 'umber', 'bronze', 'copper', 'sienna'], color: '#4a2d1f' },
+  { keywords: ['black', 'obsidian', 'ink', 'graphite', 'charcoal', 'ash', 'gray', 'grey', 'silver', 'iron'], color: '#2b2421' }
 ];
 const TYPEWRITER_MIN_FONT_SIZE_PX = 28;
 const TYPEWRITER_MIN_FONT_SIZE_REM = 1.75;
@@ -578,6 +621,81 @@ function normalizeTypewriterFontSize(fontSize) {
   return TYPEWRITER_DEFAULT_FONT_SIZE;
 }
 
+function expandHexColor(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const shortMatch = trimmed.match(/^#([0-9a-f]{3})$/i);
+  if (shortMatch) {
+    return `#${shortMatch[1].split('').map((char) => `${char}${char}`).join('').toLowerCase()}`;
+  }
+  const longMatch = trimmed.match(/^#([0-9a-f]{6})$/i);
+  if (longMatch) {
+    return `#${longMatch[1].toLowerCase()}`;
+  }
+  return null;
+}
+
+function parseHexColor(value) {
+  const expanded = expandHexColor(value);
+  if (!expanded) return null;
+  return {
+    r: Number.parseInt(expanded.slice(1, 3), 16),
+    g: Number.parseInt(expanded.slice(3, 5), 16),
+    b: Number.parseInt(expanded.slice(5, 7), 16)
+  };
+}
+
+function toHexColor({ r, g, b }) {
+  return `#${[r, g, b].map((channel) => {
+    const safeChannel = Math.max(0, Math.min(255, Math.round(channel)));
+    return safeChannel.toString(16).padStart(2, '0');
+  }).join('')}`;
+}
+
+function getRelativeLuminance({ r, g, b }) {
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+function darkenColorForTypewriter(rgb) {
+  const luminance = getRelativeLuminance(rgb);
+  if (luminance <= TYPEWRITER_MAX_FONT_COLOR_LUMINANCE) {
+    return rgb;
+  }
+  const scale = TYPEWRITER_MAX_FONT_COLOR_LUMINANCE / luminance;
+  return {
+    r: Math.max(12, Math.round(rgb.r * scale)),
+    g: Math.max(12, Math.round(rgb.g * scale)),
+    b: Math.max(12, Math.round(rgb.b * scale))
+  };
+}
+
+function pickTypewriterKeywordColor(value) {
+  const lowered = `${value || ''}`.trim().toLowerCase();
+  if (!lowered) return null;
+  const match = TYPEWRITER_FONT_COLOR_KEYWORD_MAP.find((entry) =>
+    entry.keywords.some((keyword) => lowered.includes(keyword))
+  );
+  return match?.color || null;
+}
+
+function normalizeTypewriterFontColor(fontColor) {
+  if (typeof fontColor !== 'string' || !fontColor.trim()) {
+    return TYPEWRITER_FONT_COLOR_FALLBACK;
+  }
+  const normalizedRaw = fontColor.trim().toLowerCase();
+  const expanded = expandHexColor(fontColor);
+  const parsed = parseHexColor(fontColor);
+  if (parsed) {
+    const darkenedHex = toHexColor(darkenColorForTypewriter(parsed));
+    return darkenedHex === expanded ? normalizedRaw : darkenedHex;
+  }
+  const keywordMatch = pickTypewriterKeywordColor(fontColor);
+  if (keywordMatch) {
+    return keywordMatch;
+  }
+  return TYPEWRITER_FONT_COLOR_FALLBACK;
+}
+
 function normalizeTypewriterMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return null;
   const font = metadata.font || metadata.fontName || metadata.font_family || metadata.fontFamily;
@@ -587,7 +705,7 @@ function normalizeTypewriterMetadata(metadata) {
   return {
     font: font || pickRandomItem(TYPEWRITER_DEFAULT_FONTS).font,
     font_size: normalizeTypewriterFontSize(fontSize),
-    font_color: fontColor || '#2a120f'
+    font_color: normalizeTypewriterFontColor(fontColor)
   };
 }
 
@@ -841,10 +959,193 @@ async function deleteMessengerConversation(sessionId, sceneId, persistence = 'mo
   return { deletedCount };
 }
 
+const MESSENGER_MIN_SCENE_SUMMARY_WORDS = 28;
+const MESSENGER_MIN_HIDING_SPOT_WORDS = 6;
+const MESSENGER_MIN_SENSORY_DETAILS = 3;
+const MESSENGER_SYSTEM_CONTRACT_TEXT = `Runtime output contract:
+- Return keys: has_chat_ended, message_assistant, scene_brief
+- scene_brief must include: subject, place_name, place_summary, typewriter_hiding_spot, sensory_details, notable_features, scene_established
+- Do not mark has_chat_ended true until the destination is vivid enough to establish a scene and the typewriter hiding place is concrete
+- subject must be short and easy to browse later in storage
+- place_summary must be specific enough for a later system to stage the scene immediately`;
+
+function normalizeMessengerBriefText(value, maxLength = 4000) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.slice(0, maxLength);
+}
+
+function normalizeMessengerBriefList(value, limit = 6) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const items = [];
+  for (const entry of value) {
+    const normalized = normalizeMessengerBriefText(entry, 220);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(normalized);
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
+function pickRicherMessengerText(currentValue, nextValue) {
+  const current = normalizeMessengerBriefText(currentValue);
+  const next = normalizeMessengerBriefText(nextValue);
+  if (!next) return current;
+  if (!current) return next;
+  return countWords(next) >= countWords(current) ? next : current;
+}
+
+function deriveMessengerSceneSubject(brief = {}) {
+  const explicit = normalizeMessengerBriefText(brief.subject, 120);
+  if (explicit) return explicit;
+  const fallback = normalizeMessengerBriefText(brief.placeName, 120) || normalizeMessengerBriefText(brief.placeSummary, 120);
+  if (!fallback) return '';
+  return fallback.split(/\s+/).slice(0, 6).join(' ');
+}
+
+function normalizeMessengerSceneBrief(rawBrief) {
+  const source = rawBrief && typeof rawBrief === 'object' ? rawBrief : {};
+  const brief = {
+    subject: normalizeMessengerBriefText(source.subject || source.short_title, 120),
+    placeName: normalizeMessengerBriefText(source.place_name || source.placeName || source.location_name || source.location || source.setting_name, 240),
+    placeSummary: normalizeMessengerBriefText(
+      source.place_summary
+      || source.placeSummary
+      || source.scene_description
+      || source.establishing_scene
+      || source.description,
+      4000
+    ),
+    typewriterHidingSpot: normalizeMessengerBriefText(
+      source.typewriter_hiding_spot
+      || source.typewriterHidingSpot
+      || source.hiding_spot
+      || source.hideaway,
+      1600
+    ),
+    sensoryDetails: normalizeMessengerBriefList(
+      source.sensory_details
+      || source.sensoryDetails
+      || source.sensory_anchors
+      || source.scene_details
+    ),
+    notableFeatures: normalizeMessengerBriefList(
+      source.notable_features
+      || source.notableFeatures
+      || source.props
+      || source.anchors
+    ),
+    sceneEstablished: Boolean(source.scene_established || source.sceneEstablished)
+  };
+
+  if (
+    !brief.subject
+    && !brief.placeName
+    && !brief.placeSummary
+    && !brief.typewriterHidingSpot
+    && brief.sensoryDetails.length === 0
+    && brief.notableFeatures.length === 0
+  ) {
+    return null;
+  }
+
+  brief.subject = deriveMessengerSceneSubject(brief);
+  return brief;
+}
+
+function mergeMessengerSceneBrief(existingBrief, nextBrief) {
+  const existing = existingBrief && typeof existingBrief === 'object' ? existingBrief : null;
+  const next = nextBrief && typeof nextBrief === 'object' ? nextBrief : null;
+  if (!existing && !next) return null;
+
+  const merged = {
+    id: next?.id || existing?.id,
+    subject: '',
+    placeName: pickRicherMessengerText(existing?.placeName, next?.placeName).slice(0, 240),
+    placeSummary: pickRicherMessengerText(existing?.placeSummary, next?.placeSummary),
+    typewriterHidingSpot: pickRicherMessengerText(existing?.typewriterHidingSpot, next?.typewriterHidingSpot),
+    sensoryDetails: normalizeMessengerBriefList([
+      ...(Array.isArray(next?.sensoryDetails) ? next.sensoryDetails : []),
+      ...(Array.isArray(existing?.sensoryDetails) ? existing.sensoryDetails : [])
+    ]),
+    notableFeatures: normalizeMessengerBriefList([
+      ...(Array.isArray(next?.notableFeatures) ? next.notableFeatures : []),
+      ...(Array.isArray(existing?.notableFeatures) ? existing.notableFeatures : [])
+    ]),
+    sceneEstablished: Boolean(next?.sceneEstablished || existing?.sceneEstablished),
+    assistantReply: pickRicherMessengerText(existing?.assistantReply, next?.assistantReply),
+    source: normalizeMessengerBriefText(next?.source || existing?.source, 80) || 'unknown',
+    meta: {
+      ...(existing?.meta && typeof existing.meta === 'object' ? existing.meta : {}),
+      ...(next?.meta && typeof next.meta === 'object' ? next.meta : {})
+    }
+  };
+  merged.subject = deriveMessengerSceneSubject({
+    subject: next?.subject || existing?.subject || '',
+    placeName: merged.placeName,
+    placeSummary: merged.placeSummary
+  });
+
+  if (
+    !merged.subject
+    && !merged.placeName
+    && !merged.placeSummary
+    && !merged.typewriterHidingSpot
+    && merged.sensoryDetails.length === 0
+    && merged.notableFeatures.length === 0
+  ) {
+    return null;
+  }
+
+  return merged;
+}
+
+function getMessengerSceneBriefGaps(brief) {
+  if (!brief) {
+    return ['scene', 'hideaway', 'sensory', 'subject'];
+  }
+
+  const gaps = [];
+  if (!brief.subject) gaps.push('subject');
+  if (countWords(brief.placeSummary) < MESSENGER_MIN_SCENE_SUMMARY_WORDS) gaps.push('scene');
+  if (countWords(brief.typewriterHidingSpot) < MESSENGER_MIN_HIDING_SPOT_WORDS) gaps.push('hideaway');
+  if ((Array.isArray(brief.sensoryDetails) ? brief.sensoryDetails.length : 0) < MESSENGER_MIN_SENSORY_DETAILS) {
+    gaps.push('sensory');
+  }
+  return gaps;
+}
+
+function isMessengerSceneBriefComplete(brief) {
+  return getMessengerSceneBriefGaps(brief).length === 0;
+}
+
+function buildMessengerSceneFollowUp(brief, gaps = []) {
+  if (gaps.includes('hideaway')) {
+    return 'We are nearly there. One last practical matter: where exactly could the typewriter disappear if an unwelcome eye fell upon it, and what about that hiding place keeps it safe?';
+  }
+  if (gaps.includes('scene') || gaps.includes('sensory')) {
+    return 'Good, but the Society still needs the room to come properly into focus. Give me the physical truth of it: the surface where the typewriter will rest, the light, the air, the nearby sounds, and a few concrete details that make the place unmistakable.';
+  }
+  if (gaps.includes('subject')) {
+    const placeName = normalizeMessengerBriefText(brief?.placeName, 120);
+    if (placeName) {
+      return `Excellent. One last clarification for the ledger: what would you call this place in a few words, so the Society can file it properly alongside "${placeName}"?`;
+    }
+    return 'One final filing detail: what would you call this place in a few sharp words, so the Society can ledger it properly?';
+  }
+  return 'Just a touch more detail, if you please. We need the room itself and the means of concealment to be unmistakably real before the Society commits the shipment.';
+}
+
 function buildMessengerPromptMessages(historyDocs, promptTemplate, maxHistoryMessages = DEFAULT_MESSENGER_HISTORY_LIMIT) {
-  const safePrompt = typeof promptTemplate === 'string' && promptTemplate.trim()
+  const safePromptBase = typeof promptTemplate === 'string' && promptTemplate.trim()
     ? promptTemplate.trim()
     : 'You are a strange but professional courier for the Storyteller Society. Return JSON only.';
+  const safePrompt = `${safePromptBase}\n\n${MESSENGER_SYSTEM_CONTRACT_TEXT}`;
   const safeLimit = normalizeMessengerHistoryLimit(maxHistoryMessages);
   const formattedHistory = (Array.isArray(historyDocs) ? historyDocs : []).map((doc) => ({
     role: doc?.sender === 'user' ? 'user' : 'assistant',
@@ -862,16 +1163,44 @@ function buildMessengerPromptMessages(historyDocs, promptTemplate, maxHistoryMes
 function buildMockMessengerResponse(message, historyDocs = []) {
   const normalizedMessage = typeof message === 'string' ? message.trim() : '';
   const lowerMessage = normalizedMessage.toLowerCase();
+  const historyText = (Array.isArray(historyDocs) ? historyDocs : [])
+    .map((entry) => (typeof entry?.content === 'string' ? entry.content : ''))
+    .join(' ');
   const priorUserTurns = (Array.isArray(historyDocs) ? historyDocs : []).filter((entry) => entry?.sender === 'user').length;
-  const mentionsLocation = /(window|bay|attic|apartment|room|woods|forest|desert|plateau|harbor|house|flat|studio|tower|lane|street|road|courtyard|monastery|pass|cellar|basement)/i.test(normalizedMessage);
-  const mentionsHiding = /(hide|hiding|closet|cupboard|cabinet|wardrobe|locker|crate|cellar|under|beneath|false wall|safe|chest|trunk|crawlspace)/i.test(normalizedMessage);
-  const shouldEnd = (mentionsLocation && mentionsHiding) || priorUserTurns >= 2;
+  const locationPattern = /(window|bay|attic|apartment|room|woods|forest|desert|plateau|harbor|house|flat|studio|tower|lane|street|road|courtyard|monastery|pass|cellar|basement)/i;
+  const hidingPattern = /(hide|hiding|closet|cupboard|cabinet|wardrobe|locker|crate|cellar|under|beneath|false wall|safe|chest|trunk|crawlspace)/i;
+  const mentionsLocation = locationPattern.test(normalizedMessage) || locationPattern.test(historyText);
+  const mentionsHiding = hidingPattern.test(normalizedMessage) || hidingPattern.test(historyText);
+  const likelyPlaceName = mentionsLocation
+    ? 'Attic room above the harbor'
+    : 'Undisclosed receiving room';
+  const partialSceneBrief = {
+    subject: mentionsLocation ? 'Harbor attic watchroom' : 'Pending delivery room',
+    place_name: likelyPlaceName,
+    place_summary: mentionsLocation
+      ? 'A salt-marked attic room hangs above the harbor with a rain-streaked window, a narrow work surface, and weather pressing at the glass. It feels private, habitable, and immediately stageable as the sort of place where a secret machine could begin its work.'
+      : '',
+    typewriter_hiding_spot: mentionsHiding
+      ? 'Inside the cedar wardrobe with the false back, where the machine can disappear quickly and remain dry, ordinary, and out of casual reach.'
+      : '',
+    sensory_details: mentionsLocation
+      ? ['salt wind through the sash', 'harbor bells below', 'cold damp in the rafters']
+      : [],
+    notable_features: mentionsLocation
+      ? ['rain-marked window', 'narrow oak worktable', 'sloped attic rafters']
+      : mentionsHiding
+        ? ['cedar wardrobe with false back']
+        : [],
+    scene_established: Boolean(mentionsLocation && mentionsHiding)
+  };
+  const shouldEnd = isMessengerSceneBriefComplete(normalizeMessengerSceneBrief(partialSceneBrief));
 
   if (shouldEnd) {
     return {
       has_chat_ended: true,
       message_assistant:
-        'Splendid. That will do very nicely. I have noted the room, the atmosphere, and the discreet means by which the machine may disappear should the need arise. The Society shall make its arrangements, and if anyone asks, we were never here.'
+        'Splendid. That will do very nicely. I have noted the room, the atmosphere, and the discreet means by which the machine may disappear should the need arise. The Society shall make its arrangements, and if anyone asks, we were never here.',
+      scene_brief: partialSceneBrief
     };
   }
 
@@ -879,7 +1208,8 @@ function buildMockMessengerResponse(message, historyDocs = []) {
     return {
       has_chat_ended: false,
       message_assistant:
-        'Excellent. We are beginning to see the room properly now. One final practical matter: if the typewriter had to vanish at short notice, where exactly would you conceal it, and what in that place would keep it safe from idle hands?'
+        'Excellent. We are beginning to see the room properly now. One final practical matter: if the typewriter had to vanish at short notice, where exactly would you conceal it, and what in that place would keep it safe from idle hands?',
+      scene_brief: partialSceneBrief
     };
   }
 
@@ -887,14 +1217,16 @@ function buildMockMessengerResponse(message, historyDocs = []) {
     return {
       has_chat_ended: false,
       message_assistant:
-        'Quite. But an address alone is such a blunt instrument. We require the atmosphere as well: the table, the light, the weather at the window, the noises in the corridor, and the sort of room in which the keys will learn your habits.'
+        'Quite. But an address alone is such a blunt instrument. We require the atmosphere as well: the table, the light, the weather at the window, the noises in the corridor, and the sort of room in which the keys will learn your habits.',
+      scene_brief: partialSceneBrief
     };
   }
 
   return {
     has_chat_ended: false,
     message_assistant:
-      'Yes, yes, but where will it actually live once it reaches you? We need the physical truth of it: the room, the surface, the view, the air, and any nearby place in which a very precious typewriter might be hidden without remark.'
+      'Yes, yes, but where will it actually live once it reaches you? We need the physical truth of it: the room, the surface, the view, the air, and any nearby place in which a very precious typewriter might be hidden without remark.',
+    scene_brief: partialSceneBrief
   };
 }
 
@@ -906,12 +1238,14 @@ async function buildMessengerConversationPayload(
   await ensureMessengerIntroMessage(sessionId, sceneId, persistence);
   const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId, persistence);
   const messages = historyDocs.map(toMessengerMessagePayload);
+  const sceneBrief = await getMessengerSceneBrief(sessionId, sceneId, persistence);
   return {
     sessionId,
     sceneId,
     count: messages.length,
     hasChatEnded: messages.some((message) => message.hasChatEnded),
     messages,
+    sceneBrief,
     storage: persistence
   };
 }
@@ -929,6 +1263,7 @@ async function handleMessengerChatPost(req, res) {
 
     const persistence = await resolveMessengerPersistenceMode();
     await ensureMessengerIntroMessage(sessionId, sceneId, persistence);
+    const existingSceneBrief = await getMessengerSceneBrief(sessionId, sceneId, persistence);
 
     const baseOrder = Date.now();
     await createMessengerMessage(sessionId, sceneId, {
@@ -976,8 +1311,36 @@ async function handleMessengerChatPost(req, res) {
 
     await validatePayloadForRoute('messenger_chat', aiResponse);
 
-    const reply = typeof aiResponse.message_assistant === 'string' ? aiResponse.message_assistant.trim() : '';
-    const hasChatEnded = Boolean(aiResponse.has_chat_ended);
+    let reply = typeof aiResponse.message_assistant === 'string' ? aiResponse.message_assistant.trim() : '';
+    let hasChatEnded = Boolean(aiResponse.has_chat_ended);
+    const incomingSceneBrief = normalizeMessengerSceneBrief(aiResponse.scene_brief);
+    let mergedSceneBrief = mergeMessengerSceneBrief(existingSceneBrief, incomingSceneBrief);
+
+    if (!mergedSceneBrief && hasChatEnded) {
+      hasChatEnded = false;
+      reply = buildMessengerSceneFollowUp(null, ['scene', 'hideaway', 'sensory', 'subject']);
+    } else if (mergedSceneBrief) {
+      const sceneGaps = getMessengerSceneBriefGaps(mergedSceneBrief);
+      if (hasChatEnded && sceneGaps.length > 0) {
+        hasChatEnded = false;
+        reply = buildMessengerSceneFollowUp(mergedSceneBrief, sceneGaps);
+      }
+
+      mergedSceneBrief = {
+        ...mergedSceneBrief,
+        sceneEstablished: isMessengerSceneBriefComplete(mergedSceneBrief),
+        assistantReply: reply,
+        source: shouldMock ? 'mock' : `${messengerProvider}:${messengerPipeline.model || 'default'}`,
+        meta: {
+          ...(mergedSceneBrief.meta && typeof mergedSceneBrief.meta === 'object' ? mergedSceneBrief.meta : {}),
+          pipeline: 'messenger_chat',
+          mocked: shouldMock,
+          updatedAt: new Date().toISOString()
+        }
+      };
+      hasChatEnded = hasChatEnded && mergedSceneBrief.sceneEstablished;
+    }
+
     if (!reply) {
       return res.status(502).json({
         message: 'Messenger generation returned an empty reply.',
@@ -988,6 +1351,11 @@ async function handleMessengerChatPost(req, res) {
           mocked: shouldMock
         }
       });
+    }
+
+    let savedSceneBrief = null;
+    if (mergedSceneBrief) {
+      savedSceneBrief = await saveMessengerSceneBrief(sessionId, sceneId, mergedSceneBrief, persistence);
     }
 
     await createMessengerMessage(sessionId, sceneId, {
@@ -1003,6 +1371,7 @@ async function handleMessengerChatPost(req, res) {
       ...conversation,
       reply,
       has_chat_ended: hasChatEnded,
+      sceneBrief: conversation.sceneBrief || savedSceneBrief,
       mocked: shouldMock,
       runtime: {
         pipeline: 'messenger_chat',
@@ -1053,15 +1422,710 @@ app.delete('/api/messenger/chat', async (req, res) => {
 
     const persistence = await resolveMessengerPersistenceMode();
     const deletion = await deleteMessengerConversation(sessionId, sceneId, persistence);
+    const deletedSceneBriefCount = await deleteMessengerSceneBrief(sessionId, sceneId, persistence);
     return res.status(200).json({
       sessionId,
       sceneId,
-      deletedCount: deletion?.deletedCount || 0,
+      deletedCount: (deletion?.deletedCount || 0) + deletedSceneBriefCount,
+      deletedMessagesCount: deletion?.deletedCount || 0,
+      deletedSceneBriefCount,
       storage: persistence
     });
   } catch (error) {
     console.error('Error in DELETE /api/messenger/chat:', error);
     return res.status(500).json({ message: 'Server error while clearing messenger chat.' });
+  }
+});
+
+function normalizeImmersiveRpgSessionId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function normalizeImmersiveRpgPlayerId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function normalizeImmersiveRpgPlayerName(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function normalizeImmersiveRpgMessengerSceneId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID;
+}
+
+function normalizeBooleanFlag(value, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function mergeImmersiveRpgCharacterSheetDraft(existingDoc, patch = {}) {
+  const existing = existingDoc?.toObject ? existingDoc.toObject() : (existingDoc || {});
+  const nextPatch = patch && typeof patch === 'object' ? patch : {};
+  return {
+    ...existing,
+    ...nextPatch,
+    identity: {
+      ...(existing?.identity && typeof existing.identity === 'object' ? existing.identity : {}),
+      ...(nextPatch?.identity && typeof nextPatch.identity === 'object' ? nextPatch.identity : {})
+    },
+    coreTraits: {
+      ...(existing?.coreTraits && typeof existing.coreTraits === 'object' ? existing.coreTraits : {}),
+      ...(nextPatch?.coreTraits && typeof nextPatch.coreTraits === 'object' ? nextPatch.coreTraits : {})
+    },
+    attributes: {
+      ...(existing?.attributes && typeof existing.attributes === 'object' ? existing.attributes : {}),
+      ...(nextPatch?.attributes && typeof nextPatch.attributes === 'object' ? nextPatch.attributes : {})
+    },
+    skills: {
+      ...(existing?.skills && typeof existing.skills === 'object' ? existing.skills : {}),
+      ...(nextPatch?.skills && typeof nextPatch.skills === 'object' ? nextPatch.skills : {})
+    },
+    inventory: Array.isArray(nextPatch?.inventory) ? nextPatch.inventory : existing?.inventory,
+    notes: Array.isArray(nextPatch?.notes) ? nextPatch.notes : existing?.notes
+  };
+}
+
+async function loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId) {
+  const persistence = await resolveMessengerPersistenceMode();
+  const brief = await getMessengerSceneBrief(sessionId, messengerSceneId, persistence);
+  return {
+    brief: normalizeMessengerSceneBriefForRpg(brief),
+    storage: persistence
+  };
+}
+
+async function resolveImmersiveRpgPromptTemplate() {
+  const latestPrompt = await getLatestPromptTemplate('immersive_rpg_gm');
+  if (latestPrompt?.promptTemplate) {
+    return latestPrompt.promptTemplate;
+  }
+
+  const routeConfig = await getRouteConfig('immersive_rpg_chat');
+  return routeConfig?.promptTemplate || '';
+}
+
+function buildMockImmersiveRpgChatResponse(currentScene, message) {
+  const turn = currentScene.pendingRoll
+    ? {
+      nextBeat: currentScene.currentBeat,
+      pendingRoll: currentScene.pendingRoll,
+      gmText: `${currentScene.pendingRoll.instructions} The moment still hinges on that outcome. What do you do?`
+    }
+    : buildSkeletonSceneTurn(currentScene, message);
+
+  return {
+    gm_reply: turn.gmText,
+    current_beat: turn.nextBeat,
+    should_pause_for_choice: true,
+    pending_roll: turn.pendingRoll
+      ? {
+        context_key: turn.pendingRoll.contextKey,
+        skill: turn.pendingRoll.skill,
+        label: turn.pendingRoll.label,
+        dice_notation: turn.pendingRoll.diceNotation,
+        difficulty: turn.pendingRoll.difficulty,
+        success_threshold: turn.pendingRoll.successThreshold,
+        successes_required: turn.pendingRoll.successesRequired,
+        instructions: turn.pendingRoll.instructions
+      }
+      : null,
+    scene_flags_patch: {},
+    keeper_notes: [
+      'Mock mode uses the deterministic immersive RPG scene scaffold.'
+    ]
+  };
+}
+
+async function ensureImmersiveRpgCharacterSheet({
+  sessionId,
+  playerId,
+  playerName,
+  sourceSceneBrief,
+  patch = null
+} = {}) {
+  const effectivePlayerId = playerId || DEFAULT_IMMERSIVE_RPG_PLAYER_ID;
+  const existing = await ImmersiveRpgCharacterSheet.findOne({ sessionId, playerId: effectivePlayerId });
+  const mergedDraft = mergeImmersiveRpgCharacterSheetDraft(existing, patch || {});
+  const normalized = buildCharacterSheetSkeleton({
+    sessionId,
+    playerId: effectivePlayerId,
+    playerName: playerName || existing?.playerName,
+    messengerSceneBrief: sourceSceneBrief,
+    current: mergedDraft
+  });
+
+  const doc = await ImmersiveRpgCharacterSheet.findOneAndUpdate(
+    { sessionId, playerId: effectivePlayerId },
+    {
+      $set: {
+        playerName: normalized.playerName,
+        identity: normalized.identity,
+        coreTraits: normalized.coreTraits,
+        attributes: normalized.attributes,
+        skills: normalized.skills,
+        inventory: normalized.inventory,
+        notes: normalized.notes,
+        sourceSceneBrief: normalized.sourceSceneBrief
+      }
+    },
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true
+    }
+  ).lean();
+
+  return doc;
+}
+
+async function createOrLoadImmersiveRpgScene({
+  sessionId,
+  playerId,
+  playerName,
+  messengerSceneId,
+  promptTemplate = '',
+  bootstrapIfMissing = false,
+  forceReset = false
+} = {}) {
+  let sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
+  const effectivePlayerId = sceneDoc?.playerId || playerId || DEFAULT_IMMERSIVE_RPG_PLAYER_ID;
+  const effectivePlayerName = playerName || '';
+  const { brief, storage } = await loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId);
+
+  if (!sceneDoc && !bootstrapIfMissing && !forceReset) {
+    return {
+      sceneDoc: null,
+      characterSheetDoc: null,
+      bootstrapped: false,
+      messengerSceneBrief: brief,
+      messengerStorage: storage
+    };
+  }
+
+  if (!hasEnoughMessengerSceneBriefForRpg(brief)) {
+    const error = new Error('Messenger scene brief is missing or too thin to seed the immersive RPG scene.');
+    error.code = 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED';
+    error.statusCode = 409;
+    throw error;
+  }
+
+    const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
+      sessionId,
+      playerId: effectivePlayerId,
+      playerName: effectivePlayerName,
+      sourceSceneBrief: brief
+    });
+
+  if (!sceneDoc || forceReset) {
+    const bootstrap = buildSceneBootstrap({
+      sessionId,
+      playerId: effectivePlayerId,
+      playerName: effectivePlayerName,
+      messengerSceneId,
+      sceneBrief: brief,
+      currentCharacterSheet: characterSheetDoc,
+      promptTemplate
+    });
+    sceneDoc = await ImmersiveRpgSceneSession.findOneAndUpdate(
+      { sessionId },
+      { $set: bootstrap },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true
+      }
+    ).lean();
+    return {
+      sceneDoc,
+      characterSheetDoc,
+      bootstrapped: true,
+      messengerSceneBrief: brief,
+      messengerStorage: storage
+    };
+  }
+
+  const compiledPrompt = buildCompiledScenePrompt({
+    promptTemplate,
+    sceneBrief: sceneDoc.sourceSceneBrief || brief,
+    characterSheet: characterSheetDoc,
+    currentBeat: sceneDoc.currentBeat,
+    transcript: sceneDoc.transcript
+  });
+
+  if (sceneDoc.compiledPrompt !== compiledPrompt) {
+    sceneDoc = await ImmersiveRpgSceneSession.findOneAndUpdate(
+      { sessionId },
+      {
+        $set: {
+          compiledPrompt
+        }
+      },
+      { new: true }
+    ).lean();
+  }
+
+  return {
+    sceneDoc,
+    characterSheetDoc,
+    bootstrapped: false,
+    messengerSceneBrief: brief,
+    messengerStorage: storage
+  };
+}
+
+function buildImmersiveRpgEnvelope(sceneDoc, characterSheetDoc, extras = {}) {
+  const characterSheet = toImmersiveRpgCharacterSheetPayload(characterSheetDoc);
+  return {
+    ...extras,
+    scene: toImmersiveRpgScenePayload(sceneDoc, characterSheetDoc),
+    characterSheet
+  };
+}
+
+app.get('/api/immersive-rpg/scene', async (req, res) => {
+  try {
+    const sessionId = normalizeImmersiveRpgSessionId(req.query?.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(req.query?.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(req.query?.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(req.query?.messengerSceneId);
+    const bootstrapIfMissing = normalizeBooleanFlag(req.query?.bootstrap, false);
+    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const result = await createOrLoadImmersiveRpgScene({
+      sessionId,
+      playerId,
+      playerName,
+      messengerSceneId,
+      promptTemplate,
+      bootstrapIfMissing
+    });
+
+    if (!result.sceneDoc) {
+      return res.status(404).json({ message: 'Immersive RPG scene not found for this session.' });
+    }
+
+    return res.status(200).json(buildImmersiveRpgEnvelope(result.sceneDoc, result.characterSheetDoc, {
+      sessionId,
+      messengerSceneId,
+      bootstrapped: result.bootstrapped,
+      messengerReady: Boolean(result.messengerSceneBrief?.sceneEstablished),
+      storage: 'mongo',
+      sourceStorage: result.messengerStorage
+    }));
+  } catch (error) {
+    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
+      return res.status(error.statusCode || 409).json({ message: error.message });
+    }
+    console.error('Error in GET /api/immersive-rpg/scene:', error);
+    return res.status(500).json({ message: 'Server error while loading immersive RPG scene.' });
+  }
+});
+
+app.post('/api/immersive-rpg/scene/bootstrap', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
+    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const result = await createOrLoadImmersiveRpgScene({
+      sessionId,
+      playerId,
+      playerName,
+      messengerSceneId,
+      promptTemplate,
+      bootstrapIfMissing: true,
+      forceReset: normalizeBooleanFlag(body.forceReset, false)
+    });
+
+    return res.status(200).json(buildImmersiveRpgEnvelope(result.sceneDoc, result.characterSheetDoc, {
+      sessionId,
+      messengerSceneId,
+      bootstrapped: true,
+      messengerReady: Boolean(result.messengerSceneBrief?.sceneEstablished),
+      storage: 'mongo',
+      sourceStorage: result.messengerStorage
+    }));
+  } catch (error) {
+    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
+      return res.status(error.statusCode || 409).json({ message: error.message });
+    }
+    console.error('Error in POST /api/immersive-rpg/scene/bootstrap:', error);
+    return res.status(500).json({ message: 'Server error while bootstrapping immersive RPG scene.' });
+  }
+});
+
+app.post('/api/immersive-rpg/chat', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+
+    if (!sessionId || !message) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or message.' });
+    }
+
+    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+    let result = await createOrLoadImmersiveRpgScene({
+      sessionId,
+      playerId,
+      playerName,
+      messengerSceneId,
+      promptTemplate,
+      bootstrapIfMissing: true
+    });
+
+    const currentScene = result.sceneDoc;
+    const playerEntry = createTranscriptEntry({
+      role: 'pc',
+      kind: 'action',
+      text: message
+    });
+    const requestTranscript = [...(Array.isArray(currentScene.transcript) ? currentScene.transcript : []), playerEntry];
+    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
+    const immersiveRpgProvider = typeof immersiveRpgPipeline?.provider === 'string'
+      ? immersiveRpgPipeline.provider
+      : 'openai';
+    const shouldMock = resolveMockMode(body, immersiveRpgPipeline.useMock);
+
+    let rawResponse;
+    if (shouldMock) {
+      rawResponse = buildMockImmersiveRpgChatResponse(currentScene, message);
+    } else {
+      const routeConfig = await getRouteConfig('immersive_rpg_chat');
+      const promptMessages = buildImmersiveRpgPromptMessages({
+        promptTemplate: promptTemplate || routeConfig?.promptTemplate || '',
+        sceneBrief: currentScene.sourceSceneBrief,
+        characterSheet: result.characterSheetDoc,
+        currentBeat: currentScene.currentBeat,
+        transcript: requestTranscript,
+        playerMessage: message
+      });
+      rawResponse = await callJsonLlm({
+        prompts: promptMessages.prompts,
+        provider: immersiveRpgProvider,
+        model: immersiveRpgPipeline.model || '',
+        max_tokens: 1400,
+        explicitJsonObjectFormat: true
+      });
+    }
+
+    if (!rawResponse || typeof rawResponse !== 'object') {
+      return res.status(502).json({
+        message: 'Immersive RPG generation failed.',
+        runtime: {
+          pipeline: 'immersive_rpg_gm',
+          provider: immersiveRpgProvider,
+          model: immersiveRpgPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    await validatePayloadForRoute('immersive_rpg_chat', rawResponse);
+    const normalizedResponse = normalizeImmersiveRpgChatResponse(rawResponse);
+    if (!normalizedResponse.gmReply) {
+      return res.status(502).json({
+        message: 'Immersive RPG generation returned an empty GM reply.',
+        runtime: {
+          pipeline: 'immersive_rpg_gm',
+          provider: immersiveRpgProvider,
+          model: immersiveRpgPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    const gmEntry = createTranscriptEntry({
+      role: 'gm',
+      kind: normalizedResponse.pendingRoll ? 'roll_prompt' : 'response',
+      text: normalizedResponse.gmReply,
+      meta: {
+        beat: normalizedResponse.currentBeat,
+        pendingRoll: normalizedResponse.pendingRoll,
+        shouldPauseForChoice: normalizedResponse.shouldPauseForChoice
+      }
+    });
+
+    const nextTranscript = [...requestTranscript, gmEntry];
+    const compiledPrompt = buildCompiledScenePrompt({
+      promptTemplate,
+      sceneBrief: currentScene.sourceSceneBrief,
+      characterSheet: result.characterSheetDoc,
+      currentBeat: normalizedResponse.currentBeat,
+      transcript: nextTranscript
+    });
+    const nextSceneFlags = {
+      ...(currentScene.sceneFlags && typeof currentScene.sceneFlags === 'object' ? currentScene.sceneFlags : {}),
+      ...(normalizedResponse.sceneFlagsPatch && typeof normalizedResponse.sceneFlagsPatch === 'object'
+        ? normalizedResponse.sceneFlagsPatch
+        : {})
+    };
+    const nextNotes = Array.from(new Set([
+      ...(Array.isArray(currentScene.notes) ? currentScene.notes : []),
+      ...(Array.isArray(normalizedResponse.keeperNotes) ? normalizedResponse.keeperNotes : [])
+    ])).slice(-20);
+
+    const updatedScene = await ImmersiveRpgSceneSession.findOneAndUpdate(
+      { sessionId },
+      {
+        $set: {
+          currentBeat: normalizedResponse.currentBeat,
+          pendingRoll: normalizedResponse.pendingRoll,
+          compiledPrompt,
+          sceneFlags: nextSceneFlags,
+          notes: nextNotes
+        },
+        $push: {
+          transcript: {
+            $each: [playerEntry, gmEntry]
+          }
+        }
+      },
+      { new: true }
+    ).lean();
+
+    return res.status(200).json(buildImmersiveRpgEnvelope(updatedScene, result.characterSheetDoc, {
+      sessionId,
+      reply: gmEntry.text,
+      pendingRoll: updatedScene.pendingRoll,
+      storage: 'mongo',
+      mocked: shouldMock,
+      runtime: {
+        pipeline: 'immersive_rpg_gm',
+        provider: immersiveRpgProvider,
+        model: immersiveRpgPipeline.model || '',
+        mocked: shouldMock
+      }
+    }));
+  } catch (error) {
+    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
+      return res.status(error.statusCode || 409).json({ message: error.message });
+    }
+    if (error.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
+      return res.status(502).json({
+        message: resolveSchemaErrorMessage(error, 'Immersive RPG chat schema validation failed.')
+      });
+    }
+    console.error('Error in POST /api/immersive-rpg/chat:', error);
+    return res.status(500).json({ message: 'Server error while advancing immersive RPG chat.' });
+  }
+});
+
+app.post('/api/immersive-rpg/rolls', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+    const result = await createOrLoadImmersiveRpgScene({
+      sessionId,
+      playerId,
+      playerName,
+      messengerSceneId,
+      promptTemplate,
+      bootstrapIfMissing: true
+    });
+
+    const currentScene = result.sceneDoc;
+    const pendingRoll = currentScene.pendingRoll && typeof currentScene.pendingRoll === 'object'
+      ? currentScene.pendingRoll
+      : null;
+
+    const roll = simulateDicePoolRoll({
+      contextKey: typeof body.contextKey === 'string' && body.contextKey.trim()
+        ? body.contextKey.trim()
+        : pendingRoll?.contextKey,
+      skill: typeof body.skill === 'string' && body.skill.trim()
+        ? body.skill.trim()
+        : pendingRoll?.skill,
+      label: typeof body.label === 'string' && body.label.trim()
+        ? body.label.trim()
+        : pendingRoll?.label,
+      diceNotation: typeof body.diceNotation === 'string' && body.diceNotation.trim()
+        ? body.diceNotation.trim()
+        : pendingRoll?.diceNotation,
+      difficulty: typeof body.difficulty === 'string' && body.difficulty.trim()
+        ? body.difficulty.trim()
+        : pendingRoll?.difficulty,
+      successThreshold: body.successThreshold ?? pendingRoll?.successThreshold,
+      successesRequired: body.successesRequired ?? pendingRoll?.successesRequired
+    });
+
+    const resolution = resolveRollOutcome(currentScene, roll);
+    const gmEntry = createTranscriptEntry({
+      role: 'gm',
+      kind: 'resolution',
+      text: resolution.gmText,
+      meta: {
+        beat: resolution.nextBeat,
+        resolvedRollId: roll.rollId,
+        contextKey: roll.contextKey
+      }
+    });
+
+    const nextTranscript = [...(Array.isArray(currentScene.transcript) ? currentScene.transcript : []), gmEntry];
+    const nextSceneFlags = {
+      ...(currentScene.sceneFlags && typeof currentScene.sceneFlags === 'object' ? currentScene.sceneFlags : {}),
+      ...(resolution.sceneFlags && typeof resolution.sceneFlags === 'object' ? resolution.sceneFlags : {})
+    };
+    const compiledPrompt = buildCompiledScenePrompt({
+      promptTemplate,
+      sceneBrief: currentScene.sourceSceneBrief,
+      characterSheet: result.characterSheetDoc,
+      currentBeat: resolution.nextBeat,
+      transcript: nextTranscript
+    });
+
+    const updatedScene = await ImmersiveRpgSceneSession.findOneAndUpdate(
+      { sessionId },
+      {
+        $set: {
+          currentBeat: resolution.nextBeat,
+          pendingRoll: null,
+          sceneFlags: nextSceneFlags,
+          compiledPrompt
+        },
+        $push: {
+          rollLog: {
+            ...roll,
+            meta: {
+              source: pendingRoll ? 'scene_pending_roll' : 'manual'
+            }
+          },
+          transcript: gmEntry
+        }
+      },
+      { new: true }
+    ).lean();
+
+    return res.status(200).json(buildImmersiveRpgEnvelope(updatedScene, result.characterSheetDoc, {
+      sessionId,
+      roll,
+      resolution: {
+        currentBeat: resolution.nextBeat,
+        message: gmEntry.text
+      },
+      storage: 'mongo'
+    }));
+  } catch (error) {
+    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
+      return res.status(error.statusCode || 409).json({ message: error.message });
+    }
+    if (error.code === 'INVALID_DICE_NOTATION') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/immersive-rpg/rolls:', error);
+    return res.status(500).json({ message: 'Server error while resolving immersive RPG roll.' });
+  }
+});
+
+app.get('/api/immersive-rpg/character-sheet', async (req, res) => {
+  try {
+    const sessionId = normalizeImmersiveRpgSessionId(req.query?.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(req.query?.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(req.query?.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(req.query?.messengerSceneId);
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
+    const sourceSceneBrief = sceneDoc?.sourceSceneBrief
+      || (await loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId)).brief;
+    const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
+      sessionId,
+      playerId,
+      playerName,
+      sourceSceneBrief
+    });
+
+    return res.status(200).json({
+      sessionId,
+      playerId: characterSheetDoc.playerId,
+      characterSheet: toImmersiveRpgCharacterSheetPayload(characterSheetDoc)
+    });
+  } catch (error) {
+    console.error('Error in GET /api/immersive-rpg/character-sheet:', error);
+    return res.status(500).json({ message: 'Server error while loading immersive RPG character sheet.' });
+  }
+});
+
+app.put('/api/immersive-rpg/character-sheet', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
+    const sourceSceneBrief = sceneDoc?.sourceSceneBrief
+      || (await loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId)).brief;
+    const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
+      sessionId,
+      playerId,
+      playerName,
+      sourceSceneBrief,
+      patch: body
+    });
+
+    if (sceneDoc) {
+      const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+      await ImmersiveRpgSceneSession.updateOne(
+        { sessionId },
+        {
+          $set: {
+            compiledPrompt: buildCompiledScenePrompt({
+              promptTemplate,
+              sceneBrief: sceneDoc.sourceSceneBrief,
+              characterSheet: characterSheetDoc,
+              currentBeat: sceneDoc.currentBeat,
+              transcript: sceneDoc.transcript
+            })
+          }
+        }
+      );
+    }
+
+    return res.status(200).json({
+      sessionId,
+      playerId: characterSheetDoc.playerId,
+      characterSheet: toImmersiveRpgCharacterSheetPayload(characterSheetDoc)
+    });
+  } catch (error) {
+    console.error('Error in PUT /api/immersive-rpg/character-sheet:', error);
+    return res.status(500).json({ message: 'Server error while saving immersive RPG character sheet.' });
   }
 });
 
@@ -1141,13 +2205,18 @@ app.post('/api/shouldGenerateContinuation', async (req, res) => {
 
 app.post('/api/typewriter/session/start', async (req, res) => {
   try {
-    const { sessionId, fragment } = req.body || {};
+    const { sessionId, fragment, playerId } = req.body || {};
+    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
     const session = await startTypewriterSession(sessionId);
     if (typeof fragment === 'string') {
       const seededSession = await saveTypewriterSessionFragment(session.sessionId, fragment);
-      return res.status(200).json(seededSession);
+      return res.status(200).json(
+        await buildTypewriterSessionPayload(session.sessionId, seededSession.fragment, resolvedPlayerId)
+      );
     }
-    return res.status(200).json(session);
+    return res.status(200).json(
+      await buildTypewriterSessionPayload(session.sessionId, session.fragment, resolvedPlayerId)
+    );
   } catch (error) {
     console.error('Error in /api/typewriter/session/start:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -1167,9 +2236,17 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
     await startTypewriterSession(sessionId);
     const fragmentText = await getTypewriterSessionFragment(sessionId);
     const narrativeWordCount = countWords(fragmentText);
+    const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
+    const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
+    const shouldMockStorytellers = resolveMockMode(body, storytellerPipeline.useMock);
+    const shouldMockIllustrations = resolveMockMode(body, illustrationPipeline.useMock);
+    const allowMockSlots = shouldMockStorytellers || shouldMockIllustrations;
     const assignedStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
-    const nextAvailableSlot = findNextAvailableTypewriterStorytellerSlot(assignedStorytellers);
-    const currentAssignedCount = assignedStorytellers.length;
+    const effectiveAssignedStorytellers = filterAssignedTypewriterStorytellers(assignedStorytellers, {
+      allowMockSlots
+    });
+    const nextAvailableSlot = findNextAvailableTypewriterStorytellerSlot(effectiveAssignedStorytellers);
+    const currentAssignedCount = effectiveAssignedStorytellers.length;
     const currentThreshold = getTypewriterStorytellerThreshold(currentAssignedCount);
     const shouldCreate = Boolean(nextAvailableSlot && currentThreshold !== null && narrativeWordCount >= currentThreshold);
 
@@ -1187,8 +2264,9 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
 
     const storytellers = createdStoryteller
       ? await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId)
-      : assignedStorytellers;
-    const filledCount = storytellers.length;
+      : effectiveAssignedStorytellers;
+    const visibleStorytellers = filterAssignedTypewriterStorytellers(storytellers, { allowMockSlots });
+    const filledCount = visibleStorytellers.length;
     const nextThreshold = getTypewriterStorytellerThreshold(filledCount);
 
     return res.status(200).json({
@@ -1200,7 +2278,8 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
       createdStoryteller: createdStoryteller ? buildStorytellerListItem(createdStoryteller) : null,
       assignedStorytellerCount: filledCount,
       nextThreshold,
-      slots: buildTypewriterStorytellerSlots(storytellers)
+      slots: buildTypewriterStorytellerSlots(visibleStorytellers),
+      entityKeys: (await listTypewriterStoryEntities(sessionId, resolvedPlayerId)).map(buildTypewriterEntityKeyState)
     });
   } catch (error) {
     console.error('Error in /api/shouldCreateStorytellerKey:', error);
@@ -1208,6 +2287,151 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
     return res.status(statusCode).json({
       message: statusCode === 500 ? 'Server error during storyteller key creation check.' : error.message
     });
+  }
+});
+
+app.post('/api/send_storyteller_typewriter_text', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const { sessionId, storytellerId } = body;
+    const slotIndexRaw = Number(body.slotIndex);
+    const slotIndex = Number.isInteger(slotIndexRaw) ? slotIndexRaw : null;
+    const resolvedPlayerId = normalizeOptionalPlayerId(body.playerId);
+
+    if (!sessionId || (!storytellerId && slotIndex === null)) {
+      return res.status(400).json({ error: 'Missing sessionId and storytellerId or slotIndex.' });
+    }
+
+    await startTypewriterSession(sessionId);
+    const fragmentText = await getTypewriterSessionFragment(sessionId);
+    const storyteller = await findTypewriterStorytellerForIntervention(
+      sessionId,
+      storytellerId,
+      slotIndex,
+      resolvedPlayerId
+    );
+
+    if (!storyteller) {
+      return res.status(404).json({ error: 'Storyteller not found for this session.' });
+    }
+
+    const interventionPipeline = await getAiPipelineSettings('storyteller_intervention');
+    const interventionProvider = typeof interventionPipeline?.provider === 'string'
+      ? interventionPipeline.provider
+      : 'openai';
+    const shouldMock = resolveMockMode(body, interventionPipeline.useMock);
+    const requestedFadeTimingScale = toFiniteNumber(body?.fadeTimingScale);
+
+    let interventionResponse;
+    if (shouldMock) {
+      interventionResponse = buildMockStorytellerIntervention(storyteller, fragmentText);
+    } else {
+      const promptTemplate = await resolveStorytellerInterventionPromptTemplate();
+      interventionResponse = await callJsonLlm({
+        prompts: buildStorytellerInterventionPromptMessages(storyteller, fragmentText, promptTemplate),
+        provider: interventionProvider,
+        model: interventionPipeline.model || '',
+        max_tokens: 1800,
+        explicitJsonObjectFormat: true
+      });
+    }
+
+    const continuation = firstDefinedString(interventionResponse?.continuation);
+    if (!continuation) {
+      return res.status(502).json({
+        error: 'Storyteller intervention did not return valid continuation text.',
+        runtime: {
+          pipeline: 'storyteller_intervention',
+          provider: interventionProvider,
+          model: interventionPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    const rawEntity = interventionResponse?.entity && typeof interventionResponse.entity === 'object'
+      ? interventionResponse.entity
+      : null;
+    if (!rawEntity || !firstDefinedString(rawEntity.name, rawEntity.key_text)) {
+      return res.status(502).json({
+        error: 'Storyteller intervention did not return a valid entity.',
+        runtime: {
+          pipeline: 'storyteller_intervention',
+          provider: interventionProvider,
+          model: interventionPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    const metadata = normalizeTypewriterMetadata(interventionResponse?.style)
+      || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
+      || TYPEWRITER_DEFAULT_FONTS[0];
+    const nextFragment = mergeTypewriterFragment(fragmentText, continuation);
+    const savedEntity = await saveTypewriterEntityFromIntervention({
+      sessionId,
+      playerId: resolvedPlayerId,
+      storyteller,
+      entity: rawEntity
+    });
+    const updatedStoryteller = await Storyteller.findOneAndUpdate(
+      { _id: storyteller._id },
+      {
+        $set: {
+          introducedInTypewriter: true,
+          lastTypewriterInterventionAt: new Date()
+        },
+        $inc: {
+          typewriterInterventionsCount: 1
+        }
+      },
+      { new: true }
+    );
+
+    await saveTypewriterSessionFragment(sessionId, nextFragment);
+
+    const continuationInsights = normalizeContinuationInsights(
+      {
+        meaning: [
+          `${firstDefinedString(updatedStoryteller?.name, storyteller?.name)} briefly entered the narrative.`
+        ],
+        contextual_strengthening: `The intervention surfaced ${firstDefinedString(savedEntity?.name)} as a fresh point of interest in the scene.`,
+        entities: [
+          {
+            entity_name: firstDefinedString(savedEntity?.name),
+            ner_category: firstDefinedString(savedEntity?.type),
+            ascope_pmesii: firstDefinedString(savedEntity?.subtype),
+            reuse: false
+          }
+        ],
+        style: metadata
+      },
+      continuation,
+      metadata
+    );
+
+    return res.status(200).json({
+      ...createTypewriterResponse(continuation, metadata, null, {
+        narrativeWordCount: countWords(fragmentText),
+        fadeTimingScale: requestedFadeTimingScale
+      }),
+      continuation_insights: continuationInsights,
+      sessionId,
+      fragment: nextFragment,
+      mocked: shouldMock,
+      storyteller: buildStorytellerListItem(updatedStoryteller || storyteller),
+      entityKey: buildTypewriterEntityKeyState(savedEntity),
+      entityKeys: (await listTypewriterStoryEntities(sessionId, resolvedPlayerId)).map(buildTypewriterEntityKeyState),
+      runtime: {
+        pipeline: 'storyteller_intervention',
+        provider: interventionProvider,
+        model: interventionPipeline.model || '',
+        mocked: shouldMock
+      }
+    });
+  } catch (error) {
+    console.error('Error in /api/send_storyteller_typewriter_text:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -1368,7 +2592,9 @@ const MOCK_STORYTELLER = {
     'A faint shimmer condenses into a travel-worn figure: wind-scoured cloak, pale hands stained with ink, edges of the body translucent like smoke in cold air.',
   typewriter_key: {
     symbol: 'ravine eye',
-    description: 'A weathered brass key veined with smoky lacquer and a dim silver gleam.'
+    description: 'A weathered brass key veined with smoky lacquer and a dim silver gleam.',
+    key_shape: 'horizontal',
+    shape_prompt_hint: 'wide horizontal key face with a centered emblem and calm edge margins'
   },
   voice_creation: {
     style: 'measured',
@@ -1445,6 +2671,16 @@ function matchesOptionalPlayerId(actualPlayerId, expectedPlayerId) {
     return true;
   }
   return normalizeOptionalPlayerId(actualPlayerId) === safeExpectedPlayerId;
+}
+
+function parseOptionalBooleanQuery(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return undefined;
 }
 
 function pickMockStorytellerIllustrationUrl(index = 0) {
@@ -1526,6 +2762,55 @@ function buildTypewriterStorytellerSlots(storytellers = []) {
   );
 }
 
+function normalizeLooseStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+function normalizeTypewriterEntityKeyText(value, fallbackName = '') {
+  const base = firstDefinedString(value, fallbackName) || 'Hidden Omen';
+  const cleaned = base
+    .replace(/[^a-zA-Z0-9\s'-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) {
+    return 'Hidden Omen';
+  }
+  return cleaned
+    .split(' ')
+    .slice(0, 3)
+    .join(' ');
+}
+
+function buildTypewriterEntityKeyState(entity) {
+  return {
+    id: String(entity?._id || ''),
+    entityName: firstDefinedString(entity?.name) || 'Unnamed entity',
+    keyText: normalizeTypewriterEntityKeyText(entity?.typewriterKeyText, entity?.name),
+    summary: firstDefinedString(entity?.description, entity?.lore, entity?.relevance),
+    storytellerId: firstDefinedString(entity?.introducedByStorytellerId),
+    storytellerName: firstDefinedString(entity?.introducedByStorytellerName),
+    createdAt: entity?.createdAt || null
+  };
+}
+
+function isMockStorytellerKeyUrl(value) {
+  return typeof value === 'string' && value.includes('/assets/mocks/storyteller_keys/');
+}
+
+function isReplaceableMockTypewriterStoryteller(storyteller) {
+  const keyImageUrl = firstDefinedString(storyteller?.keyImageLocalUrl, storyteller?.keyImageUrl);
+  return isMockStorytellerKeyUrl(keyImageUrl);
+}
+
+function filterAssignedTypewriterStorytellers(storytellers = [], options = {}) {
+  const allowMockSlots = options.allowMockSlots !== false;
+  if (allowMockSlots) return storytellers;
+  return storytellers.filter((storyteller) => !isReplaceableMockTypewriterStoryteller(storyteller));
+}
+
 function findNextAvailableTypewriterStorytellerSlot(storytellers = []) {
   const assignedSlots = new Set(
     storytellers
@@ -1548,6 +2833,32 @@ async function listTypewriterSlotStorytellers(sessionId, playerId = '') {
   )
     .sort({ keySlotIndex: 1, createdAt: 1 })
     .exec();
+}
+
+async function listTypewriterStoryEntities(sessionId, playerId = '') {
+  if (!sessionId) return [];
+  return NarrativeEntity.find(
+    applyOptionalPlayerId(
+      {
+        session_id: sessionId,
+        typewriterKeyText: { $exists: true, $ne: '' },
+        activeInTypewriter: true
+      },
+      playerId
+    )
+  )
+    .sort({ createdAt: -1 })
+    .limit(8)
+    .exec();
+}
+
+async function buildTypewriterSessionPayload(sessionId, fragment, playerId = '') {
+  const entityKeys = (await listTypewriterStoryEntities(sessionId, playerId)).map(buildTypewriterEntityKeyState);
+  return {
+    sessionId,
+    fragment,
+    entityKeys
+  };
 }
 
 async function generateTypewriterStorytellerForSlot({
@@ -1678,6 +2989,171 @@ function buildStorytellerListItem(storyteller) {
     ),
     lastMission: buildLastMissionSummary(storyteller)
   };
+}
+
+function buildStorytellerInterventionPromptPayload(storyteller, fragmentText) {
+  const typewriterKey = storyteller?.typewriter_key && typeof storyteller.typewriter_key === 'object'
+    ? storyteller.typewriter_key
+    : {};
+  const voiceCreation = storyteller?.voice_creation && typeof storyteller.voice_creation === 'object'
+    ? storyteller.voice_creation
+    : {};
+  return {
+    storyteller_name: firstDefinedString(storyteller?.name) || 'Unnamed storyteller',
+    storyteller_immediate_ghost_appearance: firstDefinedString(storyteller?.immediate_ghost_appearance),
+    storyteller_symbol: firstDefinedString(typewriterKey.symbol) || 'ink sigil',
+    storyteller_key_description: firstDefinedString(typewriterKey.description)
+      || 'A weathered key carrying a strange narrative charge.',
+    storyteller_voice: firstDefinedString(voiceCreation.voice),
+    storyteller_age: firstDefinedString(voiceCreation.age),
+    storyteller_style: firstDefinedString(voiceCreation.style),
+    storyteller_influences: normalizeLooseStringArray(storyteller?.influences).join(', '),
+    storyteller_known_universes: normalizeLooseStringArray(storyteller?.known_universes).join(', '),
+    storyteller_already_introduced: storyteller?.introducedInTypewriter ? 'true' : 'false',
+    fragment_text: typeof fragmentText === 'string' ? fragmentText : ''
+  };
+}
+
+async function resolveStorytellerInterventionPromptTemplate() {
+  const latestPrompt = await getLatestPromptTemplate('storyteller_intervention');
+  if (latestPrompt?.promptTemplate) {
+    return latestPrompt.promptTemplate;
+  }
+  const currentTemplates = await getCurrentTypewriterPromptTemplates();
+  return currentTemplates?.storyteller_intervention?.promptTemplate || '';
+}
+
+function buildStorytellerInterventionPromptMessages(storyteller, fragmentText, promptTemplate) {
+  const payload = buildStorytellerInterventionPromptPayload(storyteller, fragmentText);
+  const renderedPrompt = renderPromptTemplateString(promptTemplate, payload);
+  return [
+    { role: 'system', content: renderedPrompt },
+    { role: 'user', content: JSON.stringify(payload) }
+  ];
+}
+
+function pickMockStoryEntitySeed(fragmentText = '') {
+  const lowered = String(fragmentText || '').toLowerCase();
+  if (/(sea|lighthouse|harbor|bay|storm)/.test(lowered)) {
+    return {
+      name: 'Buraha Light-Wake',
+      key_text: 'Buraha Light',
+      summary: 'A slow intelligence hiding inside the blue sea-lights, felt before it is understood.',
+      type: 'omen',
+      subtype: 'marine anomaly',
+      lore: 'It moves like weather pretending to be thought.',
+      tags: ['sea', 'light', 'witness']
+    };
+  }
+  if (/(tower|watch|watchman|bell|gate)/.test(lowered)) {
+    return {
+      name: 'Threshold Bell-Memory',
+      key_text: 'Threshold Bell',
+      summary: 'A remembered toll that hangs in the air after the iron has already fallen still.',
+      type: 'omen',
+      subtype: 'threshold residue',
+      lore: 'Some places continue ringing after the metal forgets how.',
+      tags: ['threshold', 'bell', 'memory']
+    };
+  }
+  return {
+    name: 'Inkward Trace',
+    key_text: 'Inkward Trace',
+    summary: 'A faint narrative residue that suggests something unseen has been following the scene.',
+    type: 'omen',
+    subtype: 'narrative trace',
+    lore: 'It appears where observation lingers too long.',
+    tags: ['ink', 'trace', 'observation']
+  };
+}
+
+function buildMockStorytellerIntervention(storyteller, fragmentText) {
+  const entity = pickMockStoryEntitySeed(fragmentText);
+  const storytellerName = firstDefinedString(storyteller?.name) || 'The hidden storyteller';
+  const entityName = firstDefinedString(entity.name);
+  const alreadyIntroduced = Boolean(storyteller?.introducedInTypewriter);
+  const continuation = alreadyIntroduced
+    ? `I returned only for a moment, long enough to follow the drift around ${entityName}. It was there, half-seen beside the scene, taking shape in the weather of what had already begun. I watched it gather its meaning, marked the disturbance it left in the air, and withdrew before anyone could decide I had always been standing there.`
+    : `It was then that I, ${storytellerName}, admitted myself to the margin of the scene. I had been near enough to witness the change, and nearer still when ${entityName} revealed itself inside it: not a thing exactly, but a pressure with a face the night almost knew. I followed that sign until it sharpened, learned what little it wanted, and then let the scene keep moving without me.`;
+  return {
+    continuation,
+    entity,
+    style: pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0]
+  };
+}
+
+async function saveTypewriterEntityFromIntervention({
+  sessionId,
+  playerId = '',
+  storyteller,
+  entity
+}) {
+  const entityName = firstDefinedString(entity?.name) || 'Unnamed entity';
+  const keyText = normalizeTypewriterEntityKeyText(entity?.key_text, entityName);
+  const externalId = firstDefinedString(entity?.external_id) || randomUUID();
+  return upsertNarrativeEntity(
+    {
+      session_id: sessionId,
+      sessionId,
+      playerId: playerId || firstDefinedString(storyteller?.playerId),
+      name: entityName,
+      description: firstDefinedString(entity?.summary) || 'A newly surfaced narrative entity.',
+      lore: firstDefinedString(entity?.lore),
+      type: firstDefinedString(entity?.type) || 'omen',
+      subtype: firstDefinedString(entity?.subtype),
+      universal_traits: normalizeLooseStringArray(entity?.tags),
+      relevance: `Introduced during a typewriter intervention by ${firstDefinedString(storyteller?.name) || 'an unnamed storyteller'}.`,
+      externalId,
+      source: 'storyteller_intervention',
+      sourceRoute: '/api/send_storyteller_typewriter_text',
+      typewriterKeyText: keyText,
+      typewriterSource: 'storyteller_intervention',
+      introducedByStorytellerId: String(storyteller?._id || ''),
+      introducedByStorytellerName: firstDefinedString(storyteller?.name),
+      sourceStorytellerKeySlot: Number.isInteger(storyteller?.keySlotIndex) ? storyteller.keySlotIndex : null,
+      activeInTypewriter: true
+    },
+    {
+      sessionId,
+      playerId: playerId || firstDefinedString(storyteller?.playerId),
+      source: 'storyteller_intervention',
+      sourceRoute: '/api/send_storyteller_typewriter_text',
+      lookup: applyOptionalPlayerId(
+        {
+          session_id: sessionId,
+          introducedByStorytellerId: String(storyteller?._id || ''),
+          typewriterKeyText: keyText
+        },
+        playerId || firstDefinedString(storyteller?.playerId)
+      )
+    }
+  );
+}
+
+async function findTypewriterStorytellerForIntervention(sessionId, storytellerId, slotIndex, playerId = '') {
+  if (storytellerId) {
+    return Storyteller.findOne(
+      applyOptionalPlayerId(
+        {
+          _id: storytellerId,
+          session_id: sessionId
+        },
+        playerId
+      )
+    );
+  }
+  if (Number.isInteger(slotIndex)) {
+    return Storyteller.findOne(
+      applyOptionalPlayerId(
+        {
+          session_id: sessionId,
+          keySlotIndex: slotIndex
+        },
+        playerId
+      )
+    );
+  }
+  return null;
 }
 
 async function resolveFragmentText(body) {
@@ -2085,7 +3561,9 @@ function buildMockStorytellers(count, fragmentText) {
     immediate_ghost_appearance: 'A soft shimmer resolves into a figure with ink-stained hands.',
     typewriter_key: {
       symbol: 'ink moth',
-      description: 'A tarnished brass key with a faint glow.'
+      description: 'A tarnished brass key with a faint glow.',
+      key_shape: 'horizontal',
+      shape_prompt_hint: 'wide horizontal key face with a centered emblem and calm edge margins'
     },
     influences: ['Ashen Cantos', 'Voyager Myths'],
     known_universes: ['The Riven Orrery'],
@@ -3037,7 +4515,20 @@ app.get('/api/storytellers/:id', async (req, res) => {
 // List Entities
 app.get('/api/entities', async (req, res) => {
   try {
-    const { sessionId, playerId, mainEntityId, isSubEntity } = req.query;
+    const {
+      sessionId,
+      playerId,
+      mainEntityId,
+      isSubEntity,
+      source,
+      type,
+      subtype,
+      externalId,
+      introducedByStorytellerId,
+      activeInTypewriter,
+      typewriterKeyText,
+      limit
+    } = req.query;
     if (!sessionId) {
       return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
@@ -3046,12 +4537,37 @@ app.get('/api/entities', async (req, res) => {
     if (mainEntityId) {
       query.mainEntityId = mainEntityId;
     }
-    if (isSubEntity !== undefined) {
-      query.isSubEntity = String(isSubEntity) === 'true';
+    const parsedIsSubEntity = parseOptionalBooleanQuery(isSubEntity);
+    if (parsedIsSubEntity !== undefined) {
+      query.isSubEntity = parsedIsSubEntity;
+    }
+    if (source) query.source = String(source);
+    if (type) query.type = String(type);
+    if (subtype) query.subtype = String(subtype);
+    if (externalId) query.externalId = String(externalId);
+    if (introducedByStorytellerId) query.introducedByStorytellerId = String(introducedByStorytellerId);
+    const parsedActiveInTypewriter = parseOptionalBooleanQuery(activeInTypewriter);
+    if (parsedActiveInTypewriter !== undefined) {
+      query.activeInTypewriter = parsedActiveInTypewriter;
+    }
+    if (typewriterKeyText) query.typewriterKeyText = String(typewriterKeyText);
+
+    const safeLimit = Number.isFinite(Number(limit))
+      ? Math.max(1, Math.min(200, Math.floor(Number(limit))))
+      : 0;
+
+    let entitiesQuery = NarrativeEntity.find(query).sort({ createdAt: 1 });
+    if (safeLimit) {
+      entitiesQuery = entitiesQuery.limit(safeLimit);
     }
 
-    const entities = await NarrativeEntity.find(query).sort({ createdAt: 1 });
-    return res.status(200).json({ sessionId, entities });
+    const entities = await entitiesQuery.exec();
+    return res.status(200).json({
+      sessionId,
+      playerId: normalizeOptionalPlayerId(playerId),
+      count: entities.length,
+      entities
+    });
   } catch (error) {
     console.error('Error in /api/entities:', error);
     return res.status(500).json({ message: 'Server error during entity listing.' });

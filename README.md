@@ -60,6 +60,28 @@ Optional admin auth:
 - `debug`, `mock`, or `mocked_api_calls` returns mocked outputs and skips external API calls.
 - Use `text` as the canonical input field for narrative/fragment payloads.
 
+## Immersive RPG Skeleton
+
+The first immersive RPG pass is now scaffolded around the persisted messenger scene brief.
+
+- `GET /api/immersive-rpg/scene?sessionId=...&bootstrap=true`
+  Loads the current Mongo-backed scene state and can bootstrap Scene 3 from `MessengerSceneBrief`.
+- `POST /api/immersive-rpg/scene/bootstrap`
+  Forces a fresh Scene 3 bootstrap for a session.
+- `POST /api/immersive-rpg/chat`
+  Appends free-text PC actions and returns the next scaffolded GM beat.
+- `POST /api/immersive-rpg/rolls`
+  Resolves notebook-style dice pool rolls (`XdY`, successes on threshold or higher).
+- `GET /api/immersive-rpg/character-sheet`
+  Loads the PC character-sheet skeleton for the session/player.
+- `PUT /api/immersive-rpg/character-sheet`
+  Persists the editable character-sheet skeleton.
+
+Current scope:
+- Scene bootstrap depends on the messenger-derived place brief already being stored for the session.
+- The Scene 3 master prompt is currently stored in code and mirrored into the scene payload as `compiledPrompt`.
+- Scene progression, transcript, pending rolls, roll history, and character sheet all persist in Mongo.
+
 ## Core Routes
 
 ### POST `/api/textToEntity`

@@ -1,22 +1,52 @@
 import { buildOpenApiSpec } from './openapi.js';
 import { getTypewriterPipelineDefinitions } from './services/typewriterAiSettingsService.js';
 import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefinitionsService.js';
+import { listRouteConfigs } from './services/llmRouteConfigService.js';
 
 describe('story admin API metadata', () => {
-  test('includes storyteller mission in runtime AI pipeline definitions', () => {
+  test('includes storyteller intervention, mission, and immersive RPG GM in runtime AI pipeline definitions', () => {
     const definitions = getTypewriterPipelineDefinitions();
+    const storytellerIntervention = definitions.find((definition) => definition.key === 'storyteller_intervention');
     const storytellerMission = definitions.find((definition) => definition.key === 'storyteller_mission');
+    const immersiveRpgGm = definitions.find((definition) => definition.key === 'immersive_rpg_gm');
 
+    expect(storytellerIntervention).toBeDefined();
+    expect(storytellerIntervention.modelKind).toBe('text');
+    expect(storytellerIntervention.supportedProviders).toEqual(expect.arrayContaining(['openai', 'anthropic']));
     expect(storytellerMission).toBeDefined();
     expect(storytellerMission.modelKind).toBe('text');
     expect(storytellerMission.supportedProviders).toEqual(expect.arrayContaining(['openai', 'anthropic']));
+    expect(immersiveRpgGm).toBeDefined();
+    expect(immersiveRpgGm.modelKind).toBe('text');
+    expect(immersiveRpgGm.supportedProviders).toEqual(expect.arrayContaining(['openai', 'anthropic']));
   });
 
-  test('includes storyteller mission and relationship evaluation in prompt definitions', () => {
+  test('includes storyteller intervention, immersive RPG GM, storyteller mission and relationship evaluation in prompt definitions', () => {
     const definitions = getTypewriterPromptDefinitions();
 
     expect(definitions.map((definition) => definition.key)).toEqual(
-      expect.arrayContaining(['storyteller_mission', 'relationship_evaluation'])
+      expect.arrayContaining(['storyteller_intervention', 'immersive_rpg_gm', 'storyteller_mission', 'relationship_evaluation'])
+    );
+  });
+
+  test('includes immersive RPG chat and storyteller intervention in route contracts and keeps storyteller key schema fields aligned', async () => {
+    const routeConfigs = await listRouteConfigs();
+
+    expect(routeConfigs.immersive_rpg_chat).toBeDefined();
+    expect(routeConfigs.immersive_rpg_chat.routePath).toBe('/api/immersive-rpg/chat');
+    expect(routeConfigs.immersive_rpg_chat.responseSchema?.properties?.pending_roll).toBeDefined();
+    expect(routeConfigs.storyteller_typewriter_intervention).toBeDefined();
+    expect(routeConfigs.storyteller_typewriter_intervention.routePath).toBe('/api/send_storyteller_typewriter_text');
+    expect(
+      routeConfigs.storyteller_typewriter_intervention.responseSchema?.properties?.style?.properties?.font_color
+    ).toBeDefined();
+    expect(
+      routeConfigs.text_to_storyteller.responseSchema?.properties?.storytellers?.items?.properties?.typewriter_key?.properties
+    ).toEqual(
+      expect.objectContaining({
+        key_shape: expect.any(Object),
+        shape_prompt_hint: expect.any(Object)
+      })
     );
   });
 
@@ -41,11 +71,24 @@ describe('story admin API metadata', () => {
       '/api/shouldGenerateContinuation',
       '/api/typewriter/session/start',
       '/api/shouldCreateStorytellerKey',
-      '/api/send_typewriter_text'
+      '/api/send_storyteller_typewriter_text',
+      '/api/send_typewriter_text',
+      '/api/immersive-rpg/scene',
+      '/api/immersive-rpg/scene/bootstrap',
+      '/api/immersive-rpg/chat',
+      '/api/immersive-rpg/rolls',
+      '/api/immersive-rpg/character-sheet'
     ];
 
     for (const path of expectedPaths) {
       expect(spec.paths[path]).toBeDefined();
     }
+
+    expect(spec.paths['/api/entities']).toBeDefined();
+    expect(spec.components.schemas.NarrativeEntity).toBeDefined();
+    expect(spec.components.schemas.NarrativeEntityListResponse).toBeDefined();
+    expect(spec.paths['/api/entities'].get.responses['200'].content['application/json'].schema).toEqual(
+      { $ref: '#/components/schemas/NarrativeEntityListResponse' }
+    );
   });
 });
