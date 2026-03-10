@@ -59,6 +59,12 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/messenger/chat assistant prompt',
     settingsKey: 'messenger_chat'
   },
+  immersive_rpg_gm: {
+    key: 'immersive_rpg_gm',
+    label: 'Immersive RPG GM',
+    description: '/api/immersive-rpg/chat GM orchestration prompt',
+    settingsKey: 'immersive_rpg_gm'
+  },
   storyteller_mission: {
     key: 'storyteller_mission',
     label: 'Storyteller mission',

@@ -2,6 +2,10 @@ import {
   FRAGMENT_MEMORY_JSON_SCHEMA,
   FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA
 } from './contracts/fragmentMemoryContract.js';
+import {
+  NARRATIVE_ENTITY_JSON_SCHEMA,
+  NARRATIVE_ENTITY_LIST_RESPONSE_SCHEMA
+} from './contracts/narrativeEntityContract.js';
 
 const pathParam = (name, description) => ({
   name,
@@ -94,6 +98,7 @@ export function buildOpenApiSpec() {
       { name: 'Admin', description: 'LLM prompt/schema management for important generation routes.' },
       { name: 'Sessions', description: 'Session lifecycle and shared arena persistence.' },
       { name: 'Messenger', description: 'Messenger intake flow used to place the typewriter delivery.' },
+      { name: 'Immersive RPG', description: 'Mongo-backed scene, chat, roll, and character-sheet APIs for the immersive GM/PC flow.' },
       { name: 'Quest', description: 'Quest scene graph and directional screen editing APIs.' },
       { name: 'Worldbuilding', description: 'World creation and element generation.' },
       { name: 'Generation', description: 'Entity/storyteller generation and missions.' },
@@ -164,6 +169,8 @@ export function buildOpenApiSpec() {
           example: LLM_ROUTE_CONFIG_EXAMPLE
         },
         FragmentMemory: FRAGMENT_MEMORY_JSON_SCHEMA,
+        NarrativeEntity: NARRATIVE_ENTITY_JSON_SCHEMA,
+        NarrativeEntityListResponse: NARRATIVE_ENTITY_LIST_RESPONSE_SCHEMA,
         QuestDirection: {
           type: 'object',
           required: ['direction', 'label', 'targetScreenId'],
@@ -348,6 +355,130 @@ export function buildOpenApiSpec() {
               }
             }
           ]
+        },
+        ImmersiveRpgTranscriptEntry: {
+          type: 'object',
+          required: ['entryId', 'role', 'kind', 'text'],
+          properties: {
+            entryId: { type: 'string' },
+            role: { type: 'string', enum: ['gm', 'pc', 'system'] },
+            kind: { type: 'string', example: 'opening' },
+            text: { type: 'string' },
+            createdAt: { type: 'string', format: 'date-time', nullable: true },
+            meta: { type: 'object', additionalProperties: true }
+          }
+        },
+        ImmersiveRpgPendingRoll: {
+          type: 'object',
+          required: ['contextKey', 'skill', 'diceNotation', 'difficulty', 'successThreshold', 'successesRequired'],
+          properties: {
+            contextKey: { type: 'string', example: 'journal_retrieval' },
+            skill: { type: 'string', example: 'awareness' },
+            label: { type: 'string', example: 'Retrieve the journal unnoticed' },
+            diceNotation: { type: 'string', example: '5d6' },
+            difficulty: { type: 'string', example: 'moderate-high' },
+            successThreshold: { type: 'integer', example: 5 },
+            successesRequired: { type: 'integer', example: 2 },
+            instructions: { type: 'string' }
+          }
+        },
+        ImmersiveRpgRollResult: {
+          type: 'object',
+          required: ['rollId', 'diceNotation', 'rolls', 'successes', 'passed'],
+          properties: {
+            rollId: { type: 'string' },
+            contextKey: { type: 'string' },
+            skill: { type: 'string' },
+            label: { type: 'string' },
+            diceNotation: { type: 'string', example: '5d6' },
+            diceCount: { type: 'integer', minimum: 1 },
+            sides: { type: 'integer', minimum: 2 },
+            difficulty: { type: 'string' },
+            successThreshold: { type: 'integer', minimum: 1 },
+            successesRequired: { type: 'integer', minimum: 1 },
+            rolls: { type: 'array', items: { type: 'integer', minimum: 1 } },
+            successes: { type: 'integer', minimum: 0 },
+            passed: { type: 'boolean' },
+            summary: { type: 'string' },
+            createdAt: { type: 'string', format: 'date-time', nullable: true },
+            meta: { type: 'object', additionalProperties: true }
+          }
+        },
+        ImmersiveRpgCharacterSheet: {
+          type: 'object',
+          required: ['sessionId', 'playerId', 'playerName', 'identity', 'coreTraits', 'attributes', 'skills', 'inventory', 'notes'],
+          properties: {
+            id: { type: 'string' },
+            sessionId: { type: 'string' },
+            playerId: { type: 'string', example: 'pc' },
+            playerName: { type: 'string', example: 'Player Character' },
+            identity: { type: 'object', additionalProperties: true },
+            coreTraits: { type: 'object', additionalProperties: true },
+            attributes: { type: 'object', additionalProperties: true },
+            skills: { type: 'object', additionalProperties: true },
+            inventory: { type: 'array', items: { type: 'string' } },
+            notes: { type: 'array', items: { type: 'string' } },
+            createdAt: { type: 'string', format: 'date-time', nullable: true },
+            updatedAt: { type: 'string', format: 'date-time', nullable: true }
+          }
+        },
+        ImmersiveRpgScene: {
+          type: 'object',
+          required: ['sessionId', 'playerId', 'currentSceneKey', 'sceneTitle', 'currentBeat', 'status', 'transcript', 'rollLog'],
+          properties: {
+            id: { type: 'string' },
+            sessionId: { type: 'string' },
+            playerId: { type: 'string' },
+            messengerSceneId: { type: 'string', example: 'messanger' },
+            currentSceneKey: { type: 'string', example: 'scene_3_mysterious_encounter' },
+            sceneTitle: { type: 'string', example: 'Scene 3: The Mysterious Encounter' },
+            currentBeat: { type: 'string', example: 'encounter_setup' },
+            status: { type: 'string', enum: ['draft', 'active', 'paused', 'completed'] },
+            promptKey: { type: 'string' },
+            sourceSceneBrief: { $ref: '#/components/schemas/MessengerSceneBrief' },
+            compiledPrompt: { type: 'string' },
+            transcript: { type: 'array', items: { $ref: '#/components/schemas/ImmersiveRpgTranscriptEntry' } },
+            rollLog: { type: 'array', items: { $ref: '#/components/schemas/ImmersiveRpgRollResult' } },
+            pendingRoll: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/ImmersiveRpgPendingRoll' }]
+            },
+            sceneFlags: { type: 'object', additionalProperties: true },
+            notes: { type: 'array', items: { type: 'string' } },
+            characterSheet: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/ImmersiveRpgCharacterSheet' }]
+            },
+            createdAt: { type: 'string', format: 'date-time', nullable: true },
+            updatedAt: { type: 'string', format: 'date-time', nullable: true }
+          }
+        },
+        ImmersiveRpgSceneEnvelope: {
+          type: 'object',
+          required: ['scene', 'characterSheet'],
+          properties: {
+            sessionId: { type: 'string' },
+            messengerSceneId: { type: 'string' },
+            bootstrapped: { type: 'boolean' },
+            messengerReady: { type: 'boolean' },
+            storage: { type: 'string', example: 'mongo' },
+            sourceStorage: { type: 'string', enum: ['mongo', 'file'] },
+            reply: { type: 'string' },
+            pendingRoll: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/ImmersiveRpgPendingRoll' }]
+            },
+            roll: { $ref: '#/components/schemas/ImmersiveRpgRollResult' },
+            resolution: {
+              type: 'object',
+              properties: {
+                currentBeat: { type: 'string' },
+                message: { type: 'string' }
+              }
+            },
+            scene: { $ref: '#/components/schemas/ImmersiveRpgScene' },
+            characterSheet: { $ref: '#/components/schemas/ImmersiveRpgCharacterSheet' }
+          }
         },
         TypewriterAiPipelineSetting: {
           type: 'object',
@@ -1276,6 +1407,209 @@ export function buildOpenApiSpec() {
           }
         })
       },
+      '/api/immersive-rpg/scene': {
+        get: op({
+          tags: ['Immersive RPG'],
+          summary: 'Load the current immersive RPG scene for a session',
+          importance: 'Critical',
+          flow: 'Hydrates the GM/PC scene using the persisted messenger brief and optionally bootstraps the first scene on demand.',
+          parameters: [
+            queryParam('sessionId', true, 'Session identifier.'),
+            queryParam('playerId', false, 'Optional player character id. Defaults to "pc".'),
+            queryParam('playerName', false, 'Optional player character display name.'),
+            queryParam('messengerSceneId', false, 'Messenger scene identifier to read the stored place brief from. Defaults to "messanger".'),
+            queryParam('bootstrap', false, 'Set to true to create the immersive scene if it does not exist yet.')
+          ],
+          responses: {
+            '200': {
+              description: 'Current immersive RPG scene envelope.',
+              ...jsonResponse({ $ref: '#/components/schemas/ImmersiveRpgSceneEnvelope' })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Scene not found and bootstrap disabled.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '409': { description: 'Messenger brief missing or insufficient.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/immersive-rpg/scene/bootstrap': {
+        post: op({
+          tags: ['Immersive RPG'],
+          summary: 'Bootstrap or reset the first immersive RPG scene',
+          importance: 'Critical',
+          flow: 'Creates the Mongo-backed Scene 3 state from the messenger-derived location brief and seeds the initial GM opening turn.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    playerId: { type: 'string' },
+                    playerName: { type: 'string' },
+                    messengerSceneId: { type: 'string' },
+                    forceReset: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Bootstrapped immersive RPG scene envelope.',
+              ...jsonResponse({ $ref: '#/components/schemas/ImmersiveRpgSceneEnvelope' })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '409': { description: 'Messenger brief missing or insufficient.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/immersive-rpg/chat': {
+        post: op({
+          tags: ['Immersive RPG'],
+          summary: 'Append a PC action and get the next scaffolded GM beat',
+          importance: 'High',
+          flow: 'Persists the free-text GM/PC transcript and advances the first scene using the deterministic skeleton until a fuller LLM loop replaces it.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId', 'message'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    playerId: { type: 'string' },
+                    playerName: { type: 'string' },
+                    messengerSceneId: { type: 'string' },
+                    message: { type: 'string' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Updated immersive RPG scene envelope with the next GM reply.',
+              ...jsonResponse({ $ref: '#/components/schemas/ImmersiveRpgSceneEnvelope' })
+            },
+            '400': { description: 'Missing sessionId or message.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '409': { description: 'Messenger brief missing or insufficient.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/immersive-rpg/rolls': {
+        post: op({
+          tags: ['Immersive RPG'],
+          summary: 'Resolve a notebook-style dice pool roll for the current scene',
+          importance: 'High',
+          flow: 'Simulates rolls and successes for the square notebook panel and applies the consequence back into persisted scene state.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    playerId: { type: 'string' },
+                    playerName: { type: 'string' },
+                    messengerSceneId: { type: 'string' },
+                    contextKey: { type: 'string' },
+                    skill: { type: 'string' },
+                    label: { type: 'string' },
+                    diceNotation: { type: 'string', example: '5d6' },
+                    difficulty: { type: 'string', example: 'moderate-high' },
+                    successThreshold: { type: 'integer', minimum: 1 },
+                    successesRequired: { type: 'integer', minimum: 1 }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Roll result plus updated scene envelope.',
+              ...jsonResponse({ $ref: '#/components/schemas/ImmersiveRpgSceneEnvelope' })
+            },
+            '400': { description: 'Missing sessionId or invalid dice notation.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '409': { description: 'Messenger brief missing or insufficient.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/immersive-rpg/character-sheet': {
+        get: op({
+          tags: ['Immersive RPG'],
+          summary: 'Load the PC character-sheet skeleton',
+          importance: 'High',
+          flow: 'Hydrates the editable PC skeleton that will later feed deeper RPG mechanics and scene generation.',
+          parameters: [
+            queryParam('sessionId', true, 'Session identifier.'),
+            queryParam('playerId', false, 'Optional player character id. Defaults to "pc".'),
+            queryParam('playerName', false, 'Optional player character display name.'),
+            queryParam('messengerSceneId', false, 'Messenger scene identifier to read the stored place brief from if no scene exists yet.')
+          ],
+          responses: {
+            '200': {
+              description: 'Character-sheet envelope.',
+              ...jsonResponse({
+                type: 'object',
+                properties: {
+                  sessionId: { type: 'string' },
+                  playerId: { type: 'string' },
+                  characterSheet: { $ref: '#/components/schemas/ImmersiveRpgCharacterSheet' }
+                }
+              })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        }),
+        put: op({
+          tags: ['Immersive RPG'],
+          summary: 'Save the PC character-sheet skeleton',
+          importance: 'High',
+          flow: 'Persists the editable PC scaffold so later GM turns and mechanics can consume stable session state from Mongo.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    playerId: { type: 'string' },
+                    playerName: { type: 'string' },
+                    messengerSceneId: { type: 'string' },
+                    identity: { type: 'object', additionalProperties: true },
+                    coreTraits: { type: 'object', additionalProperties: true },
+                    attributes: { type: 'object', additionalProperties: true },
+                    skills: { type: 'object', additionalProperties: true },
+                    inventory: { type: 'array', items: { type: 'string' } },
+                    notes: { type: 'array', items: { type: 'string' } }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Character-sheet envelope.',
+              ...jsonResponse({
+                type: 'object',
+                properties: {
+                  sessionId: { type: 'string' },
+                  playerId: { type: 'string' },
+                  characterSheet: { $ref: '#/components/schemas/ImmersiveRpgCharacterSheet' }
+                }
+              })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
       '/api/send_typewriter_text': {
         post: op({
           tags: ['Generation'],
@@ -1809,12 +2143,23 @@ export function buildOpenApiSpec() {
           flow: 'Entity gallery hydration for world/arena interactions.',
           parameters: [
             queryParam('sessionId', true, 'Session identifier.'),
-            queryParam('playerId', true, 'Player identifier.'),
+            queryParam('playerId', false, 'Optional player identifier.'),
             queryParam('mainEntityId', false, 'Filter by parent entity.'),
-            queryParam('isSubEntity', false, 'Filter by sub-entity flag.')
+            queryParam('isSubEntity', false, 'Filter by sub-entity flag.'),
+            queryParam('source', false, 'Filter by provenance source such as text_to_entity or storyteller_intervention.'),
+            queryParam('type', false, 'Filter by canonical entity type.'),
+            queryParam('subtype', false, 'Filter by canonical entity subtype.'),
+            queryParam('externalId', false, 'Filter by canonical external entity id.'),
+            queryParam('introducedByStorytellerId', false, 'Filter by storyteller origin id.'),
+            queryParam('activeInTypewriter', false, 'Filter by active typewriter presence.'),
+            queryParam('typewriterKeyText', false, 'Filter by the entity key label shown on the typewriter.'),
+            queryParam('limit', false, 'Optional cap on returned results (1-200).')
           ],
           responses: {
-            '200': { description: 'Entity list.' }
+            '200': {
+              description: 'Entity list.',
+              ...jsonResponse({ $ref: '#/components/schemas/NarrativeEntityListResponse' })
+            }
           }
         })
       },

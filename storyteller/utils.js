@@ -1,6 +1,7 @@
 import fs from 'fs';
 import mongoose from 'mongoose';
 import * as fsPromises from 'fs/promises';
+import { randomUUID } from 'crypto';
 import { NarrativeFragment, ChatMessage, Storyteller } from '../models/models.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -22,6 +23,7 @@ import { generateMasterStorytellerChat, } from '../ai/openai/personaChatPrompts.
 import { askForBooksGeneration } from "../ai/openai/bookPrompts.js";
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
 import { renderPromptTemplateString } from '../services/typewriterPromptConfigService.js';
+import { NARRATIVE_ENTITY_REQUIRED_FIELDS } from '../contracts/narrativeEntityContract.js';
 
 // Setup __dirname and __filename for ES6 modules
 const __filename = fileURLToPath(import.meta.url);
@@ -45,69 +47,158 @@ export async function ensureDirectoryExists(dirPath) {
   }
 }
 
-export function mapEntity(rawEntity, sessionId, playerId) {
-  // Create a new object with the mapped keys.
-  // For keys that exist in multiple forms (like universal_traits),
-  // you might merge them.
-  const normalized = {};
+function normalizeEntityString(value, fallback = '') {
+  return typeof value === 'string' ? value.trim() : fallback;
+}
 
-  // Basic info:
-  normalized.name = rawEntity.name || 'Unnamed';
-  normalized.description = rawEntity.description || '';
-  normalized.lore = rawEntity.lore || '';
-  normalized.session_id = rawEntity.session_id || rawEntity.sessionId || sessionId || '';
-  normalized.sessionId = rawEntity.sessionId || rawEntity.session_id || sessionId || '';
-  normalized.playerId = rawEntity.playerId || playerId || '';
-  // Classification:
-  normalized.type = rawEntity.ner_type || '';
-  normalized.subtype = rawEntity.ner_subtype || '';
+function normalizeEntityStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean);
+}
 
-  // Traits & Attributes:
-  // Merge both possible keys for universal traits.
-  let traits = [];
-  if (rawEntity.universal_traits) traits = traits.concat(rawEntity.universal_traits);
-  if (rawEntity['universal traits']) traits = traits.concat(rawEntity['universal traits']);
-  // Remove duplicates:
-  normalized.universalTraits = Array.from(new Set(traits));
-  
-  normalized.attributes = rawEntity.attributes || {};
-  normalized.connections = rawEntity.connections || {};
-  normalized.clusterName = rawEntity.cluster_name || '';
-  normalized.category = Array.isArray(rawEntity.category) ? rawEntity.category.join(',') : rawEntity.category || '';
+function normalizeEntityNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
 
+function normalizeEntityMixed(value, fallback = null) {
+  return value === undefined ? fallback : value;
+}
 
-  // Metrics & Costs:
-  normalized.importance = Number(rawEntity.importance) || 0;
-  normalized.xp = Number(rawEntity.xp) || 0;
-  normalized.tileDistance = Number(rawEntity.tile_distance) || 0;
-  normalized.familiarityLevel = Number(rawEntity.familiarity_level) || 0;
-  normalized.reusabilityLevel = Number(rawEntity.reusability_level) || 0;
-  normalized.relevance = rawEntity.relevance
-  normalized.impact = rawEntity.impact
-  normalized.developmentCost = rawEntity.developmentCost
-  normalized.storytellingPointsCost = Number(rawEntity.storytelling_points_cost) || 0;
-  normalized.urgency = rawEntity.urgency
+function normalizeEntityReusabilityLevel(value) {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  const numeric = normalizeEntityNumber(value);
+  return numeric === null ? '' : numeric;
+}
 
-  // Other/Additional:
-  normalized.nextLevelSpecifically = rawEntity.next_level_specifically || null;
-  normalized.hooks = rawEntity.hooks || null;
-  normalized.specificity = rawEntity.specificity || null;
-  normalized.externalId = rawEntity.externalId
-    ? String(rawEntity.externalId)
-    : (rawEntity.id ? String(rawEntity.id) : '');
-  normalized.turn = rawEntity.turn || null;
-  normalized.skillsAndRolls = rawEntity.skills_and_rolls || null;
-  normalized.evolutionState = rawEntity.evolution_state || '';
-  normalized.evolutionNotes = rawEntity.evolution_notes || '';
-  normalized.mainEntityId = rawEntity.mainEntityId || '';
-  normalized.isSubEntity = Boolean(rawEntity.isSubEntity);
+function normalizeNarrativeEntitySource(value, fallback = 'unknown') {
+  const normalized = normalizeEntityString(value);
+  return normalized || fallback;
+}
+
+export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
+  const sourceEntity = rawEntity && typeof rawEntity === 'object' ? rawEntity : {};
+  const sessionId = normalizeEntityString(
+    sourceEntity.session_id || sourceEntity.sessionId || options.sessionId,
+    ''
+  );
+  const playerId = normalizeEntityString(sourceEntity.playerId || options.playerId, '');
+  const typewriterKeyText = normalizeEntityString(
+    sourceEntity.typewriterKeyText || sourceEntity.key_text,
+    ''
+  );
+  const typewriterSource = normalizeEntityString(
+    sourceEntity.typewriterSource || options.typewriterSource,
+    ''
+  );
+  const tags = normalizeEntityStringArray(sourceEntity.tags);
+  const traits = Array.from(new Set([
+    ...normalizeEntityStringArray(sourceEntity.universal_traits),
+    ...normalizeEntityStringArray(sourceEntity['universal traits']),
+    ...normalizeEntityStringArray(sourceEntity.traits),
+    ...tags
+  ]));
+  const externalId = normalizeEntityString(
+    sourceEntity.externalId || sourceEntity.id || options.externalId,
+    randomUUID()
+  );
+
+  const normalized = {
+    session_id: sessionId,
+    sessionId,
+    playerId,
+    mainEntityId: normalizeEntityString(sourceEntity.mainEntityId || options.mainEntityId, ''),
+    isSubEntity: Boolean(sourceEntity.isSubEntity ?? options.isSubEntity),
+    name: normalizeEntityString(sourceEntity.name || sourceEntity.entity_name, 'Unnamed'),
+    description: normalizeEntityString(
+      sourceEntity.description || sourceEntity.summary || options.defaultDescription,
+      ''
+    ),
+    lore: normalizeEntityString(sourceEntity.lore, ''),
+    type: normalizeEntityString(sourceEntity.type || sourceEntity.ner_type, ''),
+    subtype: normalizeEntityString(sourceEntity.subtype || sourceEntity.ner_subtype, ''),
+    tags,
+    universalTraits: traits,
+    attributes: sourceEntity.attributes || {},
+    connections: sourceEntity.connections || {},
+    clusterName: normalizeEntityString(sourceEntity.clusterName || sourceEntity.cluster_name, ''),
+    category: Array.isArray(sourceEntity.category)
+      ? sourceEntity.category.filter((entry) => typeof entry === 'string' && entry.trim()).join(',')
+      : normalizeEntityString(sourceEntity.category, ''),
+    relevance: normalizeEntityString(sourceEntity.relevance, ''),
+    impact: normalizeEntityString(sourceEntity.impact, ''),
+    developmentCost: normalizeEntityString(
+      sourceEntity.developmentCost || sourceEntity.development_cost,
+      ''
+    ),
+    urgency: normalizeEntityString(sourceEntity.urgency, ''),
+    nextLevelSpecifically: normalizeEntityMixed(
+      sourceEntity.nextLevelSpecifically || sourceEntity.next_level_specifically,
+      null
+    ),
+    hooks: normalizeEntityMixed(sourceEntity.hooks, null),
+    specificity: normalizeEntityMixed(sourceEntity.specificity, null),
+    externalId,
+    source: normalizeNarrativeEntitySource(sourceEntity.source || options.source, 'unknown'),
+    sourceRoute: normalizeEntityString(sourceEntity.sourceRoute || options.sourceRoute, ''),
+    turn: normalizeEntityMixed(sourceEntity.turn, null),
+    skillsAndRolls: normalizeEntityMixed(
+      sourceEntity.skillsAndRolls || sourceEntity.skills_and_rolls,
+      null
+    ),
+    evolutionState: normalizeEntityString(sourceEntity.evolutionState || sourceEntity.evolution_state, ''),
+    evolutionNotes: normalizeEntityString(sourceEntity.evolutionNotes || sourceEntity.evolution_notes, ''),
+    typewriterKeyText,
+    typewriterSource,
+    introducedByStorytellerId: normalizeEntityString(
+      sourceEntity.introducedByStorytellerId || options.introducedByStorytellerId,
+      ''
+    ),
+    introducedByStorytellerName: normalizeEntityString(
+      sourceEntity.introducedByStorytellerName || options.introducedByStorytellerName,
+      ''
+    ),
+    sourceStorytellerKeySlot: Number.isInteger(sourceEntity.sourceStorytellerKeySlot)
+      ? sourceEntity.sourceStorytellerKeySlot
+      : Number.isInteger(options.sourceStorytellerKeySlot)
+        ? options.sourceStorytellerKeySlot
+        : null,
+    activeInTypewriter: Boolean(sourceEntity.activeInTypewriter ?? options.activeInTypewriter)
+  };
+
+  const importance = normalizeEntityNumber(sourceEntity.importance);
+  if (importance !== null) normalized.importance = importance;
+  const xp = normalizeEntityNumber(sourceEntity.xp);
+  if (xp !== null) normalized.xp = xp;
+  const tileDistance = normalizeEntityNumber(sourceEntity.tileDistance || sourceEntity.tile_distance);
+  if (tileDistance !== null) normalized.tileDistance = tileDistance;
+  const familiarityLevel = normalizeEntityNumber(
+    sourceEntity.familiarityLevel || sourceEntity.familiarity_level
+  );
+  if (familiarityLevel !== null) normalized.familiarityLevel = familiarityLevel;
+  normalized.reusabilityLevel = normalizeEntityReusabilityLevel(
+    sourceEntity.reusabilityLevel || sourceEntity.reusability_level
+  );
+  const storytellingPointsCost = normalizeEntityNumber(
+    sourceEntity.storytellingPointsCost || sourceEntity.storytelling_points_cost
+  );
+  if (storytellingPointsCost !== null) normalized.storytellingPointsCost = storytellingPointsCost;
 
   return normalized;
 }
 
+export function mapEntity(rawEntity, sessionId, playerId) {
+  return normalizeNarrativeEntityDocument(rawEntity, {
+    sessionId,
+    playerId,
+    source: rawEntity?.source || 'text_to_entity',
+    sourceRoute: rawEntity?.sourceRoute || '/api/textToEntity'
+  });
+}
 
-
-const entitySchema = new mongoose.Schema({
+const entitySchemaDefinition = {
   session_id: { type: String, required: true },
   sessionId: { type: String },
   playerId: { type: String, index: true },
@@ -122,6 +213,7 @@ const entitySchema = new mongoose.Schema({
   // Classification/Type Info
   type: { type: String },           // from ner_type
   subtype: { type: String },        // from ner_subtype
+  tags: { type: [String], default: [] },
   
   // Traits & Attributes
   universalTraits: { type: [String] },  // merging "universal_traits" and "universal traits"
@@ -135,7 +227,7 @@ const entitySchema = new mongoose.Schema({
   xp: { type: Number },
   tileDistance: { type: Number },   // from tile_distance
   familiarityLevel: { type: Number },
-  reusabilityLevel: { type: Number },
+  reusabilityLevel: { type: mongoose.Schema.Types.Mixed },
   relevance: { type: String },
   impact: { type: String },
   developmentCost: { type: String },
@@ -147,6 +239,8 @@ const entitySchema = new mongoose.Schema({
   hooks: { type: mongoose.Schema.Types.Mixed },
   specificity: { type: mongoose.Schema.Types.Mixed },
   externalId: { type: String },     // from id (renamed to avoid conflict)
+  source: { type: String, default: 'unknown', index: true },
+  sourceRoute: { type: String },
   turn: { type: mongoose.Schema.Types.Mixed },
   skillsAndRolls: { type: mongoose.Schema.Types.Mixed },
   evolutionState: { type: String },
@@ -157,9 +251,88 @@ const entitySchema = new mongoose.Schema({
   introducedByStorytellerName: { type: String },
   sourceStorytellerKeySlot: { type: Number },
   activeInTypewriter: { type: Boolean, default: false }
+};
+
+const entitySchema = new mongoose.Schema(entitySchemaDefinition, {
+  timestamps: true,
+  strict: true
 });
 
+entitySchema.index({ session_id: 1, playerId: 1, externalId: 1 });
+entitySchema.index({ session_id: 1, playerId: 1, source: 1, createdAt: -1 });
+entitySchema.index({ session_id: 1, playerId: 1, type: 1, subtype: 1 });
+
+for (const field of NARRATIVE_ENTITY_REQUIRED_FIELDS) {
+  if (!entitySchemaDefinition[field]) {
+    throw new Error(`NarrativeEntity schema missing required contract field: ${field}`);
+  }
+}
+
 export const NarrativeEntity = mongoose.model('NarrativeEntity', entitySchema);
+
+function buildNarrativeEntityLookup(document, options = {}) {
+  if (options.lookup && typeof options.lookup === 'object') {
+    return { ...options.lookup };
+  }
+  if (typeof options.lookupBuilder === 'function') {
+    return options.lookupBuilder(document, options.rawEntity || {});
+  }
+
+  const lookup = {
+    session_id: document.session_id,
+    playerId: document.playerId || '',
+    externalId: document.externalId
+  };
+
+  if (document.mainEntityId) {
+    lookup.mainEntityId = document.mainEntityId;
+  }
+  if (document.isSubEntity) {
+    lookup.isSubEntity = true;
+  }
+
+  return lookup;
+}
+
+export async function upsertNarrativeEntity(rawEntity = {}, options = {}) {
+  const document = normalizeNarrativeEntityDocument(rawEntity, options);
+  const lookup = buildNarrativeEntityLookup(document, {
+    ...options,
+    rawEntity
+  });
+
+  return NarrativeEntity.findOneAndUpdate(
+    lookup,
+    document,
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true
+    }
+  );
+}
+
+export async function upsertNarrativeEntitiesForSession(
+  sessionId,
+  jsonEntities,
+  playerId,
+  options = {}
+) {
+  const sourceEntities = Array.isArray(jsonEntities) ? jsonEntities : [];
+  if (!sourceEntities.length) {
+    return [];
+  }
+
+  return Promise.all(
+    sourceEntities.map((entity) =>
+      upsertNarrativeEntity(entity, {
+        sessionId,
+        playerId,
+        ...options
+      })
+    )
+  );
+}
 
 const narrativeTextureSchema = new mongoose.Schema({
     session_id: { type: String, required: true },
@@ -374,13 +547,17 @@ export async function getFragment(sessionId, turn) {
 }
 
 
-export const setEntitiesForSession = async(sessionId, jsonEntities, playerId) => {
+export const setEntitiesForSession = async(sessionId, jsonEntities, playerId, options = {}) => {
   try {
-    // Find a document by session_id and turn, update its fragment,
-    // or create a new document if none exists.
-    jsonEntities = jsonEntities.map((entity) => mapEntity(entity, sessionId, playerId))
-    const entities = await NarrativeEntity.insertMany(
-      jsonEntities
+    const entities = await upsertNarrativeEntitiesForSession(
+      sessionId,
+      jsonEntities,
+      playerId,
+      {
+        source: options.source || 'text_to_entity',
+        sourceRoute: options.sourceRoute || '/api/textToEntity',
+        ...options
+      }
     );
     console.log("created entity:", entities);
     return entities;
@@ -393,14 +570,11 @@ export const setEntitiesForSession = async(sessionId, jsonEntities, playerId) =>
   
 export async function getEntitiesForSession(sessionId) {
     try {
-      // Find a document by session_id and turn, update its fragment,
-      // or create a new document if none exists.
       const entities = await NarrativeEntity.find(
-        { session_id: sessionId },      // Query: match session_id and turn
-        
+        { session_id: sessionId },
       );
       console.log(`Got Entites: ${entities}`);
-      return fragment;
+      return entities;
     } catch (error) {
       console.error("Error getting entities:", error);
       throw error;

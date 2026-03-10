@@ -7,6 +7,7 @@ import { LlmRouteConfigVersion } from '../models/models.js';
 import { FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA } from '../contracts/fragmentMemoryContract.js';
 import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
 import { ensureMongoConnection } from './mongoConnectionService.js';
+import { getDefaultImmersiveRpgGmPromptTemplate } from './immersiveRpgService.js';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validatorCache = new Map();
@@ -83,6 +84,62 @@ const MESSENGER_SCENE_BRIEF_SCHEMA = {
       items: { type: 'string' }
     },
     scene_established: { type: 'boolean' }
+  },
+  additionalProperties: true
+};
+
+const IMMERSIVE_RPG_PENDING_ROLL_SCHEMA = {
+  type: 'object',
+  required: [
+    'context_key',
+    'skill',
+    'label',
+    'dice_notation',
+    'difficulty',
+    'success_threshold',
+    'successes_required',
+    'instructions'
+  ],
+  properties: {
+    context_key: { type: 'string', minLength: 1 },
+    skill: { type: 'string', minLength: 1 },
+    label: { type: 'string', minLength: 1 },
+    dice_notation: { type: 'string', minLength: 3 },
+    difficulty: { type: 'string', minLength: 1 },
+    success_threshold: { type: 'integer', minimum: 1 },
+    successes_required: { type: 'integer', minimum: 1 },
+    instructions: { type: 'string', minLength: 1 }
+  },
+  additionalProperties: true
+};
+
+const IMMERSIVE_RPG_CHAT_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['gm_reply', 'current_beat', 'should_pause_for_choice', 'scene_flags_patch'],
+  properties: {
+    gm_reply: { type: 'string', minLength: 1 },
+    current_beat: { type: 'string', minLength: 1 },
+    should_pause_for_choice: { type: 'boolean' },
+    pending_roll: {
+      anyOf: [
+        IMMERSIVE_RPG_PENDING_ROLL_SCHEMA,
+        { type: 'null' }
+      ]
+    },
+    scene_flags_patch: {
+      type: 'object',
+      additionalProperties: {
+        anyOf: [
+          { type: 'boolean' },
+          { type: 'string' },
+          { type: 'number' }
+        ]
+      }
+    },
+    keeper_notes: {
+      type: 'array',
+      items: { type: 'string' }
+    }
   },
   additionalProperties: true
 };
@@ -360,6 +417,55 @@ Return JSON only in this exact shape:
       },
       additionalProperties: true
     }
+  },
+  immersive_rpg_chat: {
+    routeKey: 'immersive_rpg_chat',
+    routePath: '/api/immersive-rpg/chat',
+    method: 'POST',
+    description: 'Reserved GM structured-output contract for the immersive RPG chat loop.',
+    promptMode: 'manual',
+    promptTemplate: getDefaultImmersiveRpgGmPromptTemplate(),
+    promptCore: '',
+    fieldDocs: {
+      gm_reply: 'The next atmospheric GM response shown to the player.',
+      current_beat: 'Scene-state beat identifier to persist into Mongo.',
+      should_pause_for_choice: 'True when the GM should stop and wait for the PC to answer "What do you do?"',
+      pending_roll: 'Include only when a roll should appear in the notebook panel.',
+      'pending_roll.context_key': 'Stable key for roll resolution logic.',
+      scene_flags_patch: 'Shallow patch of scene flags to persist after the GM turn.'
+    },
+    examplePayload: {
+      gm_reply:
+        'The stranger still has not seen you. The journal lies half-hidden where the brush dips toward the path, and the wrongness of the scene grows sharper the longer you wait. If you want it, you need to move now. What do you do?',
+      current_beat: 'encounter_setup',
+      should_pause_for_choice: true,
+      pending_roll: {
+        context_key: 'journal_retrieval',
+        skill: 'awareness',
+        label: 'Retrieve the journal unnoticed',
+        dice_notation: '5d6',
+        difficulty: 'moderate-high',
+        success_threshold: 5,
+        successes_required: 2,
+        instructions:
+          'Roll 5d6 Awareness. Count 5s and 6s as successes. You need 2 successes to reach the journal, see enough of it, and stay unnoticed.'
+      },
+      scene_flags_patch: {
+        strangerSpottedPc: false,
+        sawJournalSketches: false
+      },
+      keeper_notes: [
+        'Never present menu choices.',
+        'Pause on meaningful uncertainty and ask "What do you do?"'
+      ]
+    },
+    outputRules: [
+      'Maintain suggestive, Hitchcock-like dread without removing player agency.',
+      'Never present explicit choice lists.',
+      'If a roll is required, include pending_roll and state the stakes plainly.',
+      'GM output must stay in-world and must not mention prompts, APIs, JSON, or tooling.'
+    ],
+    responseSchema: IMMERSIVE_RPG_CHAT_RESPONSE_SCHEMA
   },
   storyteller_mission: {
     routeKey: 'storyteller_mission',

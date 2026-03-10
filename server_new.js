@@ -11,12 +11,22 @@ import {
   listAvailableAnthropicModels,
   listAvailableOpenAiModels
 } from './ai/openai/apiService.js';
-import { ChatMessage, Storyteller, SessionPlayer, Arena, World, WorldElement, QuestScreenGraph } from './models/models.js';
+import {
+  ChatMessage,
+  Storyteller,
+  SessionPlayer,
+  Arena,
+  World,
+  WorldElement,
+  QuestScreenGraph,
+  ImmersiveRpgSceneSession,
+  ImmersiveRpgCharacterSheet
+} from './models/models.js';
 import {
   createStoryTellerKey,
   createStorytellerIllustration
 } from './services/storytellerService.js';
-import { NarrativeEntity } from './storyteller/utils.js';
+import { NarrativeEntity, upsertNarrativeEntity } from './storyteller/utils.js';
 import { textToEntityFromText } from './services/textToEntityService.js';
 import {
   normalizePredicate,
@@ -86,6 +96,24 @@ import {
   saveTypewriterSessionFragment,
   startTypewriterSession
 } from './services/typewriterSessionService.js';
+import {
+  DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID,
+  DEFAULT_IMMERSIVE_RPG_PLAYER_ID,
+  DEFAULT_IMMERSIVE_RPG_PLAYER_NAME,
+  buildImmersiveRpgPromptMessages,
+  buildCharacterSheetSkeleton,
+  buildCompiledScenePrompt,
+  buildSceneBootstrap,
+  buildSkeletonSceneTurn,
+  createTranscriptEntry,
+  hasEnoughMessengerSceneBriefForRpg,
+  normalizeImmersiveRpgChatResponse,
+  normalizeMessengerSceneBriefForRpg,
+  resolveRollOutcome,
+  simulateDicePoolRoll,
+  toImmersiveRpgCharacterSheetPayload,
+  toImmersiveRpgScenePayload
+} from './services/immersiveRpgService.js';
 
 
 const app = express();
@@ -1409,6 +1437,698 @@ app.delete('/api/messenger/chat', async (req, res) => {
   }
 });
 
+function normalizeImmersiveRpgSessionId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function normalizeImmersiveRpgPlayerId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function normalizeImmersiveRpgPlayerName(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function normalizeImmersiveRpgMessengerSceneId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID;
+}
+
+function normalizeBooleanFlag(value, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function mergeImmersiveRpgCharacterSheetDraft(existingDoc, patch = {}) {
+  const existing = existingDoc?.toObject ? existingDoc.toObject() : (existingDoc || {});
+  const nextPatch = patch && typeof patch === 'object' ? patch : {};
+  return {
+    ...existing,
+    ...nextPatch,
+    identity: {
+      ...(existing?.identity && typeof existing.identity === 'object' ? existing.identity : {}),
+      ...(nextPatch?.identity && typeof nextPatch.identity === 'object' ? nextPatch.identity : {})
+    },
+    coreTraits: {
+      ...(existing?.coreTraits && typeof existing.coreTraits === 'object' ? existing.coreTraits : {}),
+      ...(nextPatch?.coreTraits && typeof nextPatch.coreTraits === 'object' ? nextPatch.coreTraits : {})
+    },
+    attributes: {
+      ...(existing?.attributes && typeof existing.attributes === 'object' ? existing.attributes : {}),
+      ...(nextPatch?.attributes && typeof nextPatch.attributes === 'object' ? nextPatch.attributes : {})
+    },
+    skills: {
+      ...(existing?.skills && typeof existing.skills === 'object' ? existing.skills : {}),
+      ...(nextPatch?.skills && typeof nextPatch.skills === 'object' ? nextPatch.skills : {})
+    },
+    inventory: Array.isArray(nextPatch?.inventory) ? nextPatch.inventory : existing?.inventory,
+    notes: Array.isArray(nextPatch?.notes) ? nextPatch.notes : existing?.notes
+  };
+}
+
+async function loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId) {
+  const persistence = await resolveMessengerPersistenceMode();
+  const brief = await getMessengerSceneBrief(sessionId, messengerSceneId, persistence);
+  return {
+    brief: normalizeMessengerSceneBriefForRpg(brief),
+    storage: persistence
+  };
+}
+
+async function resolveImmersiveRpgPromptTemplate() {
+  const latestPrompt = await getLatestPromptTemplate('immersive_rpg_gm');
+  if (latestPrompt?.promptTemplate) {
+    return latestPrompt.promptTemplate;
+  }
+
+  const routeConfig = await getRouteConfig('immersive_rpg_chat');
+  return routeConfig?.promptTemplate || '';
+}
+
+function buildMockImmersiveRpgChatResponse(currentScene, message) {
+  const turn = currentScene.pendingRoll
+    ? {
+      nextBeat: currentScene.currentBeat,
+      pendingRoll: currentScene.pendingRoll,
+      gmText: `${currentScene.pendingRoll.instructions} The moment still hinges on that outcome. What do you do?`
+    }
+    : buildSkeletonSceneTurn(currentScene, message);
+
+  return {
+    gm_reply: turn.gmText,
+    current_beat: turn.nextBeat,
+    should_pause_for_choice: true,
+    pending_roll: turn.pendingRoll
+      ? {
+        context_key: turn.pendingRoll.contextKey,
+        skill: turn.pendingRoll.skill,
+        label: turn.pendingRoll.label,
+        dice_notation: turn.pendingRoll.diceNotation,
+        difficulty: turn.pendingRoll.difficulty,
+        success_threshold: turn.pendingRoll.successThreshold,
+        successes_required: turn.pendingRoll.successesRequired,
+        instructions: turn.pendingRoll.instructions
+      }
+      : null,
+    scene_flags_patch: {},
+    keeper_notes: [
+      'Mock mode uses the deterministic immersive RPG scene scaffold.'
+    ]
+  };
+}
+
+async function ensureImmersiveRpgCharacterSheet({
+  sessionId,
+  playerId,
+  playerName,
+  sourceSceneBrief,
+  patch = null
+} = {}) {
+  const effectivePlayerId = playerId || DEFAULT_IMMERSIVE_RPG_PLAYER_ID;
+  const existing = await ImmersiveRpgCharacterSheet.findOne({ sessionId, playerId: effectivePlayerId });
+  const mergedDraft = mergeImmersiveRpgCharacterSheetDraft(existing, patch || {});
+  const normalized = buildCharacterSheetSkeleton({
+    sessionId,
+    playerId: effectivePlayerId,
+    playerName: playerName || existing?.playerName,
+    messengerSceneBrief: sourceSceneBrief,
+    current: mergedDraft
+  });
+
+  const doc = await ImmersiveRpgCharacterSheet.findOneAndUpdate(
+    { sessionId, playerId: effectivePlayerId },
+    {
+      $set: {
+        playerName: normalized.playerName,
+        identity: normalized.identity,
+        coreTraits: normalized.coreTraits,
+        attributes: normalized.attributes,
+        skills: normalized.skills,
+        inventory: normalized.inventory,
+        notes: normalized.notes,
+        sourceSceneBrief: normalized.sourceSceneBrief
+      }
+    },
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true
+    }
+  ).lean();
+
+  return doc;
+}
+
+async function createOrLoadImmersiveRpgScene({
+  sessionId,
+  playerId,
+  playerName,
+  messengerSceneId,
+  promptTemplate = '',
+  bootstrapIfMissing = false,
+  forceReset = false
+} = {}) {
+  let sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
+  const effectivePlayerId = sceneDoc?.playerId || playerId || DEFAULT_IMMERSIVE_RPG_PLAYER_ID;
+  const effectivePlayerName = playerName || '';
+  const { brief, storage } = await loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId);
+
+  if (!sceneDoc && !bootstrapIfMissing && !forceReset) {
+    return {
+      sceneDoc: null,
+      characterSheetDoc: null,
+      bootstrapped: false,
+      messengerSceneBrief: brief,
+      messengerStorage: storage
+    };
+  }
+
+  if (!hasEnoughMessengerSceneBriefForRpg(brief)) {
+    const error = new Error('Messenger scene brief is missing or too thin to seed the immersive RPG scene.');
+    error.code = 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED';
+    error.statusCode = 409;
+    throw error;
+  }
+
+    const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
+      sessionId,
+      playerId: effectivePlayerId,
+      playerName: effectivePlayerName,
+      sourceSceneBrief: brief
+    });
+
+  if (!sceneDoc || forceReset) {
+    const bootstrap = buildSceneBootstrap({
+      sessionId,
+      playerId: effectivePlayerId,
+      playerName: effectivePlayerName,
+      messengerSceneId,
+      sceneBrief: brief,
+      currentCharacterSheet: characterSheetDoc,
+      promptTemplate
+    });
+    sceneDoc = await ImmersiveRpgSceneSession.findOneAndUpdate(
+      { sessionId },
+      { $set: bootstrap },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true
+      }
+    ).lean();
+    return {
+      sceneDoc,
+      characterSheetDoc,
+      bootstrapped: true,
+      messengerSceneBrief: brief,
+      messengerStorage: storage
+    };
+  }
+
+  const compiledPrompt = buildCompiledScenePrompt({
+    promptTemplate,
+    sceneBrief: sceneDoc.sourceSceneBrief || brief,
+    characterSheet: characterSheetDoc,
+    currentBeat: sceneDoc.currentBeat,
+    transcript: sceneDoc.transcript
+  });
+
+  if (sceneDoc.compiledPrompt !== compiledPrompt) {
+    sceneDoc = await ImmersiveRpgSceneSession.findOneAndUpdate(
+      { sessionId },
+      {
+        $set: {
+          compiledPrompt
+        }
+      },
+      { new: true }
+    ).lean();
+  }
+
+  return {
+    sceneDoc,
+    characterSheetDoc,
+    bootstrapped: false,
+    messengerSceneBrief: brief,
+    messengerStorage: storage
+  };
+}
+
+function buildImmersiveRpgEnvelope(sceneDoc, characterSheetDoc, extras = {}) {
+  const characterSheet = toImmersiveRpgCharacterSheetPayload(characterSheetDoc);
+  return {
+    ...extras,
+    scene: toImmersiveRpgScenePayload(sceneDoc, characterSheetDoc),
+    characterSheet
+  };
+}
+
+app.get('/api/immersive-rpg/scene', async (req, res) => {
+  try {
+    const sessionId = normalizeImmersiveRpgSessionId(req.query?.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(req.query?.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(req.query?.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(req.query?.messengerSceneId);
+    const bootstrapIfMissing = normalizeBooleanFlag(req.query?.bootstrap, false);
+    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const result = await createOrLoadImmersiveRpgScene({
+      sessionId,
+      playerId,
+      playerName,
+      messengerSceneId,
+      promptTemplate,
+      bootstrapIfMissing
+    });
+
+    if (!result.sceneDoc) {
+      return res.status(404).json({ message: 'Immersive RPG scene not found for this session.' });
+    }
+
+    return res.status(200).json(buildImmersiveRpgEnvelope(result.sceneDoc, result.characterSheetDoc, {
+      sessionId,
+      messengerSceneId,
+      bootstrapped: result.bootstrapped,
+      messengerReady: Boolean(result.messengerSceneBrief?.sceneEstablished),
+      storage: 'mongo',
+      sourceStorage: result.messengerStorage
+    }));
+  } catch (error) {
+    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
+      return res.status(error.statusCode || 409).json({ message: error.message });
+    }
+    console.error('Error in GET /api/immersive-rpg/scene:', error);
+    return res.status(500).json({ message: 'Server error while loading immersive RPG scene.' });
+  }
+});
+
+app.post('/api/immersive-rpg/scene/bootstrap', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
+    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const result = await createOrLoadImmersiveRpgScene({
+      sessionId,
+      playerId,
+      playerName,
+      messengerSceneId,
+      promptTemplate,
+      bootstrapIfMissing: true,
+      forceReset: normalizeBooleanFlag(body.forceReset, false)
+    });
+
+    return res.status(200).json(buildImmersiveRpgEnvelope(result.sceneDoc, result.characterSheetDoc, {
+      sessionId,
+      messengerSceneId,
+      bootstrapped: true,
+      messengerReady: Boolean(result.messengerSceneBrief?.sceneEstablished),
+      storage: 'mongo',
+      sourceStorage: result.messengerStorage
+    }));
+  } catch (error) {
+    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
+      return res.status(error.statusCode || 409).json({ message: error.message });
+    }
+    console.error('Error in POST /api/immersive-rpg/scene/bootstrap:', error);
+    return res.status(500).json({ message: 'Server error while bootstrapping immersive RPG scene.' });
+  }
+});
+
+app.post('/api/immersive-rpg/chat', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+
+    if (!sessionId || !message) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or message.' });
+    }
+
+    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+    let result = await createOrLoadImmersiveRpgScene({
+      sessionId,
+      playerId,
+      playerName,
+      messengerSceneId,
+      promptTemplate,
+      bootstrapIfMissing: true
+    });
+
+    const currentScene = result.sceneDoc;
+    const playerEntry = createTranscriptEntry({
+      role: 'pc',
+      kind: 'action',
+      text: message
+    });
+    const requestTranscript = [...(Array.isArray(currentScene.transcript) ? currentScene.transcript : []), playerEntry];
+    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
+    const immersiveRpgProvider = typeof immersiveRpgPipeline?.provider === 'string'
+      ? immersiveRpgPipeline.provider
+      : 'openai';
+    const shouldMock = resolveMockMode(body, immersiveRpgPipeline.useMock);
+
+    let rawResponse;
+    if (shouldMock) {
+      rawResponse = buildMockImmersiveRpgChatResponse(currentScene, message);
+    } else {
+      const routeConfig = await getRouteConfig('immersive_rpg_chat');
+      const promptMessages = buildImmersiveRpgPromptMessages({
+        promptTemplate: promptTemplate || routeConfig?.promptTemplate || '',
+        sceneBrief: currentScene.sourceSceneBrief,
+        characterSheet: result.characterSheetDoc,
+        currentBeat: currentScene.currentBeat,
+        transcript: requestTranscript,
+        playerMessage: message
+      });
+      rawResponse = await callJsonLlm({
+        prompts: promptMessages.prompts,
+        provider: immersiveRpgProvider,
+        model: immersiveRpgPipeline.model || '',
+        max_tokens: 1400,
+        explicitJsonObjectFormat: true
+      });
+    }
+
+    if (!rawResponse || typeof rawResponse !== 'object') {
+      return res.status(502).json({
+        message: 'Immersive RPG generation failed.',
+        runtime: {
+          pipeline: 'immersive_rpg_gm',
+          provider: immersiveRpgProvider,
+          model: immersiveRpgPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    await validatePayloadForRoute('immersive_rpg_chat', rawResponse);
+    const normalizedResponse = normalizeImmersiveRpgChatResponse(rawResponse);
+    if (!normalizedResponse.gmReply) {
+      return res.status(502).json({
+        message: 'Immersive RPG generation returned an empty GM reply.',
+        runtime: {
+          pipeline: 'immersive_rpg_gm',
+          provider: immersiveRpgProvider,
+          model: immersiveRpgPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    const gmEntry = createTranscriptEntry({
+      role: 'gm',
+      kind: normalizedResponse.pendingRoll ? 'roll_prompt' : 'response',
+      text: normalizedResponse.gmReply,
+      meta: {
+        beat: normalizedResponse.currentBeat,
+        pendingRoll: normalizedResponse.pendingRoll,
+        shouldPauseForChoice: normalizedResponse.shouldPauseForChoice
+      }
+    });
+
+    const nextTranscript = [...requestTranscript, gmEntry];
+    const compiledPrompt = buildCompiledScenePrompt({
+      promptTemplate,
+      sceneBrief: currentScene.sourceSceneBrief,
+      characterSheet: result.characterSheetDoc,
+      currentBeat: normalizedResponse.currentBeat,
+      transcript: nextTranscript
+    });
+    const nextSceneFlags = {
+      ...(currentScene.sceneFlags && typeof currentScene.sceneFlags === 'object' ? currentScene.sceneFlags : {}),
+      ...(normalizedResponse.sceneFlagsPatch && typeof normalizedResponse.sceneFlagsPatch === 'object'
+        ? normalizedResponse.sceneFlagsPatch
+        : {})
+    };
+    const nextNotes = Array.from(new Set([
+      ...(Array.isArray(currentScene.notes) ? currentScene.notes : []),
+      ...(Array.isArray(normalizedResponse.keeperNotes) ? normalizedResponse.keeperNotes : [])
+    ])).slice(-20);
+
+    const updatedScene = await ImmersiveRpgSceneSession.findOneAndUpdate(
+      { sessionId },
+      {
+        $set: {
+          currentBeat: normalizedResponse.currentBeat,
+          pendingRoll: normalizedResponse.pendingRoll,
+          compiledPrompt,
+          sceneFlags: nextSceneFlags,
+          notes: nextNotes
+        },
+        $push: {
+          transcript: {
+            $each: [playerEntry, gmEntry]
+          }
+        }
+      },
+      { new: true }
+    ).lean();
+
+    return res.status(200).json(buildImmersiveRpgEnvelope(updatedScene, result.characterSheetDoc, {
+      sessionId,
+      reply: gmEntry.text,
+      pendingRoll: updatedScene.pendingRoll,
+      storage: 'mongo',
+      mocked: shouldMock,
+      runtime: {
+        pipeline: 'immersive_rpg_gm',
+        provider: immersiveRpgProvider,
+        model: immersiveRpgPipeline.model || '',
+        mocked: shouldMock
+      }
+    }));
+  } catch (error) {
+    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
+      return res.status(error.statusCode || 409).json({ message: error.message });
+    }
+    if (error.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
+      return res.status(502).json({
+        message: resolveSchemaErrorMessage(error, 'Immersive RPG chat schema validation failed.')
+      });
+    }
+    console.error('Error in POST /api/immersive-rpg/chat:', error);
+    return res.status(500).json({ message: 'Server error while advancing immersive RPG chat.' });
+  }
+});
+
+app.post('/api/immersive-rpg/rolls', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+    const result = await createOrLoadImmersiveRpgScene({
+      sessionId,
+      playerId,
+      playerName,
+      messengerSceneId,
+      promptTemplate,
+      bootstrapIfMissing: true
+    });
+
+    const currentScene = result.sceneDoc;
+    const pendingRoll = currentScene.pendingRoll && typeof currentScene.pendingRoll === 'object'
+      ? currentScene.pendingRoll
+      : null;
+
+    const roll = simulateDicePoolRoll({
+      contextKey: typeof body.contextKey === 'string' && body.contextKey.trim()
+        ? body.contextKey.trim()
+        : pendingRoll?.contextKey,
+      skill: typeof body.skill === 'string' && body.skill.trim()
+        ? body.skill.trim()
+        : pendingRoll?.skill,
+      label: typeof body.label === 'string' && body.label.trim()
+        ? body.label.trim()
+        : pendingRoll?.label,
+      diceNotation: typeof body.diceNotation === 'string' && body.diceNotation.trim()
+        ? body.diceNotation.trim()
+        : pendingRoll?.diceNotation,
+      difficulty: typeof body.difficulty === 'string' && body.difficulty.trim()
+        ? body.difficulty.trim()
+        : pendingRoll?.difficulty,
+      successThreshold: body.successThreshold ?? pendingRoll?.successThreshold,
+      successesRequired: body.successesRequired ?? pendingRoll?.successesRequired
+    });
+
+    const resolution = resolveRollOutcome(currentScene, roll);
+    const gmEntry = createTranscriptEntry({
+      role: 'gm',
+      kind: 'resolution',
+      text: resolution.gmText,
+      meta: {
+        beat: resolution.nextBeat,
+        resolvedRollId: roll.rollId,
+        contextKey: roll.contextKey
+      }
+    });
+
+    const nextTranscript = [...(Array.isArray(currentScene.transcript) ? currentScene.transcript : []), gmEntry];
+    const nextSceneFlags = {
+      ...(currentScene.sceneFlags && typeof currentScene.sceneFlags === 'object' ? currentScene.sceneFlags : {}),
+      ...(resolution.sceneFlags && typeof resolution.sceneFlags === 'object' ? resolution.sceneFlags : {})
+    };
+    const compiledPrompt = buildCompiledScenePrompt({
+      promptTemplate,
+      sceneBrief: currentScene.sourceSceneBrief,
+      characterSheet: result.characterSheetDoc,
+      currentBeat: resolution.nextBeat,
+      transcript: nextTranscript
+    });
+
+    const updatedScene = await ImmersiveRpgSceneSession.findOneAndUpdate(
+      { sessionId },
+      {
+        $set: {
+          currentBeat: resolution.nextBeat,
+          pendingRoll: null,
+          sceneFlags: nextSceneFlags,
+          compiledPrompt
+        },
+        $push: {
+          rollLog: {
+            ...roll,
+            meta: {
+              source: pendingRoll ? 'scene_pending_roll' : 'manual'
+            }
+          },
+          transcript: gmEntry
+        }
+      },
+      { new: true }
+    ).lean();
+
+    return res.status(200).json(buildImmersiveRpgEnvelope(updatedScene, result.characterSheetDoc, {
+      sessionId,
+      roll,
+      resolution: {
+        currentBeat: resolution.nextBeat,
+        message: gmEntry.text
+      },
+      storage: 'mongo'
+    }));
+  } catch (error) {
+    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
+      return res.status(error.statusCode || 409).json({ message: error.message });
+    }
+    if (error.code === 'INVALID_DICE_NOTATION') {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/immersive-rpg/rolls:', error);
+    return res.status(500).json({ message: 'Server error while resolving immersive RPG roll.' });
+  }
+});
+
+app.get('/api/immersive-rpg/character-sheet', async (req, res) => {
+  try {
+    const sessionId = normalizeImmersiveRpgSessionId(req.query?.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(req.query?.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(req.query?.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(req.query?.messengerSceneId);
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
+    const sourceSceneBrief = sceneDoc?.sourceSceneBrief
+      || (await loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId)).brief;
+    const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
+      sessionId,
+      playerId,
+      playerName,
+      sourceSceneBrief
+    });
+
+    return res.status(200).json({
+      sessionId,
+      playerId: characterSheetDoc.playerId,
+      characterSheet: toImmersiveRpgCharacterSheetPayload(characterSheetDoc)
+    });
+  } catch (error) {
+    console.error('Error in GET /api/immersive-rpg/character-sheet:', error);
+    return res.status(500).json({ message: 'Server error while loading immersive RPG character sheet.' });
+  }
+});
+
+app.put('/api/immersive-rpg/character-sheet', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
+    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
+    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
+    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
+    const sourceSceneBrief = sceneDoc?.sourceSceneBrief
+      || (await loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId)).brief;
+    const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
+      sessionId,
+      playerId,
+      playerName,
+      sourceSceneBrief,
+      patch: body
+    });
+
+    if (sceneDoc) {
+      const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+      await ImmersiveRpgSceneSession.updateOne(
+        { sessionId },
+        {
+          $set: {
+            compiledPrompt: buildCompiledScenePrompt({
+              promptTemplate,
+              sceneBrief: sceneDoc.sourceSceneBrief,
+              characterSheet: characterSheetDoc,
+              currentBeat: sceneDoc.currentBeat,
+              transcript: sceneDoc.transcript
+            })
+          }
+        }
+      );
+    }
+
+    return res.status(200).json({
+      sessionId,
+      playerId: characterSheetDoc.playerId,
+      characterSheet: toImmersiveRpgCharacterSheetPayload(characterSheetDoc)
+    });
+  } catch (error) {
+    console.error('Error in PUT /api/immersive-rpg/character-sheet:', error);
+    return res.status(500).json({ message: 'Server error while saving immersive RPG character sheet.' });
+  }
+});
+
 app.post('/api/next_film_image', async (req, res) => {
   try {
     const { sessionId } = req.body || {};
@@ -1953,6 +2673,16 @@ function matchesOptionalPlayerId(actualPlayerId, expectedPlayerId) {
   return normalizeOptionalPlayerId(actualPlayerId) === safeExpectedPlayerId;
 }
 
+function parseOptionalBooleanQuery(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return undefined;
+}
+
 function pickMockStorytellerIllustrationUrl(index = 0) {
   if (!MOCK_STORYTELLER_ILLUSTRATION_URLS.length) {
     return '';
@@ -2361,15 +3091,7 @@ async function saveTypewriterEntityFromIntervention({
   const entityName = firstDefinedString(entity?.name) || 'Unnamed entity';
   const keyText = normalizeTypewriterEntityKeyText(entity?.key_text, entityName);
   const externalId = firstDefinedString(entity?.external_id) || randomUUID();
-  return NarrativeEntity.findOneAndUpdate(
-    applyOptionalPlayerId(
-      {
-        session_id: sessionId,
-        introducedByStorytellerId: String(storyteller?._id || ''),
-        typewriterKeyText: keyText
-      },
-      playerId
-    ),
+  return upsertNarrativeEntity(
     {
       session_id: sessionId,
       sessionId,
@@ -2379,9 +3101,11 @@ async function saveTypewriterEntityFromIntervention({
       lore: firstDefinedString(entity?.lore),
       type: firstDefinedString(entity?.type) || 'omen',
       subtype: firstDefinedString(entity?.subtype),
-      universalTraits: normalizeLooseStringArray(entity?.tags),
+      universal_traits: normalizeLooseStringArray(entity?.tags),
       relevance: `Introduced during a typewriter intervention by ${firstDefinedString(storyteller?.name) || 'an unnamed storyteller'}.`,
       externalId,
+      source: 'storyteller_intervention',
+      sourceRoute: '/api/send_storyteller_typewriter_text',
       typewriterKeyText: keyText,
       typewriterSource: 'storyteller_intervention',
       introducedByStorytellerId: String(storyteller?._id || ''),
@@ -2389,7 +3113,20 @@ async function saveTypewriterEntityFromIntervention({
       sourceStorytellerKeySlot: Number.isInteger(storyteller?.keySlotIndex) ? storyteller.keySlotIndex : null,
       activeInTypewriter: true
     },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    {
+      sessionId,
+      playerId: playerId || firstDefinedString(storyteller?.playerId),
+      source: 'storyteller_intervention',
+      sourceRoute: '/api/send_storyteller_typewriter_text',
+      lookup: applyOptionalPlayerId(
+        {
+          session_id: sessionId,
+          introducedByStorytellerId: String(storyteller?._id || ''),
+          typewriterKeyText: keyText
+        },
+        playerId || firstDefinedString(storyteller?.playerId)
+      )
+    }
   );
 }
 
@@ -3778,7 +4515,20 @@ app.get('/api/storytellers/:id', async (req, res) => {
 // List Entities
 app.get('/api/entities', async (req, res) => {
   try {
-    const { sessionId, playerId, mainEntityId, isSubEntity } = req.query;
+    const {
+      sessionId,
+      playerId,
+      mainEntityId,
+      isSubEntity,
+      source,
+      type,
+      subtype,
+      externalId,
+      introducedByStorytellerId,
+      activeInTypewriter,
+      typewriterKeyText,
+      limit
+    } = req.query;
     if (!sessionId) {
       return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
@@ -3787,12 +4537,37 @@ app.get('/api/entities', async (req, res) => {
     if (mainEntityId) {
       query.mainEntityId = mainEntityId;
     }
-    if (isSubEntity !== undefined) {
-      query.isSubEntity = String(isSubEntity) === 'true';
+    const parsedIsSubEntity = parseOptionalBooleanQuery(isSubEntity);
+    if (parsedIsSubEntity !== undefined) {
+      query.isSubEntity = parsedIsSubEntity;
+    }
+    if (source) query.source = String(source);
+    if (type) query.type = String(type);
+    if (subtype) query.subtype = String(subtype);
+    if (externalId) query.externalId = String(externalId);
+    if (introducedByStorytellerId) query.introducedByStorytellerId = String(introducedByStorytellerId);
+    const parsedActiveInTypewriter = parseOptionalBooleanQuery(activeInTypewriter);
+    if (parsedActiveInTypewriter !== undefined) {
+      query.activeInTypewriter = parsedActiveInTypewriter;
+    }
+    if (typewriterKeyText) query.typewriterKeyText = String(typewriterKeyText);
+
+    const safeLimit = Number.isFinite(Number(limit))
+      ? Math.max(1, Math.min(200, Math.floor(Number(limit))))
+      : 0;
+
+    let entitiesQuery = NarrativeEntity.find(query).sort({ createdAt: 1 });
+    if (safeLimit) {
+      entitiesQuery = entitiesQuery.limit(safeLimit);
     }
 
-    const entities = await NarrativeEntity.find(query).sort({ createdAt: 1 });
-    return res.status(200).json({ sessionId, entities });
+    const entities = await entitiesQuery.exec();
+    return res.status(200).json({
+      sessionId,
+      playerId: normalizeOptionalPlayerId(playerId),
+      count: entities.length,
+      entities
+    });
   } catch (error) {
     console.error('Error in /api/entities:', error);
     return res.status(500).json({ message: 'Server error during entity listing.' });

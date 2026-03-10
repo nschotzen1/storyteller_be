@@ -51,9 +51,44 @@ afterAll(async () => {
   }
 });
 
-describe('POST /api/send_storyteller_typewriter_text', () => {
-  test('runs a storyteller intervention and saves a textual entity key in Mongo', async () => {
-    const sessionId = 'storyteller-intervention-session';
+describe('GET /api/entities', () => {
+  test('returns canonical entity documents and supports provenance filters', async () => {
+    const sessionId = 'entities-query-session';
+
+    const entityResponse = await request(app)
+      .post('/api/textToEntity')
+      .send({
+        sessionId,
+        text: 'The watchman traced a dim line over the sea and named nothing yet.',
+        debug: true,
+        count: 2
+      })
+      .expect(200);
+
+    expect(entityResponse.body.count).toBe(2);
+
+    const textEntitiesResponse = await request(app)
+      .get('/api/entities')
+      .query({
+        sessionId,
+        source: 'text_to_entity',
+        type: 'LOCATION',
+        limit: 1
+      })
+      .expect(200);
+
+    expect(textEntitiesResponse.body.count).toBe(1);
+    expect(textEntitiesResponse.body.entities).toHaveLength(1);
+    expect(textEntitiesResponse.body.entities[0]).toEqual(
+      expect.objectContaining({
+        session_id: sessionId,
+        sessionId,
+        source: 'text_to_entity',
+        sourceRoute: '/api/textToEntity',
+        type: 'LOCATION',
+        externalId: expect.any(String)
+      })
+    );
 
     await request(app)
       .post('/api/typewriter/session/start')
@@ -63,13 +98,10 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
       })
       .expect(200);
 
-    const storytellerResponse = await request(app)
+    await request(app)
       .post('/api/shouldCreateStorytellerKey')
       .send({ sessionId, mocked_api_calls: true })
       .expect(200);
-
-    expect(storytellerResponse.body.created).toBe(true);
-    expect(storytellerResponse.body.slots[0].filled).toBe(true);
 
     const storyteller = await Storyteller.findOne({ session_id: sessionId, keySlotIndex: 0 }).lean();
     expect(storyteller).toBeTruthy();
@@ -83,55 +115,29 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
       })
       .expect(200);
 
-    expect(interventionResponse.body).toHaveProperty('writing_sequence');
-    expect(interventionResponse.body).toHaveProperty('entityKey');
-    expect(interventionResponse.body.entityKey).toEqual(
-      expect.objectContaining({
-        entityName: expect.any(String),
-        keyText: expect.any(String),
-        storytellerId: String(storyteller._id),
-        storytellerName: storyteller.name
+    const storytellerEntitiesResponse = await request(app)
+      .get('/api/entities')
+      .query({
+        sessionId,
+        source: 'storyteller_intervention',
+        introducedByStorytellerId: String(storyteller._id),
+        activeInTypewriter: true,
+        typewriterKeyText: interventionResponse.body.entityKey.keyText
       })
-    );
-    expect(interventionResponse.body.entityKeys).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          keyText: interventionResponse.body.entityKey.keyText
-        })
-      ])
-    );
+      .expect(200);
 
-    const updatedStoryteller = await Storyteller.findById(storyteller._id).lean();
-    expect(updatedStoryteller.introducedInTypewriter).toBe(true);
-    expect(updatedStoryteller.typewriterInterventionsCount).toBe(1);
-    expect(updatedStoryteller.lastTypewriterInterventionAt).toBeTruthy();
-
-    const savedEntity = await NarrativeEntity.findOne({
-      session_id: sessionId,
-      typewriterKeyText: interventionResponse.body.entityKey.keyText
-    }).lean();
-    expect(savedEntity).toEqual(
+    expect(storytellerEntitiesResponse.body.entities).toEqual([
       expect.objectContaining({
+        session_id: sessionId,
+        sessionId,
         name: interventionResponse.body.entityKey.entityName,
         source: 'storyteller_intervention',
         sourceRoute: '/api/send_storyteller_typewriter_text',
-        introducedByStorytellerName: storyteller.name,
+        introducedByStorytellerId: String(storyteller._id),
         activeInTypewriter: true,
-        typewriterSource: 'storyteller_intervention'
+        typewriterKeyText: interventionResponse.body.entityKey.keyText,
+        externalId: expect.any(String)
       })
-    );
-
-    const refreshedSlotsResponse = await request(app)
-      .post('/api/shouldCreateStorytellerKey')
-      .send({ sessionId, mocked_api_calls: true })
-      .expect(200);
-
-    expect(refreshedSlotsResponse.body.entityKeys).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          keyText: interventionResponse.body.entityKey.keyText
-        })
-      ])
-    );
+    ]);
   });
 });

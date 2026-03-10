@@ -9,6 +9,7 @@ import {
   getNArchetypes
 } from '../ai/openai/promptsUtils.js';
 import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
+import { getDefaultImmersiveRpgGmPromptTemplate } from './immersiveRpgService.js';
 
 const DEFAULT_ENTITY_COUNT = 4;
 const DEFAULT_MAX_ENTITIES = 8;
@@ -243,6 +244,10 @@ function buildMessengerChatPromptTemplate() {
   return buildInitialChatPromptText();
 }
 
+function buildImmersiveRpgGmPromptTemplate() {
+  return getDefaultImmersiveRpgGmPromptTemplate();
+}
+
 async function buildStorytellerMissionPromptTemplate() {
   const routeConfig = await getRouteConfig('storyteller_mission');
   return routeConfig?.promptTemplate || '';
@@ -438,6 +443,12 @@ export async function getCurrentTypewriterPromptTemplates() {
       pipelineKey: 'messenger_chat',
       promptTemplate: buildMessengerChatPromptTemplate(),
       source: 'ai/openai/personaChatPrompts.js:buildInitialChatPromptText',
+      variables: []
+    },
+    immersive_rpg_gm: {
+      pipelineKey: 'immersive_rpg_gm',
+      promptTemplate: buildImmersiveRpgGmPromptTemplate(),
+      source: 'services/immersiveRpgService.js:getDefaultImmersiveRpgGmPromptTemplate',
       variables: []
     },
     storyteller_mission: {

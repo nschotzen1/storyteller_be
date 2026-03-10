@@ -94,6 +94,16 @@ const PIPELINE_DEFINITIONS = {
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_MESSENGER_PROVIDER || DEFAULT_PROVIDER
   },
+  immersive_rpg_gm: {
+    key: 'immersive_rpg_gm',
+    label: 'Immersive RPG GM',
+    description: '/api/immersive-rpg/chat',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_IMMERSIVE_RPG_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_IMMERSIVE_RPG_PROVIDER || DEFAULT_PROVIDER
+  },
   storyteller_mission: {
     key: 'storyteller_mission',
     label: 'Storyteller Mission',

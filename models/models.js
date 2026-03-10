@@ -2,6 +2,7 @@ import fs from 'fs';
 import mongoose from 'mongoose';
 import fsPromises from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { ensureMongoConnection } from '../services/mongoConnectionService.js';
 
 const chatMessageSchema = new mongoose.Schema({
@@ -207,6 +208,70 @@ const QuestScreenGraphSchema = new mongoose.Schema({
 QuestScreenGraphSchema.index({ sessionId: 1, questId: 1 }, { unique: true });
 
 export const QuestScreenGraph = mongoose.model('QuestScreenGraph', QuestScreenGraphSchema);
+
+const ImmersiveRpgTranscriptEntrySchema = new mongoose.Schema({
+  entryId: { type: String, default: () => randomUUID() },
+  role: { type: String, enum: ['gm', 'pc', 'system'], required: true },
+  kind: { type: String, default: 'narration' },
+  text: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  meta: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { _id: false });
+
+const ImmersiveRpgRollSchema = new mongoose.Schema({
+  rollId: { type: String, default: () => randomUUID() },
+  contextKey: { type: String, default: '' },
+  skill: { type: String, default: '' },
+  label: { type: String, default: '' },
+  diceNotation: { type: String, default: '1d6' },
+  diceCount: { type: Number, default: 1 },
+  sides: { type: Number, default: 6 },
+  difficulty: { type: String, default: 'standard' },
+  successThreshold: { type: Number, default: 5 },
+  successesRequired: { type: Number, default: 1 },
+  rolls: { type: [Number], default: [] },
+  successes: { type: Number, default: 0 },
+  passed: { type: Boolean, default: false },
+  summary: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+  meta: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { _id: false });
+
+const ImmersiveRpgSceneSessionSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, index: true, unique: true },
+  playerId: { type: String, required: true, default: 'pc', index: true },
+  messengerSceneId: { type: String, default: 'messanger' },
+  currentSceneKey: { type: String, required: true, default: 'scene_3_mysterious_encounter' },
+  sceneTitle: { type: String, required: true, default: 'Scene 3: The Mysterious Encounter' },
+  currentBeat: { type: String, default: 'encounter_setup' },
+  status: { type: String, enum: ['draft', 'active', 'paused', 'completed'], default: 'active' },
+  promptKey: { type: String, default: 'scene_3_mysterious_encounter' },
+  sourceSceneBrief: { type: mongoose.Schema.Types.Mixed, default: {} },
+  compiledPrompt: { type: String, default: '' },
+  transcript: { type: [ImmersiveRpgTranscriptEntrySchema], default: [] },
+  rollLog: { type: [ImmersiveRpgRollSchema], default: [] },
+  pendingRoll: { type: mongoose.Schema.Types.Mixed, default: null },
+  sceneFlags: { type: mongoose.Schema.Types.Mixed, default: {} },
+  notes: { type: [String], default: [] }
+}, { timestamps: true });
+
+const ImmersiveRpgCharacterSheetSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, index: true },
+  playerId: { type: String, required: true, default: 'pc', index: true },
+  playerName: { type: String, default: 'Player Character' },
+  identity: { type: mongoose.Schema.Types.Mixed, default: {} },
+  coreTraits: { type: mongoose.Schema.Types.Mixed, default: {} },
+  attributes: { type: mongoose.Schema.Types.Mixed, default: {} },
+  skills: { type: mongoose.Schema.Types.Mixed, default: {} },
+  inventory: { type: [String], default: [] },
+  notes: { type: [String], default: [] },
+  sourceSceneBrief: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { timestamps: true });
+
+ImmersiveRpgCharacterSheetSchema.index({ sessionId: 1, playerId: 1 }, { unique: true });
+
+export const ImmersiveRpgSceneSession = mongoose.model('ImmersiveRpgSceneSession', ImmersiveRpgSceneSessionSchema);
+export const ImmersiveRpgCharacterSheet = mongoose.model('ImmersiveRpgCharacterSheet', ImmersiveRpgCharacterSheetSchema);
 
 const TypewriterPromptTemplateSchema = new mongoose.Schema({
   pipelineKey: { type: String, required: true, index: true },
