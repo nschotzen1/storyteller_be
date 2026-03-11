@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-09T22:05:13.021Z",
+  "updatedAt": "2026-03-11T12:56:27.557Z",
   "updatedBy": "story-admin-ui",
   "pipelines": {
     "story_continuation": {
@@ -7,14 +7,14 @@
       "label": "Story Continuation",
       "modelKind": "text",
       "useMock": false,
-      "model": "claude-sonnet-4-6",
-      "provider": "anthropic"
+      "model": "gpt-5-mini",
+      "provider": "openai"
     },
     "memory_creation": {
       "key": "memory_creation",
       "label": "Memory Creation",
       "modelKind": "text",
-      "useMock": true,
+      "useMock": false,
       "model": "gpt-5-mini",
       "provider": "openai",
       "memoryCount": 3
@@ -23,7 +23,7 @@
       "key": "entity_creation",
       "label": "Entity Creation",
       "modelKind": "text",
-      "useMock": true,
+      "useMock": false,
       "model": "gpt-5-mini",
       "provider": "openai",
       "entityCount": 8
@@ -50,7 +50,15 @@
       "label": "Messenger Chat",
       "modelKind": "text",
       "useMock": false,
-      "model": "claude-sonnet-4-6",
+      "model": "gpt-5-mini",
+      "provider": "openai"
+    },
+    "immersive_rpg_gm": {
+      "key": "immersive_rpg_gm",
+      "label": "Immersive RPG GM",
+      "modelKind": "text",
+      "useMock": false,
+      "model": "claude-opus-4-6",
       "provider": "anthropic"
     },
     "storyteller_mission": {
@@ -65,7 +73,7 @@
       "key": "relationship_evaluation",
       "label": "Relationship Evaluation",
       "modelKind": "text",
-      "useMock": true,
+      "useMock": false,
       "model": "gpt-5-mini",
       "provider": "openai"
     },
@@ -74,7 +82,7 @@
       "label": "Texture Creation",
       "modelKind": "image",
       "useMock": false,
-      "model": "gpt-image-1-mini",
+      "model": "gpt-image-1",
       "provider": "openai"
     },
     "illustration_creation": {
@@ -82,7 +90,7 @@
       "label": "Illustration Creation",
       "modelKind": "image",
       "useMock": false,
-      "model": "gpt-image-1-mini",
+      "model": "gpt-image-1",
       "provider": "openai"
     }
   }

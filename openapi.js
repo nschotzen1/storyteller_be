@@ -193,7 +193,23 @@ export function buildOpenApiSpec() {
               example: 'Cinematic fantasy cliff path along ruined rose-court wall at sunset, weathered stones and moody atmosphere.'
             },
             textPromptPlaceholder: { type: 'string', example: 'What do you say into the dusk?' },
-            directions: { type: 'array', items: { $ref: '#/components/schemas/QuestDirection' } }
+            directions: { type: 'array', items: { $ref: '#/components/schemas/QuestDirection' } },
+            screenType: { type: 'string', enum: ['authored', 'generated'] },
+            parentScreenId: { type: 'string' },
+            anchorScreenId: { type: 'string' },
+            expectationSummary: { type: 'string' },
+            continuitySummary: { type: 'string' },
+            generatedFromPrompt: { type: 'string' },
+            generatedByPlayerId: { type: 'string' },
+            generatedAt: { type: 'string', format: 'date-time' },
+            stageLayout: {
+              type: 'string',
+              enum: ['focus-left', 'focus-right', 'triptych', 'stacked']
+            },
+            stageModules: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/ImmersiveRpgStageModule' }
+            }
           }
         },
         QuestScreensConfig: {
@@ -247,6 +263,47 @@ export function buildOpenApiSpec() {
             questId: { type: 'string' },
             event: { $ref: '#/components/schemas/QuestTraversalEvent' },
             traversalCount: { type: 'integer', minimum: 0 }
+          }
+        },
+        QuestRuntime: {
+          type: 'object',
+          required: ['pipeline', 'provider', 'model', 'mocked'],
+          properties: {
+            pipeline: { type: 'string', example: 'quest_generation' },
+            provider: { type: 'string', example: 'openai' },
+            model: { type: 'string', example: 'gpt-5-mini' },
+            mocked: { type: 'boolean' }
+          },
+          additionalProperties: true
+        },
+        QuestAdvanceResponse: {
+          type: 'object',
+          required: ['sessionId', 'questId', 'actionType', 'screen', 'traversalCount', 'mocked'],
+          properties: {
+            sessionId: { type: 'string' },
+            questId: { type: 'string' },
+            actionType: { type: 'string', enum: ['direction', 'prompt'] },
+            config: { $ref: '#/components/schemas/QuestScreensConfig' },
+            screen: { $ref: '#/components/schemas/QuestScreen' },
+            createdScreen: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/QuestScreen' }]
+            },
+            event: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/QuestTraversalEvent' }]
+            },
+            traversalCount: { type: 'integer', minimum: 0 },
+            mocked: { type: 'boolean' },
+            runtime: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/QuestRuntime' }]
+            },
+            mockedData: {
+              nullable: true,
+              type: 'object',
+              additionalProperties: true
+            }
           }
         },
         FragmentToMemoriesResponse: {
@@ -382,6 +439,56 @@ export function buildOpenApiSpec() {
             instructions: { type: 'string' }
           }
         },
+        ImmersiveRpgNotebook: {
+          type: 'object',
+          required: ['mode', 'title', 'prompt', 'instruction', 'scratchLines', 'focusTags', 'diceFaces', 'resultSummary'],
+          properties: {
+            mode: {
+              type: 'string',
+              enum: ['idle', 'story_prompt', 'roll_request', 'roll_result', 'discovery']
+            },
+            title: { type: 'string' },
+            prompt: { type: 'string' },
+            instruction: { type: 'string' },
+            scratchLines: { type: 'array', items: { type: 'string' } },
+            focusTags: { type: 'array', items: { type: 'string' } },
+            pendingRoll: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/ImmersiveRpgPendingRoll' }]
+            },
+            diceFaces: { type: 'array', items: { type: 'integer', minimum: 1 } },
+            successTrack: {
+              nullable: true,
+              type: 'object',
+              properties: {
+                successes: { type: 'integer', minimum: 0 },
+                successesRequired: { type: 'integer', minimum: 1 },
+                passed: { type: 'boolean', nullable: true }
+              },
+              additionalProperties: true
+            },
+            resultSummary: { type: 'string' },
+            updatedAt: { type: 'string', format: 'date-time', nullable: true }
+          }
+        },
+        ImmersiveRpgStageModule: {
+          type: 'object',
+          required: ['moduleId', 'type', 'variant', 'title', 'caption', 'imageUrl', 'altText', 'emphasis', 'rotateDeg', 'tone', 'body', 'meta'],
+          properties: {
+            moduleId: { type: 'string' },
+            type: { type: 'string', enum: ['illustration', 'evidence_note', 'quote_panel'] },
+            variant: { type: 'string' },
+            title: { type: 'string' },
+            caption: { type: 'string' },
+            imageUrl: { type: 'string' },
+            altText: { type: 'string' },
+            emphasis: { type: 'string' },
+            rotateDeg: { type: 'number', minimum: -12, maximum: 12 },
+            tone: { type: 'string' },
+            body: { type: 'string' },
+            meta: { type: 'object', additionalProperties: true }
+          }
+        },
         ImmersiveRpgRollResult: {
           type: 'object',
           required: ['rollId', 'diceNotation', 'rolls', 'successes', 'passed'],
@@ -424,12 +531,13 @@ export function buildOpenApiSpec() {
         },
         ImmersiveRpgScene: {
           type: 'object',
-          required: ['sessionId', 'playerId', 'currentSceneKey', 'sceneTitle', 'currentBeat', 'status', 'transcript', 'rollLog'],
+          required: ['sessionId', 'playerId', 'currentSceneNumber', 'currentSceneKey', 'sceneTitle', 'currentBeat', 'status', 'transcript', 'rollLog', 'notebook', 'stageLayout', 'stageModules'],
           properties: {
             id: { type: 'string' },
             sessionId: { type: 'string' },
             playerId: { type: 'string' },
             messengerSceneId: { type: 'string', example: 'messanger' },
+            currentSceneNumber: { type: 'integer', example: 3 },
             currentSceneKey: { type: 'string', example: 'scene_3_mysterious_encounter' },
             sceneTitle: { type: 'string', example: 'Scene 3: The Mysterious Encounter' },
             currentBeat: { type: 'string', example: 'encounter_setup' },
@@ -442,6 +550,15 @@ export function buildOpenApiSpec() {
             pendingRoll: {
               nullable: true,
               allOf: [{ $ref: '#/components/schemas/ImmersiveRpgPendingRoll' }]
+            },
+            notebook: { $ref: '#/components/schemas/ImmersiveRpgNotebook' },
+            stageLayout: {
+              type: 'string',
+              enum: ['focus-left', 'focus-right', 'triptych', 'stacked']
+            },
+            stageModules: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/ImmersiveRpgStageModule' }
             },
             sceneFlags: { type: 'object', additionalProperties: true },
             notes: { type: 'array', items: { type: 'string' } },
@@ -458,11 +575,16 @@ export function buildOpenApiSpec() {
           required: ['scene', 'characterSheet'],
           properties: {
             sessionId: { type: 'string' },
+            ready: { type: 'boolean' },
+            currentSceneNumber: { type: 'integer', example: 3 },
+            currentSceneKey: { type: 'string', example: 'scene_3_mysterious_encounter' },
+            missingContext: { type: 'array', items: { type: 'string' } },
+            mockedContext: { type: 'array', items: { type: 'string' } },
             messengerSceneId: { type: 'string' },
             bootstrapped: { type: 'boolean' },
             messengerReady: { type: 'boolean' },
             storage: { type: 'string', example: 'mongo' },
-            sourceStorage: { type: 'string', enum: ['mongo', 'file'] },
+            sourceStorage: { type: 'string', enum: ['mongo', 'file', 'mock'] },
             reply: { type: 'string' },
             pendingRoll: {
               nullable: true,
@@ -476,8 +598,14 @@ export function buildOpenApiSpec() {
                 message: { type: 'string' }
               }
             },
-            scene: { $ref: '#/components/schemas/ImmersiveRpgScene' },
-            characterSheet: { $ref: '#/components/schemas/ImmersiveRpgCharacterSheet' }
+            scene: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/ImmersiveRpgScene' }]
+            },
+            characterSheet: {
+              nullable: true,
+              allOf: [{ $ref: '#/components/schemas/ImmersiveRpgCharacterSheet' }]
+            }
           }
         },
         TypewriterAiPipelineSetting: {
@@ -1412,56 +1540,18 @@ export function buildOpenApiSpec() {
           tags: ['Immersive RPG'],
           summary: 'Load the current immersive RPG scene for a session',
           importance: 'Critical',
-          flow: 'Hydrates the GM/PC scene using the persisted messenger brief and optionally bootstraps the first scene on demand.',
+          flow: 'Resolves the active immersive RPG scene from persisted session state and lazily loads the scene dependencies required by that scene.',
           parameters: [
             queryParam('sessionId', true, 'Session identifier.'),
             queryParam('playerId', false, 'Optional player character id. Defaults to "pc".'),
-            queryParam('playerName', false, 'Optional player character display name.'),
-            queryParam('messengerSceneId', false, 'Messenger scene identifier to read the stored place brief from. Defaults to "messanger".'),
-            queryParam('bootstrap', false, 'Set to true to create the immersive scene if it does not exist yet.')
+            queryParam('playerName', false, 'Optional player character display name.')
           ],
           responses: {
             '200': {
-              description: 'Current immersive RPG scene envelope.',
+              description: 'Current immersive RPG scene envelope. If required persisted context is missing, `ready` is false and `missingContext` explains what is blocking the scene.',
               ...jsonResponse({ $ref: '#/components/schemas/ImmersiveRpgSceneEnvelope' })
             },
-            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
-            '404': { description: 'Scene not found and bootstrap disabled.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
-            '409': { description: 'Messenger brief missing or insufficient.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
-          }
-        })
-      },
-      '/api/immersive-rpg/scene/bootstrap': {
-        post: op({
-          tags: ['Immersive RPG'],
-          summary: 'Bootstrap or reset the first immersive RPG scene',
-          importance: 'Critical',
-          flow: 'Creates the Mongo-backed Scene 3 state from the messenger-derived location brief and seeds the initial GM opening turn.',
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['sessionId'],
-                  properties: {
-                    sessionId: { type: 'string' },
-                    playerId: { type: 'string' },
-                    playerName: { type: 'string' },
-                    messengerSceneId: { type: 'string' },
-                    forceReset: { type: 'boolean' }
-                  }
-                }
-              }
-            }
-          },
-          responses: {
-            '200': {
-              description: 'Bootstrapped immersive RPG scene envelope.',
-              ...jsonResponse({ $ref: '#/components/schemas/ImmersiveRpgSceneEnvelope' })
-            },
-            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
-            '409': { description: 'Messenger brief missing or insufficient.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
@@ -1482,7 +1572,6 @@ export function buildOpenApiSpec() {
                     sessionId: { type: 'string' },
                     playerId: { type: 'string' },
                     playerName: { type: 'string' },
-                    messengerSceneId: { type: 'string' },
                     message: { type: 'string' }
                   }
                 }
@@ -1516,7 +1605,6 @@ export function buildOpenApiSpec() {
                     sessionId: { type: 'string' },
                     playerId: { type: 'string' },
                     playerName: { type: 'string' },
-                    messengerSceneId: { type: 'string' },
                     contextKey: { type: 'string' },
                     skill: { type: 'string' },
                     label: { type: 'string' },
@@ -1548,8 +1636,7 @@ export function buildOpenApiSpec() {
           parameters: [
             queryParam('sessionId', true, 'Session identifier.'),
             queryParam('playerId', false, 'Optional player character id. Defaults to "pc".'),
-            queryParam('playerName', false, 'Optional player character display name.'),
-            queryParam('messengerSceneId', false, 'Messenger scene identifier to read the stored place brief from if no scene exists yet.')
+            queryParam('playerName', false, 'Optional player character display name.')
           ],
           responses: {
             '200': {
@@ -1904,6 +1991,49 @@ export function buildOpenApiSpec() {
               ...jsonResponse({ $ref: '#/components/schemas/QuestTraversalWriteResponse' })
             },
             '400': { description: 'Invalid traversal event payload.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/quest/advance': {
+        post: op({
+          tags: ['Quest'],
+          summary: 'Advance quest state',
+          importance: 'Critical',
+          flow: 'Primary quest play route for following directions or generating persistent child screens from prompts.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['currentScreenId', 'actionType'],
+                  properties: {
+                    sessionId: { type: 'string', example: 'rose-court-demo' },
+                    questId: { type: 'string', example: 'ruined_rose_court' },
+                    playerId: { type: 'string', example: 'wanderer-01' },
+                    currentScreenId: { type: 'string', example: 'outer_gate_murals' },
+                    actionType: { type: 'string', enum: ['direction', 'prompt'] },
+                    direction: { type: 'string', example: 'north' },
+                    targetScreenId: { type: 'string', example: 'mural_center_panel' },
+                    promptText: { type: 'string', example: 'Inspect the cracked lantern niche behind the center mural.' },
+                    mock: { type: 'boolean' },
+                    debug: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Quest state advanced.',
+              ...jsonResponse({ $ref: '#/components/schemas/QuestAdvanceResponse' })
+            },
+            '400': { description: 'Invalid request.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Screen or direction not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '502': { description: 'Generation or schema failure.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
             '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })

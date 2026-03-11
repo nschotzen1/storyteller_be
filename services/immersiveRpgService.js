@@ -5,6 +5,7 @@ export const DEFAULT_IMMERSIVE_RPG_PLAYER_NAME = 'Player Character';
 export const DEFAULT_IMMERSIVE_RPG_SCENE_KEY = 'scene_3_mysterious_encounter';
 export const DEFAULT_IMMERSIVE_RPG_SCENE_TITLE = 'Scene 3: The Mysterious Encounter';
 export const DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID = 'messanger';
+export const IMMERSIVE_RPG_TURN_CONTRACT_KEY = 'immersive_rpg_turn';
 
 const DEFAULT_OPENING_SENSORY_DETAILS = [
   'the quiet familiarity of home just a few paces away',
@@ -22,6 +23,19 @@ const DIFFICULTY_PRESETS = {
 };
 
 const NOTEBOOK_MODES = new Set(['idle', 'story_prompt', 'roll_request', 'roll_result', 'discovery']);
+const STAGE_LAYOUTS = new Set(['focus-left', 'focus-right', 'triptych', 'stacked']);
+const STAGE_MODULE_TYPES = new Set(['illustration', 'evidence_note', 'quote_panel']);
+const IMMERSIVE_RPG_SCENE_DEFINITIONS = Object.freeze({
+  3: Object.freeze({
+    number: 3,
+    key: DEFAULT_IMMERSIVE_RPG_SCENE_KEY,
+    title: DEFAULT_IMMERSIVE_RPG_SCENE_TITLE,
+    promptKey: 'immersive_rpg_gm',
+    messengerSceneId: DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID,
+    needs: Object.freeze(['messenger_scene_brief']),
+    optional: Object.freeze(['character_sheet'])
+  })
+});
 
 const SCENE_3_MASTER_PROMPT = `GM Guidelines for Scene 3
 Objective: Create an interactive scene where the PC receives a mysterious package in their home, gradually unveiling an eerie and suspenseful atmosphere. The PC should experience growing unease, leading to the discovery of the hidden package. This package contains a letter filled with specific details that correspond to the initial storytelling fragment, a journal, a pen, and a blank deck of cards. The letter emphasizes urgency, caution, and the need for secrecy.
@@ -71,6 +85,26 @@ Instructions for GM:
 
 export function getDefaultImmersiveRpgGmPromptTemplate() {
   return SCENE_3_MASTER_PROMPT;
+}
+
+export function getDefaultImmersiveRpgSceneDefinition() {
+  return { ...IMMERSIVE_RPG_SCENE_DEFINITIONS[3] };
+}
+
+export function getImmersiveRpgSceneDefinition(sceneRef = 3) {
+  if (typeof sceneRef === 'number' && IMMERSIVE_RPG_SCENE_DEFINITIONS[sceneRef]) {
+    return { ...IMMERSIVE_RPG_SCENE_DEFINITIONS[sceneRef] };
+  }
+
+  const normalizedRef = normalizeText(sceneRef, 160);
+  if (!normalizedRef) {
+    return getDefaultImmersiveRpgSceneDefinition();
+  }
+
+  const byKey = Object.values(IMMERSIVE_RPG_SCENE_DEFINITIONS).find((definition) =>
+    definition.key === normalizedRef
+  );
+  return byKey ? { ...byKey } : getDefaultImmersiveRpgSceneDefinition();
 }
 
 function asObject(value) {
@@ -147,6 +181,54 @@ export function normalizeMessengerSceneBriefForRpg(brief = {}) {
 export function hasEnoughMessengerSceneBriefForRpg(brief) {
   const normalized = normalizeMessengerSceneBriefForRpg(brief);
   return Boolean(normalized.placeSummary || normalized.placeName || normalized.subject);
+}
+
+export function buildMockMessengerSceneBrief({ playerName = '' } = {}) {
+  const normalizedPlayerName = normalizeText(playerName, 120) || 'the resident';
+  return normalizeMessengerSceneBriefForRpg({
+    id: 'immersive-rpg-demo-brief',
+    subject: 'Basalt guesthouse above Mourning Cove',
+    placeName: 'Basalt Guesthouse, Mourning Cove',
+    placeSummary:
+      'A salt-worn guesthouse clings to the basalt above a narrow cove, reached by a grocery path that curls through rosemary, wet stone, and wind-pressed grass. The place is intimate rather than grand: a back door often used, kitchen light caught in old panes, and the kind of routine that makes intrusion feel immediate. Tonight the familiarity has thinned. The windows hold the fading light like watchful eyes, the brush beside the path offers just enough concealment for someone patient, and the hush of the cove makes every small movement feel privately observed.',
+    typewriterHidingSpot:
+      'A square pantry nook cut into the basalt wall beside the back steps, hidden behind stacked produce crates and a canvas shopping sack. Groceries can be slipped there from the path and remain invisible unless someone knows exactly where to reach.',
+    sensoryDetails: [
+      'rosemary bruised underfoot',
+      'salt damp on black stone',
+      'the far clink of harbor metal in evening wind'
+    ],
+    notableFeatures: [
+      'a narrow grocery path between brush and basalt',
+      'kitchen windows facing the cove',
+      'a concealed pantry recess beside the back steps',
+      'thorny cover near the path where a journal could vanish from casual sight'
+    ],
+    sceneEstablished: true,
+    assistantReply:
+      `${normalizedPlayerName} returns by habit, which is why the wrongness gathers so quickly: the path, the brush, and the back of the house are all too familiar to feel accidental tonight.`,
+    source: 'immersive_rpg_mock',
+    meta: {
+      mock: true,
+      mockTemplate: 'scene_3_guesthouse_seed'
+    }
+  });
+}
+
+export function toMessengerSceneBriefContractPayload(brief = {}) {
+  const normalized = normalizeMessengerSceneBriefForRpg(brief);
+  return {
+    subject: normalized.subject,
+    place_name: normalized.placeName,
+    place_summary: normalized.placeSummary,
+    typewriter_hiding_spot: normalized.typewriterHidingSpot,
+    sensory_details: normalized.sensoryDetails,
+    notable_features: normalized.notableFeatures,
+    scene_established: normalized.sceneEstablished,
+    assistant_reply: normalized.assistantReply,
+    source: normalized.source,
+    meta: normalized.meta
+  };
 }
 
 export function buildCharacterSheetSkeleton({
@@ -263,6 +345,22 @@ function normalizeNullableBoolean(value) {
   return null;
 }
 
+function normalizeStageLayout(value) {
+  const normalized = normalizeText(value, 80);
+  return STAGE_LAYOUTS.has(normalized) ? normalized : 'focus-left';
+}
+
+function normalizeStageModuleType(value) {
+  const normalized = normalizeText(value, 80);
+  return STAGE_MODULE_TYPES.has(normalized) ? normalized : 'illustration';
+}
+
+function normalizeNumberInRange(value, { min = -20, max = 20, fallback = 0 } = {}) {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return fallback;
+  return Math.min(Math.max(next, min), max);
+}
+
 function coercePendingRoll(raw = null) {
   if (!raw || typeof raw !== 'object') return null;
   return buildPendingRoll({
@@ -334,6 +432,400 @@ function buildNotebookState({
     resultSummary: normalizeText(resultSummary, 400),
     updatedAt: safeDateString(updatedAt) || new Date().toISOString()
   };
+}
+
+function buildStageModule({
+  moduleId = '',
+  type = 'illustration',
+  variant = 'landscape',
+  title = '',
+  caption = '',
+  imageUrl = '',
+  altText = '',
+  emphasis = 'secondary',
+  rotateDeg = 0,
+  tone = '',
+  body = '',
+  meta = {}
+} = {}) {
+  return {
+    moduleId: normalizeText(moduleId, 120) || randomUUID(),
+    type: normalizeStageModuleType(type),
+    variant: normalizeText(variant, 80) || 'landscape',
+    title: normalizeText(title, 160),
+    caption: normalizeText(caption, 320),
+    imageUrl: normalizeText(imageUrl, 600),
+    altText: normalizeText(altText, 320),
+    emphasis: normalizeText(emphasis, 80) || 'secondary',
+    rotateDeg: normalizeNumberInRange(rotateDeg, { min: -12, max: 12, fallback: 0 }),
+    tone: normalizeText(tone, 120),
+    body: normalizeText(body, 800),
+    meta: asObject(meta)
+  };
+}
+
+function normalizeStageModules(value, { limit = 4 } = {}) {
+  if (!Array.isArray(value)) return [];
+  const items = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    items.push(buildStageModule({
+      moduleId: entry.moduleId || entry.module_id,
+      type: entry.type,
+      variant: entry.variant,
+      title: entry.title,
+      caption: entry.caption,
+      imageUrl: entry.imageUrl || entry.image_url,
+      altText: entry.altText || entry.alt_text,
+      emphasis: entry.emphasis,
+      rotateDeg: entry.rotateDeg ?? entry.rotate_deg,
+      tone: entry.tone,
+      body: entry.body,
+      meta: entry.meta
+    }));
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
+function buildStageModuleContractPayload(module) {
+  const normalized = buildStageModule(module);
+  return {
+    module_id: normalized.moduleId,
+    type: normalized.type,
+    variant: normalized.variant,
+    title: normalized.title,
+    caption: normalized.caption,
+    image_url: normalized.imageUrl,
+    alt_text: normalized.altText,
+    emphasis: normalized.emphasis,
+    rotate_deg: normalized.rotateDeg,
+    tone: normalized.tone,
+    body: normalized.body,
+    meta: normalized.meta
+  };
+}
+
+function buildOpeningStageModules(sceneBrief) {
+  const placeName = sceneBrief.placeName || 'the house';
+  return [
+    buildStageModule({
+      moduleId: 'opening-terrain',
+      type: 'illustration',
+      variant: 'landscape',
+      title: 'Approach to Home',
+      caption: `${placeName} sits close enough to promise safety, which makes the stranger’s presence feel worse.`,
+      imageUrl: '/assets/mocks/memory_cards/memory_front_01.png',
+      altText: 'Atmospheric illustration of the path leading toward home.',
+      emphasis: 'primary',
+      rotateDeg: -2,
+      tone: 'uneasy'
+    }),
+    buildStageModule({
+      moduleId: 'opening-journal',
+      type: 'illustration',
+      variant: 'polaroid',
+      title: 'Fallen Journal',
+      caption: 'Half-screened by brush, better seen from the PC’s angle than the stranger’s.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_02.png',
+      altText: 'Close view of a journal lying partly hidden near the path.',
+      emphasis: 'secondary',
+      rotateDeg: 3,
+      tone: 'watchful'
+    }),
+    buildStageModule({
+      moduleId: 'opening-note',
+      type: 'evidence_note',
+      variant: 'scribble',
+      title: 'Keeper Margin',
+      body: 'The place is ordinary enough to be intimate. The intrusion must arrive by degrees, not all at once.',
+      caption: 'Pace the dread.',
+      emphasis: 'secondary',
+      rotateDeg: -1,
+      tone: 'gaslight'
+    })
+  ];
+}
+
+function buildRetrieveStageModules() {
+  return [
+    buildStageModule({
+      moduleId: 'retrieve-primary',
+      type: 'illustration',
+      variant: 'landscape',
+      title: 'A Reach Too Visible',
+      caption: 'The ground is not clean, the timing worse.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_03.png',
+      altText: 'A tense close approach toward something half-hidden on the ground.',
+      emphasis: 'primary',
+      rotateDeg: -3,
+      tone: 'urgent'
+    }),
+    buildStageModule({
+      moduleId: 'retrieve-secondary',
+      type: 'illustration',
+      variant: 'portrait',
+      title: 'Peripheral Stranger',
+      caption: 'The stranger is one wrong glance away from noticing the movement.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_02.png',
+      altText: 'A nearby figure searching with too much private focus.',
+      emphasis: 'secondary',
+      rotateDeg: 4,
+      tone: 'tense'
+    })
+  ];
+}
+
+function buildObservationStageModules() {
+  return [
+    buildStageModule({
+      moduleId: 'observe-primary',
+      type: 'illustration',
+      variant: 'landscape',
+      title: 'Watching the Search',
+      caption: 'The stranger betrays themself in breaths and pauses before they ever speak.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_01.png',
+      altText: 'A concealed vantage on a stranger searching the ground.',
+      emphasis: 'primary',
+      rotateDeg: -2,
+      tone: 'surveillance'
+    }),
+    buildStageModule({
+      moduleId: 'observe-note',
+      type: 'quote_panel',
+      variant: 'typewritten',
+      title: 'Margin Thought',
+      body: 'Delay hands the scene to the stranger.',
+      caption: 'The journal will not remain yours alone to see.',
+      emphasis: 'secondary',
+      rotateDeg: 2,
+      tone: 'pressure'
+    })
+  ];
+}
+
+function buildContactStageModules() {
+  return [
+    buildStageModule({
+      moduleId: 'contact-primary',
+      type: 'illustration',
+      variant: 'portrait',
+      title: 'Recognition',
+      caption: 'The eyes linger as if comparing the original to a drawing already made.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_03.png',
+      altText: 'A tense close portrait of the stranger becoming too calm.',
+      emphasis: 'primary',
+      rotateDeg: 2,
+      tone: 'recognition'
+    }),
+    buildStageModule({
+      moduleId: 'contact-note',
+      type: 'evidence_note',
+      variant: 'scribble',
+      title: 'False Calm',
+      body: 'The mask arrives too quickly. That is what makes it frightening.',
+      caption: 'No roll yet.',
+      emphasis: 'secondary',
+      rotateDeg: -3,
+      tone: 'uncanny'
+    })
+  ];
+}
+
+function buildHomeStageModules() {
+  return [
+    buildStageModule({
+      moduleId: 'home-primary',
+      type: 'illustration',
+      variant: 'landscape',
+      title: 'After Someone Searched',
+      caption: 'Home remains recognizable, but only in the way a face remains recognizable after shock.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_01.png',
+      altText: 'A familiar room rendered uneasy by subtle disturbance.',
+      emphasis: 'primary',
+      rotateDeg: -2,
+      tone: 'intrusion'
+    }),
+    buildStageModule({
+      moduleId: 'home-secondary',
+      type: 'illustration',
+      variant: 'polaroid',
+      title: 'The Hidden Nook',
+      caption: 'Still untouched. That matters.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_02.png',
+      altText: 'A small nook hidden beside a path or pantry.',
+      emphasis: 'secondary',
+      rotateDeg: 4,
+      tone: 'revelation'
+    })
+  ];
+}
+
+function buildJournalGlimpseStageModules(sceneBrief) {
+  const placeName = sceneBrief.placeName || 'the house';
+  return [
+    buildStageModule({
+      moduleId: 'glimpse-landscape',
+      type: 'illustration',
+      variant: 'landscape',
+      title: 'Fast Landscape Study',
+      caption: 'The surrounding terrain appears first, drawn quickly and impossibly well.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_01.png',
+      altText: 'A sketch-like landscape study of the area around the house.',
+      emphasis: 'primary',
+      rotateDeg: -3,
+      tone: 'revelation'
+    }),
+    buildStageModule({
+      moduleId: 'glimpse-house',
+      type: 'illustration',
+      variant: 'polaroid',
+      title: `${placeName} Exterior`,
+      caption: 'The familiar exterior has already been studied from outside.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_02.png',
+      altText: 'A careful exterior study of the player character’s house.',
+      emphasis: 'secondary',
+      rotateDeg: 2,
+      tone: 'surveillance'
+    }),
+    buildStageModule({
+      moduleId: 'glimpse-portrait',
+      type: 'illustration',
+      variant: 'portrait',
+      title: 'Portrait of the PC',
+      caption: 'The final page makes the observation personal.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_03.png',
+      altText: 'A portrait sketch of the player character.',
+      emphasis: 'secondary',
+      rotateDeg: 4,
+      tone: 'violation'
+    })
+  ];
+}
+
+function buildCaughtStageModules() {
+  return [
+    buildStageModule({
+      moduleId: 'caught-primary',
+      type: 'illustration',
+      variant: 'portrait',
+      title: 'Caught in Motion',
+      caption: 'The wrong glance lands at the wrong second.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_03.png',
+      altText: 'A stranger turning with sudden calm after noticing movement.',
+      emphasis: 'primary',
+      rotateDeg: 2,
+      tone: 'caught'
+    }),
+    buildStageModule({
+      moduleId: 'caught-note',
+      type: 'evidence_note',
+      variant: 'scribble',
+      title: 'Performance Shift',
+      body: 'Urgency vanishes too fast. The stranger is acting calm now, which confirms the first panic was real.',
+      caption: 'Mutual awareness established.',
+      emphasis: 'secondary',
+      rotateDeg: -2,
+      tone: 'gaslight'
+    })
+  ];
+}
+
+function buildResistanceStageModules() {
+  return [
+    buildStageModule({
+      moduleId: 'resist-primary',
+      type: 'illustration',
+      variant: 'portrait',
+      title: 'The Reach',
+      caption: 'The stranger closes the distance as if this outcome had already been rehearsed.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_03.png',
+      altText: 'A sudden close confrontation over the journal.',
+      emphasis: 'primary',
+      rotateDeg: 3,
+      tone: 'pressure'
+    }),
+    buildStageModule({
+      moduleId: 'resist-quote',
+      type: 'quote_panel',
+      variant: 'typewritten',
+      title: 'Tension',
+      body: 'This is no longer about stealth. It is about whether the PC can hold onto proof for one more second.',
+      caption: 'Hard contest.',
+      emphasis: 'secondary',
+      rotateDeg: -3,
+      tone: 'hard'
+    })
+  ];
+}
+
+function buildPackageDiscoveryStageModules(sceneBrief) {
+  const placeName = sceneBrief.placeName || 'your home';
+  return [
+    buildStageModule({
+      moduleId: 'package-primary',
+      type: 'illustration',
+      variant: 'landscape',
+      title: 'Disturbed Familiarity',
+      caption: `${placeName} feels newly wrong in small, deliberate ways.`,
+      imageUrl: '/assets/mocks/memory_cards/memory_front_01.png',
+      altText: 'A familiar room with subtle signs of intrusion.',
+      emphasis: 'primary',
+      rotateDeg: -2,
+      tone: 'intrusion'
+    }),
+    buildStageModule({
+      moduleId: 'package-secondary',
+      type: 'illustration',
+      variant: 'polaroid',
+      title: 'Hidden Package',
+      caption: 'The nook still keeps its secret for the moment.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_02.png',
+      altText: 'A hidden nook revealing a package.',
+      emphasis: 'secondary',
+      rotateDeg: 4,
+      tone: 'discovery'
+    }),
+    buildStageModule({
+      moduleId: 'package-note',
+      type: 'evidence_note',
+      variant: 'scribble',
+      title: 'Contents',
+      body: 'Letter. Journal. Pen. Blank deck of cards.',
+      caption: 'Untouched by the intruder.',
+      emphasis: 'secondary',
+      rotateDeg: -1,
+      tone: 'inventory'
+    })
+  ];
+}
+
+function buildHeldBreathStageModules() {
+  return [
+    buildStageModule({
+      moduleId: 'held-primary',
+      type: 'illustration',
+      variant: 'landscape',
+      title: 'The Moment Holds',
+      caption: 'Nothing has resolved yet, which is its own form of pressure.',
+      imageUrl: '/assets/mocks/memory_cards/memory_front_01.png',
+      altText: 'A held, unresolved moment near the house path.',
+      emphasis: 'primary',
+      rotateDeg: -2,
+      tone: 'suspense'
+    }),
+    buildStageModule({
+      moduleId: 'held-note',
+      type: 'quote_panel',
+      variant: 'typewritten',
+      title: 'Pressure',
+      body: 'Delay is not neutral. The scene is moving even when the PC does not.',
+      caption: 'Choose soon.',
+      emphasis: 'secondary',
+      rotateDeg: 2,
+      tone: 'pressure'
+    })
+  ];
 }
 
 function buildOpeningNotebook(sceneBrief, characterSheet) {
@@ -488,8 +980,48 @@ Recent transcript:
 ${recentTranscript || 'No transcript yet.'}`;
 }
 
+function buildRuntimeContractPromptAppendix(routeContract = null) {
+  const contract = asObject(routeContract);
+  const responseSchema = asObject(contract.responseSchema);
+  const fieldDocs = asObject(contract.fieldDocs);
+  const outputRules = Array.isArray(contract.outputRules) ? contract.outputRules : [];
+  const examplePayload = contract.examplePayload && typeof contract.examplePayload === 'object'
+    ? contract.examplePayload
+    : null;
+  const sections = [];
+
+  if (Object.keys(responseSchema).length) {
+    sections.push(`Runtime JSON Schema:\n${JSON.stringify(responseSchema, null, 2)}`);
+  }
+
+  const fieldLines = Object.entries(fieldDocs)
+    .map(([key, value]) => {
+      const normalizedKey = normalizeText(key, 160);
+      const normalizedValue = normalizeText(value, 320);
+      return normalizedKey && normalizedValue ? `- ${normalizedKey}: ${normalizedValue}` : '';
+    })
+    .filter(Boolean);
+  if (fieldLines.length) {
+    sections.push(`Field guidance:\n${fieldLines.join('\n')}`);
+  }
+
+  const normalizedRules = outputRules
+    .map((rule) => normalizeText(rule, 320))
+    .filter(Boolean);
+  if (normalizedRules.length) {
+    sections.push(`Output rules:\n${normalizedRules.map((rule) => `- ${rule}`).join('\n')}`);
+  }
+
+  if (examplePayload) {
+    sections.push(`Example valid JSON:\n${JSON.stringify(examplePayload, null, 2)}`);
+  }
+
+  return sections.filter(Boolean).join('\n\n').trim();
+}
+
 export function buildCompiledScenePrompt({
   promptTemplate = '',
+  routeContract = null,
   sceneBrief,
   characterSheet,
   currentBeat = 'encounter_setup',
@@ -504,8 +1036,7 @@ export function buildCompiledScenePrompt({
     current: characterSheet
   });
   const promptBase = normalizeText(promptTemplate, 20000) || SCENE_3_MASTER_PROMPT;
-
-  return `${promptBase}
+  const compiledBase = `${promptBase}
 
 Operational scene state:
 ${buildImmersiveRpgGuidanceSummary(normalizedBrief, normalizedSheet, currentBeat, transcript)}
@@ -514,11 +1045,18 @@ GM output reminders:
 - Maintain a Hitchcock-like atmosphere with subtle gaslight-style dread.
 - Ask "What do you do?" when the player reaches a meaningful point of agency.
 - Do not offer bullet choices.
-- If a roll is required, state the skill, the dice, and the difficulty in plain language.`;
+- If a roll is required, state the skill, the dice, and the difficulty in plain language.
+- Always keep the notebook state aligned with the scene state. If a roll is needed, the notebook must carry that roll request clearly.`;
+
+  const contractAppendix = buildRuntimeContractPromptAppendix(routeContract);
+  return contractAppendix
+    ? `${compiledBase}\n\nReturn JSON only.\n\n${contractAppendix}`
+    : `${compiledBase}\n\nReturn JSON only.`;
 }
 
 export function buildImmersiveRpgPromptMessages({
   promptTemplate = '',
+  routeContract = null,
   sceneBrief,
   characterSheet,
   currentBeat = 'encounter_setup',
@@ -527,6 +1065,7 @@ export function buildImmersiveRpgPromptMessages({
 }) {
   const compiledPrompt = buildCompiledScenePrompt({
     promptTemplate,
+    routeContract,
     sceneBrief,
     characterSheet,
     currentBeat,
@@ -539,9 +1078,17 @@ export function buildImmersiveRpgPromptMessages({
       { role: 'system', content: compiledPrompt },
       {
         role: 'user',
-        content: `Latest PC action:\n${normalizeText(playerMessage, 4000)}\n\nReturn the next GM turn as JSON only.`
+        content: `Latest PC action:\n${normalizeText(playerMessage, 4000)}`
       }
     ]
+  };
+}
+
+export function normalizeImmersiveRpgStagePayload(raw = {}) {
+  const source = asObject(raw);
+  return {
+    stageLayout: normalizeStageLayout(source.stage_layout || source.stageLayout),
+    stageModules: normalizeStageModules(source.stage_modules || source.stageModules)
   };
 }
 
@@ -567,10 +1114,15 @@ export function buildSceneBootstrap({
   playerId = DEFAULT_IMMERSIVE_RPG_PLAYER_ID,
   playerName = DEFAULT_IMMERSIVE_RPG_PLAYER_NAME,
   messengerSceneId = DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID,
+  sceneDefinition = null,
   sceneBrief,
   currentCharacterSheet = null,
-  promptTemplate = ''
+  promptTemplate = '',
+  routeContract = null
 }) {
+  const resolvedSceneDefinition = getImmersiveRpgSceneDefinition(
+    sceneDefinition?.number || sceneDefinition?.key || null
+  );
   const normalizedBrief = normalizeMessengerSceneBriefForRpg(sceneBrief);
   const characterSheet = buildCharacterSheetSkeleton({
     sessionId,
@@ -592,15 +1144,17 @@ export function buildSceneBootstrap({
   return {
     sessionId: normalizeText(sessionId, 160),
     playerId: characterSheet.playerId,
-    messengerSceneId: normalizeText(messengerSceneId, 160) || DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID,
-    currentSceneKey: DEFAULT_IMMERSIVE_RPG_SCENE_KEY,
-    sceneTitle: DEFAULT_IMMERSIVE_RPG_SCENE_TITLE,
+    messengerSceneId: normalizeText(messengerSceneId, 160) || resolvedSceneDefinition.messengerSceneId || DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID,
+    currentSceneNumber: resolvedSceneDefinition.number,
+    currentSceneKey: resolvedSceneDefinition.key,
+    sceneTitle: resolvedSceneDefinition.title,
     currentBeat: 'encounter_setup',
     status: 'active',
-    promptKey: DEFAULT_IMMERSIVE_RPG_SCENE_KEY,
+    promptKey: resolvedSceneDefinition.promptKey,
     sourceSceneBrief: normalizedBrief,
     compiledPrompt: buildCompiledScenePrompt({
       promptTemplate,
+      routeContract,
       sceneBrief: normalizedBrief,
       characterSheet,
       currentBeat: 'encounter_setup',
@@ -609,6 +1163,9 @@ export function buildSceneBootstrap({
     transcript: [openingEntry],
     rollLog: [],
     pendingRoll: null,
+    notebook: buildOpeningNotebook(normalizedBrief, characterSheet),
+    stageLayout: 'focus-left',
+    stageModules: buildOpeningStageModules(normalizedBrief),
     sceneFlags: {
       sawJournalSketches: false,
       strangerSpottedPc: false,
@@ -617,32 +1174,116 @@ export function buildSceneBootstrap({
     },
     notes: [
       'Bootstrap generated from MessengerSceneBrief.',
+      `Scene definition resolved for ${resolvedSceneDefinition.key}.`,
       'Compiled prompt generated from the current immersive RPG GM prompt template.'
     ]
   };
 }
 
 export function normalizeImmersiveRpgPendingRoll(raw = null) {
-  if (!raw || typeof raw !== 'object') return null;
-  return buildPendingRoll({
-    contextKey: raw.contextKey || raw.context_key,
-    skill: raw.skill,
-    diceNotation: raw.diceNotation || raw.dice_notation,
-    difficulty: raw.difficulty,
-    successThreshold: raw.successThreshold ?? raw.success_threshold,
-    successesRequired: raw.successesRequired ?? raw.successes_required,
-    label: raw.label,
-    instructions: raw.instructions
+  return coercePendingRoll(raw);
+}
+
+export function normalizeImmersiveRpgNotebook(raw = null, { fallbackPendingRoll = null, fallbackRoll = null } = {}) {
+  const source = asObject(raw);
+  const pendingRoll = normalizeImmersiveRpgPendingRoll(
+    source.pending_roll || source.pendingRoll || fallbackPendingRoll
+  );
+  const successTrackSource = source.success_track || source.successTrack;
+
+  if (!Object.keys(source).length) {
+    if (pendingRoll) {
+      return buildRollRequestNotebook(pendingRoll);
+    }
+    if (fallbackRoll && typeof fallbackRoll === 'object') {
+      return buildRollResultNotebook(fallbackRoll);
+    }
+    return buildStoryNotebook({
+      title: 'Mechanics Notebook',
+      prompt: 'Notebook standing by.',
+      instruction: 'No mechanical prompt is currently active.',
+      scratchLines: [],
+      focusTags: ['standby'],
+      resultSummary: 'No roll pending.'
+    });
+  }
+
+  return buildNotebookState({
+    mode: source.mode,
+    title: source.title,
+    prompt: source.prompt,
+    instruction: source.instruction,
+    scratchLines: source.scratch_lines || source.scratchLines,
+    focusTags: source.focus_tags || source.focusTags,
+    pendingRoll,
+    diceFaces: source.dice_faces || source.diceFaces,
+    successTrack: successTrackSource,
+    resultSummary: source.result_summary || source.resultSummary,
+    updatedAt: source.updated_at || source.updatedAt
   });
+}
+
+export function toImmersiveRpgNotebookContractPayload(notebook = null) {
+  const normalized = normalizeImmersiveRpgNotebook(notebook);
+  return {
+    mode: normalized.mode,
+    title: normalized.title,
+    prompt: normalized.prompt,
+    instruction: normalized.instruction,
+    scratch_lines: normalized.scratchLines,
+    focus_tags: normalized.focusTags,
+    pending_roll: normalized.pendingRoll
+      ? {
+        context_key: normalized.pendingRoll.contextKey,
+        skill: normalized.pendingRoll.skill,
+        label: normalized.pendingRoll.label,
+        dice_notation: normalized.pendingRoll.diceNotation,
+        difficulty: normalized.pendingRoll.difficulty,
+        success_threshold: normalized.pendingRoll.successThreshold,
+        successes_required: normalized.pendingRoll.successesRequired,
+        instructions: normalized.pendingRoll.instructions
+      }
+      : null,
+    dice_faces: normalized.diceFaces,
+    success_track: normalized.successTrack
+      ? {
+        successes: normalized.successTrack.successes,
+        successes_required: normalized.successTrack.successesRequired,
+        passed: normalized.successTrack.passed
+      }
+      : null,
+    result_summary: normalized.resultSummary,
+    updated_at: normalized.updatedAt
+  };
+}
+
+export function toImmersiveRpgStageModuleContractPayload(module = null) {
+  return buildStageModuleContractPayload(module);
+}
+
+export function toImmersiveRpgStageContractPayload(raw = {}) {
+  const normalized = normalizeImmersiveRpgStagePayload(raw);
+  return {
+    stage_layout: normalized.stageLayout,
+    stage_modules: normalized.stageModules.map((module) => buildStageModuleContractPayload(module))
+  };
 }
 
 export function normalizeImmersiveRpgChatResponse(raw = {}) {
   const source = asObject(raw);
+  const pendingRoll = normalizeImmersiveRpgPendingRoll(source.pending_roll || source.pendingRoll);
+  const notebook = normalizeImmersiveRpgNotebook(source.notebook, {
+    fallbackPendingRoll: pendingRoll
+  });
+  const stage = normalizeImmersiveRpgStagePayload(source);
   return {
     gmReply: normalizeText(source.gm_reply || source.gmReply, 8000),
     currentBeat: normalizeText(source.current_beat || source.currentBeat, 120) || 'encounter_setup',
     shouldPauseForChoice: Boolean(source.should_pause_for_choice ?? source.shouldPauseForChoice),
-    pendingRoll: normalizeImmersiveRpgPendingRoll(source.pending_roll || source.pendingRoll),
+    pendingRoll: pendingRoll || notebook?.pendingRoll || null,
+    notebook,
+    stageLayout: stage.stageLayout,
+    stageModules: stage.stageModules,
     sceneFlagsPatch: asObject(source.scene_flags_patch || source.sceneFlagsPatch),
     keeperNotes: normalizeList(source.keeper_notes || source.keeperNotes, { limit: 12, itemMaxLength: 280 })
   };
@@ -660,10 +1301,22 @@ function buildRetrieveJournalTurn() {
     instructions:
       'Roll 5d6 Awareness. Count 5s and 6s as successes. You need 2 successes to reach the journal, see enough of it, and stay unnoticed.'
   });
+  const notebook = buildRollRequestNotebook(pendingRoll, {
+    title: 'Journal Margin Test',
+    prompt: 'The journal is within reach, but only for a moment.',
+    scratchLines: [
+      'Failure means the stranger catches the movement.',
+      'Success buys only a few seconds with the pages.'
+    ],
+    focusTags: ['awareness', 'speed', 'concealment']
+  });
 
   return {
     nextBeat: 'journal_attempt',
     pendingRoll,
+    notebook,
+    stageLayout: 'focus-left',
+    stageModules: buildRetrieveStageModules(),
     gmText:
       `You ease toward the fallen journal, but this is not a clean movement. The stranger is too near, the ground too uncertain, and the moment too narrow. ${pendingRoll.instructions} If you hesitate much longer, the chance will close. What do you do?`
   };
@@ -673,6 +1326,19 @@ function buildObserveTurn() {
   return {
     nextBeat: 'encounter_observation',
     pendingRoll: null,
+    notebook: buildStoryNotebook({
+      title: 'Observation Notes',
+      prompt: 'The stranger is still revealing themself.',
+      instruction: 'Hold the scene. No roll yet, but time is narrowing.',
+      scratchLines: [
+        'Breathing sharp, then deliberately calm.',
+        'Journal still visible from the PC angle.',
+        'Delay favors the stranger, not the PC.'
+      ],
+      focusTags: ['observation', 'timing', 'tension']
+    }),
+    stageLayout: 'focus-right',
+    stageModules: buildObservationStageModules(),
     gmText:
       'You remain concealed and let the stranger reveal themselves by degrees. Their breathing is wrong for someone merely inconvenienced; too controlled one instant, too sharp the next. The journal still lies where only you have the clear angle on it, but that will not remain true forever. What do you do?'
   };
@@ -682,6 +1348,18 @@ function buildApproachTurn() {
   return {
     nextBeat: 'direct_contact',
     pendingRoll: null,
+    notebook: buildStoryNotebook({
+      title: 'Contact Notes',
+      prompt: 'The stranger now knows the PC is here.',
+      instruction: 'No roll yet. The danger is social and immediate.',
+      scratchLines: [
+        'Calm arrives too quickly to be honest.',
+        'The eyes linger as if comparing sketch to subject.'
+      ],
+      focusTags: ['contact', 'unease', 'confrontation']
+    }),
+    stageLayout: 'focus-right',
+    stageModules: buildContactStageModules(),
     gmText:
       'A small sound gives you away before your voice does. The stranger straightens with practiced calm, smoothing away the urgency you witnessed a moment ago. They look almost harmless now, which is worse. For a beat too long their eyes rest on you as if confirming a sketch against the original. What do you do?'
   };
@@ -691,6 +1369,19 @@ function buildReturnHomeTurn() {
   return {
     nextBeat: 'home_intrusion',
     pendingRoll: null,
+    notebook: buildStoryNotebook({
+      title: 'House Survey',
+      prompt: 'The scene shifts from encounter to intrusion.',
+      instruction: 'No roll yet. Let the PC inspect the altered familiarity of home.',
+      scratchLines: [
+        'Object displaced.',
+        'Unfamiliar cologne lingering.',
+        'The hidden nook may still be untouched.'
+      ],
+      focusTags: ['home', 'intrusion', 'package']
+    }),
+    stageLayout: 'focus-left',
+    stageModules: buildHomeStageModules(),
     gmText:
       'You break from the moment and head inside. The familiarity of home does not survive the threshold intact. Something is fractionally wrong: an object displaced, a scent that does not belong to you, the quiet aftermath of someone patient searching where they should not have been. The nook where you sometimes leave groceries remains untouched. What do you do?'
   };
@@ -708,10 +1399,22 @@ function buildResistTurn() {
     instructions:
       'Roll 5d6 Brawl or raw resolve. Count 5s and 6s as successes. You need 3 successes to keep the journal when the stranger closes in.'
   });
+  const notebook = buildRollRequestNotebook(pendingRoll, {
+    title: 'Resistance Check',
+    prompt: 'The stranger is already reaching for the journal.',
+    scratchLines: [
+      'This is a hard contest.',
+      'Failure means the journal leaves with them.'
+    ],
+    focusTags: ['brawl', 'resolve', 'pressure']
+  });
 
   return {
     nextBeat: 'confrontation',
     pendingRoll,
+    notebook,
+    stageLayout: 'focus-right',
+    stageModules: buildResistanceStageModules(),
     gmText:
       `The stranger closes the distance with a confidence that feels rehearsed. There is nothing accidental left in them now. ${pendingRoll.instructions} Their hand is already reaching. What do you do?`
   };
@@ -722,6 +1425,19 @@ function buildInspectHomeTurn(sceneBrief) {
   return {
     nextBeat: 'package_discovery',
     pendingRoll: null,
+    notebook: buildStoryNotebook({
+      title: 'Package Discovery',
+      prompt: 'The hidden nook finally yields the package.',
+      instruction: 'No roll. Let the contents land with clarity and dread.',
+      scratchLines: [
+        `Location: ${placeName}`,
+        'Contents: letter, journal, pen, blank deck of cards.',
+        'The package waited where the intruder did not look.'
+      ],
+      focusTags: ['package', 'letter', 'discovery']
+    }),
+    stageLayout: 'triptych',
+    stageModules: buildPackageDiscoveryStageModules(sceneBrief),
     gmText:
       `The signs of intrusion lead you through ${placeName} and finally toward the small natural nook you trust because nobody else would think to use it that way. The package is there, untouched, as if it has been waiting with held breath. Inside are a letter, a journal, a pen, and a blank deck of cards. The paper already feels more urgent than safe. What do you do?`
   };
@@ -754,12 +1470,25 @@ export function buildSkeletonSceneTurn(sessionDoc, playerMessage) {
   return {
     nextBeat: currentBeat,
     pendingRoll: null,
+    notebook: buildStoryNotebook({
+      title: 'Held Breath',
+      prompt: 'The scene is still unresolved.',
+      instruction: 'No roll yet. Pressure rises while the PC still chooses freely.',
+      scratchLines: [
+        'Stranger occupied but not for long.',
+        'Journal remains vulnerable.',
+        'Delay sharpens the wrongness of the moment.'
+      ],
+      focusTags: ['agency', 'pressure', 'hesitation']
+    }),
+    stageLayout: 'focus-left',
+    stageModules: buildHeldBreathStageModules(),
     gmText:
       'The moment stretches but does not release you. The stranger is still occupied, the journal is still vulnerable, and the sense that you are being drawn into something deliberate only sharpens. You still have agency, but not much time. What do you do?'
   };
 }
 
-function resolveJournalRetrieval(roll) {
+function resolveJournalRetrieval(sceneBrief, roll) {
   if (roll.passed) {
     return {
       nextBeat: 'journal_glimpse',
@@ -767,6 +1496,18 @@ function resolveJournalRetrieval(roll) {
         sawJournalSketches: true,
         strangerSpottedPc: true
       },
+      notebook: buildRollResultNotebook(roll, {
+        title: 'Journal Reached',
+        prompt: 'The journal yields its sketches before the stranger notices.',
+        scratchLines: [
+          'Landscape studies first.',
+          'Then the house exterior.',
+          'Then a patient portrait of the PC.'
+        ],
+        focusTags: ['success', 'journal', 'portrait']
+      }),
+      stageLayout: 'triptych',
+      stageModules: buildJournalGlimpseStageModules(sceneBrief),
       gmText:
         'You reach the journal with seconds to spare. The first pages are rapid, beautiful studies of the surrounding land; flora, contours, and little local details rendered by a hand too skilled to be casual. Then the exterior of your house. Then, with a colder precision, a portrait of you made from patient observation. That is the instant the stranger notices you. Their composure gathers around them like a curtain. What do you do?'
     };
@@ -777,6 +1518,17 @@ function resolveJournalRetrieval(roll) {
     sceneFlags: {
       strangerSpottedPc: true
     },
+    notebook: buildRollResultNotebook(roll, {
+      title: 'Movement Seen',
+      prompt: 'The stranger catches the attempt before the journal can be studied cleanly.',
+      scratchLines: [
+        'The calm is theatrical now.',
+        'The failed approach confirms mutual awareness.'
+      ],
+      focusTags: ['failure', 'caught', 'journal']
+    }),
+    stageLayout: 'focus-right',
+    stageModules: buildCaughtStageModules(),
     gmText:
       'You move, and the movement is enough. The stranger turns just before you can manage the journal cleanly. The urgency leaves their face so quickly it becomes theatrical. "No trouble," they seem to suggest without quite saying it, but the performance comes a second too late. They were looking for something, and now they know you know it. What do you do?'
   };
@@ -789,6 +1541,17 @@ function resolveJournalResistance(roll) {
       sceneFlags: {
         strangerSpottedPc: true
       },
+      notebook: buildRollResultNotebook(roll, {
+        title: 'Journal Kept',
+        prompt: 'The PC keeps the journal, but the stranger leaves with certainty intact.',
+        scratchLines: [
+          'A second sketch appears from the parchment fold.',
+          'The threat shifts from taking to promising return.'
+        ],
+        focusTags: ['success', 'resistance', 'threat']
+      }),
+      stageLayout: 'focus-left',
+      stageModules: buildHomeStageModules(),
       gmText:
         'You manage to keep the journal. The stranger stops, studies you, and with almost amused resignation unfolds a looser sketch of your face from inside a parchment fold. "I suppose that will do," they murmur. Then the smile comes, brief and wrong. "Oh, we will meet again. Do not worry. We will find you." The retreat that follows is so skillful it might as well be a vanishing act. By the time you return home, the feeling of being watched has gone indoors ahead of you. What do you do?'
     };
@@ -799,6 +1562,18 @@ function resolveJournalResistance(roll) {
     sceneFlags: {
       strangerSpottedPc: true
     },
+    notebook: buildRollResultNotebook(roll, {
+      title: 'Journal Lost',
+      prompt: 'The stranger takes the journal back with practiced calm.',
+      scratchLines: [
+        '"I believe that is mine."',
+        'The retreat is too skillful to counter.',
+        'Home now carries the aftermath.'
+      ],
+      focusTags: ['failure', 'loss', 'intrusion']
+    }),
+    stageLayout: 'focus-left',
+    stageModules: buildHomeStageModules(),
     gmText:
       'The stranger takes the journal from you with quiet, practiced force. "I believe that is mine. Thank you." The words are polite enough to be insulting. Before retreating they leave you with a shorter line and a short laugh that does not belong in the open air: "Oh, we will meet again. Do not worry. We will find you." You cannot catch them. By the time you make it home, something in the place has already been touched. What do you do?'
   };
@@ -867,8 +1642,9 @@ export function simulateDicePoolRoll({
 
 export function resolveRollOutcome(sessionDoc, roll) {
   const contextKey = normalizeText(roll?.contextKey, 120) || normalizeText(sessionDoc?.pendingRoll?.contextKey, 120);
+  const sceneBrief = normalizeMessengerSceneBriefForRpg(sessionDoc?.sourceSceneBrief);
   if (contextKey === 'journal_retrieval') {
-    return resolveJournalRetrieval(roll);
+    return resolveJournalRetrieval(sceneBrief, roll);
   }
   if (contextKey === 'resist_journal_grab') {
     return resolveJournalResistance(roll);
@@ -876,6 +1652,16 @@ export function resolveRollOutcome(sessionDoc, roll) {
   return {
     nextBeat: normalizeText(sessionDoc?.currentBeat, 120) || 'encounter_setup',
     sceneFlags: {},
+    notebook: buildRollResultNotebook(roll, {
+      title: 'Unmapped Roll',
+      prompt: 'The mechanical result is known, but the authored consequence remains open.',
+      scratchLines: [
+        'Scaffold fallback: no bespoke consequence yet.'
+      ],
+      focusTags: ['fallback']
+    }),
+    stageLayout: normalizeStageLayout(sessionDoc?.stageLayout),
+    stageModules: normalizeStageModules(sessionDoc?.stageModules),
     gmText:
       `${roll?.summary || 'The roll lands.'} The scene is scaffolded and waiting for the next authored consequence. What do you do?`
   };
@@ -939,12 +1725,19 @@ export function toImmersiveRpgScenePayload(doc, characterSheet = null) {
       meta: asObject(roll.meta)
     }))
     : [];
+  const pendingRoll = normalizeImmersiveRpgPendingRoll(doc.pendingRoll);
+  const notebook = normalizeImmersiveRpgNotebook(doc.notebook, {
+    fallbackPendingRoll: pendingRoll,
+    fallbackRoll: rollLog.length ? rollLog[rollLog.length - 1] : null
+  });
+  const stage = normalizeImmersiveRpgStagePayload(doc);
 
   return {
     id: String(doc._id || doc.id || ''),
     sessionId: normalizeText(doc.sessionId, 160),
     playerId: normalizeText(doc.playerId, 160),
     messengerSceneId: normalizeText(doc.messengerSceneId, 160),
+    currentSceneNumber: Number.isFinite(Number(doc.currentSceneNumber)) ? Number(doc.currentSceneNumber) : 3,
     currentSceneKey: normalizeText(doc.currentSceneKey, 160),
     sceneTitle: normalizeText(doc.sceneTitle, 240),
     currentBeat: normalizeText(doc.currentBeat, 120),
@@ -954,7 +1747,10 @@ export function toImmersiveRpgScenePayload(doc, characterSheet = null) {
     compiledPrompt: normalizeText(doc.compiledPrompt, 20000),
     transcript,
     rollLog,
-    pendingRoll: doc.pendingRoll ? { ...asObject(doc.pendingRoll) } : null,
+    pendingRoll,
+    notebook,
+    stageLayout: stage.stageLayout,
+    stageModules: stage.stageModules,
     sceneFlags: asObject(doc.sceneFlags),
     notes: normalizeList(doc.notes, { limit: 20, itemMaxLength: 400 }),
     characterSheet: characterSheet ? toImmersiveRpgCharacterSheetPayload(characterSheet) : null,

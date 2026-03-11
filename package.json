@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "cleanup:persistent-relationships": "node scripts/cleanup_persistent_relationships_test.js"
+    "cleanup:persistent-relationships": "node scripts/cleanup_persistent_relationships_test.js",
+    "cleanup:unused-mongo": "node scripts/cleanup_unused_mongo_collections.js"
   },
   "author": "",
   "license": "ISC",

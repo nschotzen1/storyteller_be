@@ -178,4 +178,102 @@ describe('Quest Screen API', () => {
     expect(listResponse.body.traversal).toHaveLength(1);
     expect(listResponse.body.traversal[0].toScreenId).toBe('mural_center_panel');
   });
+
+  test('POST /api/quest/advance creates a persistent generated child screen with runtime and mock metadata', async () => {
+    const scope = { sessionId: 'quest-advance-session', questId: 'quest-advance-id' };
+
+    const response = await request(app)
+      .post('/api/quest/advance')
+      .send({
+        ...scope,
+        playerId: 'wanderer-02',
+        currentScreenId: 'outer_gate_murals',
+        actionType: 'prompt',
+        promptText: 'inspect the cracked lantern niche behind the center mural',
+        mock: true
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        sessionId: scope.sessionId,
+        questId: scope.questId,
+        actionType: 'prompt',
+        traversalCount: 1,
+        mocked: true
+      })
+    );
+    expect(response.body.runtime).toEqual(
+      expect.objectContaining({
+        pipeline: 'quest_generation',
+        provider: expect.any(String),
+        model: expect.any(String),
+        mocked: true
+      })
+    );
+    expect(response.body.mockedData).toEqual(
+      expect.objectContaining({
+        source: 'deterministic-quest-generator',
+        currentScreenId: 'outer_gate_murals',
+        anchorScreenId: 'outer_gate_murals',
+        promptPayload: expect.any(Object),
+        plan: expect.objectContaining({
+          title: expect.any(String),
+          direction_label: expect.any(String),
+          stage_layout: expect.any(String)
+        })
+      })
+    );
+    expect(response.body.createdScreen).toEqual(
+      expect.objectContaining({
+        screenType: 'generated',
+        parentScreenId: 'outer_gate_murals',
+        anchorScreenId: 'outer_gate_murals',
+        generatedByPlayerId: 'wanderer-02',
+        generatedFromPrompt: expect.stringContaining('inspect the cracked lantern niche'),
+        image_prompt: expect.any(String),
+        expectationSummary: expect.any(String),
+        continuitySummary: expect.any(String),
+        stageLayout: expect.any(String),
+        stageModules: expect.any(Array)
+      })
+    );
+    expect(response.body.createdScreen.stageModules.length).toBeGreaterThan(0);
+    expect(response.body.screen.id).toBe(response.body.createdScreen.id);
+
+    const getResponse = await request(app)
+      .get('/api/quest/screens')
+      .query(scope);
+
+    expect(getResponse.status).toBe(200);
+    const parentScreen = getResponse.body.screens.find((screen) => screen.id === 'outer_gate_murals');
+    const generatedScreen = getResponse.body.screens.find((screen) => screen.id === response.body.createdScreen.id);
+    expect(parentScreen).toBeTruthy();
+    expect(generatedScreen).toBeTruthy();
+    expect(parentScreen.directions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          direction: 'prompt',
+          targetScreenId: generatedScreen.id
+        })
+      ])
+    );
+    expect(generatedScreen.stageModules.length).toBeGreaterThan(0);
+
+    const traversalResponse = await request(app)
+      .get('/api/quest/traversal')
+      .query(scope);
+
+    expect(traversalResponse.status).toBe(200);
+    expect(traversalResponse.body.traversal).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromScreenId: 'outer_gate_murals',
+          toScreenId: generatedScreen.id,
+          direction: 'prompt',
+          promptText: 'inspect the cracked lantern niche behind the center mural'
+        })
+      ])
+    );
+  });
 });

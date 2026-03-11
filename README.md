@@ -62,12 +62,10 @@ Optional admin auth:
 
 ## Immersive RPG Skeleton
 
-The first immersive RPG pass is now scaffolded around the persisted messenger scene brief.
+The first immersive RPG pass is now scaffolded around persisted session state plus scene-specific dependencies.
 
-- `GET /api/immersive-rpg/scene?sessionId=...&bootstrap=true`
-  Loads the current Mongo-backed scene state and can bootstrap Scene 3 from `MessengerSceneBrief`.
-- `POST /api/immersive-rpg/scene/bootstrap`
-  Forces a fresh Scene 3 bootstrap for a session.
+- `GET /api/immersive-rpg/scene?sessionId=...`
+  Resolves the active scene for the session, lazily bootstraps it if dependencies are present, and returns `ready: false` plus `missingContext` when the scene is blocked.
 - `POST /api/immersive-rpg/chat`
   Appends free-text PC actions and returns the next scaffolded GM beat.
 - `POST /api/immersive-rpg/rolls`
@@ -78,7 +76,9 @@ The first immersive RPG pass is now scaffolded around the persisted messenger sc
   Persists the editable character-sheet skeleton.
 
 Current scope:
-- Scene bootstrap depends on the messenger-derived place brief already being stored for the session.
+- The client only needs `sessionId`; the server resolves the current scene and its dependencies.
+- Scene 3 currently depends on the messenger-derived place brief already being stored for the session.
+- If Story Admin sets `immersive_rpg_gm.useMock=true`, missing scene dependencies can be mocked internally instead of requiring setup routes.
 - The Scene 3 master prompt is currently stored in code and mirrored into the scene payload as `compiledPrompt`.
 - Scene progression, transcript, pending rolls, roll history, and character sheet all persist in Mongo.
 

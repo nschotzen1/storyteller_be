@@ -189,13 +189,15 @@ Conversation rules:
 - If the user gives only an address or a vague location, ask for the room, surfaces, atmosphere, and concealment details.
 - Once the information is sufficient, close the conversation neatly and mysteriously, as if the Society now has what it needs.
 
-Always maintain a running structured summary of the place in the JSON output.
-If the information is still partial, infer cautiously but leave "scene_established" false.
-
-Return JSON only, with this exact top-level shape:
+Return JSON only.
+Always return:
 {
   "has_chat_ended": boolean,
-  "message_assistant": "string",
+  "message_assistant": "string"
+}
+
+Only when the scene is truly complete and you are ending the chat, also include:
+{
   "scene_brief": {
     "subject": "short browsable label, 2-6 words",
     "place_name": "concise name of the room or site",
@@ -203,12 +205,13 @@ Return JSON only, with this exact top-level shape:
     "typewriter_hiding_spot": "specific concealment location and why it works",
     "sensory_details": ["3-6 short concrete sensory anchors"],
     "notable_features": ["2-6 tangible props or environmental anchors"],
-    "scene_established": boolean
+    "scene_established": true
   }
 }
 
 Important:
-- When "has_chat_ended" is true, "scene_brief.scene_established" must also be true.
+- If "has_chat_ended" is false, omit "scene_brief".
+- If "has_chat_ended" is true, include "scene_brief".
 - "place_summary" must be specific enough that a later system could read it and immediately know how to stage the destination scene.
 - "typewriter_hiding_spot" must describe where the typewriter can be hidden, not merely say that it can be hidden.`;
 }

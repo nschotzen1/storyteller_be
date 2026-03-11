@@ -14,6 +14,12 @@ const MAIN_TEXT_MODELS = ['gpt-5.2-pro', 'gpt-5.2-chat-latest', 'gpt-5.2', 'gpt-
 const MAIN_IMAGE_MODELS = ['gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3'];
 const ANTHROPIC_DEFAULT_TEXT_MODEL = process.env.ANTHROPIC_TEXT_MODEL || 'claude-3-7-sonnet-latest';
 const FALLBACK_ANTHROPIC_TEXT_MODELS = [
+    'claude-opus-4-6',
+    'claude-sonnet-4-6',
+    'claude-haiku-4-5',
+    'claude-opus-4-1-20250805',
+    'claude-opus-4-20250514',
+    'claude-sonnet-4-20250514',
     'claude-3-7-sonnet-latest',
     'claude-3-opus-latest',
     'claude-3-5-sonnet-latest',
@@ -116,6 +122,21 @@ function normalizeAnthropicListedModel(item) {
             : 0,
         owned_by: 'anthropic'
     };
+}
+
+function buildAnthropicModelChoices(models = []) {
+    const normalized = Array.isArray(models) ? models.filter(Boolean) : [];
+    const byId = new Map(normalized.map((model) => [model.id, model]));
+    const ordered = [];
+
+    FALLBACK_ANTHROPIC_TEXT_MODELS.forEach((id) => {
+        const existing = byId.get(id);
+        ordered.push(existing || { id, created: 0, owned_by: 'anthropic' });
+        byId.delete(id);
+    });
+
+    const extras = sortModels(Array.from(byId.values()));
+    return [...ordered, ...extras];
 }
 
 function sortModels(models) {
@@ -273,7 +294,7 @@ export async function listAvailableAnthropicModels({ forceRefresh = false } = {}
                 .map(normalizeAnthropicListedModel)
                 .filter(Boolean)
         );
-        const textModels = normalized.length ? normalized : buildFallbackAnthropicModelsPayload().textModels;
+        const textModels = buildAnthropicModelChoices(normalized);
         const payload = {
             source: 'live',
             fetchedAt: new Date().toISOString(),

@@ -239,6 +239,10 @@ describe('messenger chat fallback without mongo', () => {
         promptTemplate: 'You are the Society courier. Return JSON only.'
       })
     );
+    expect(savedLlmConfig.body.responseSchema.required).toEqual(
+      expect.arrayContaining(['has_chat_ended', 'message_assistant'])
+    );
+    expect(savedLlmConfig.body.responseSchema.required).not.toContain('scene_brief');
     expect(savedLlmConfig.body.meta).toEqual(
       expect.objectContaining({
         source: 'file',
@@ -276,13 +280,7 @@ describe('messenger chat fallback without mongo', () => {
       })
     );
     expect(reply.body.messages).toHaveLength(3);
-    expect(reply.body.sceneBrief).toEqual(
-      expect.objectContaining({
-        subject: expect.any(String),
-        placeSummary: expect.stringMatching(/harbor/i),
-        sceneEstablished: false
-      })
-    );
+    expect(reply.body.sceneBrief).toBeNull();
 
     const deletion = await invokeRoute('delete', '/api/messenger/chat', {
       query: { sessionId }
@@ -292,8 +290,8 @@ describe('messenger chat fallback without mongo', () => {
     expect(deletion.body).toEqual(
       expect.objectContaining({
         deletedMessagesCount: 3,
-        deletedSceneBriefCount: 1,
-        deletedCount: 4,
+        deletedSceneBriefCount: 0,
+        deletedCount: 3,
         storage: 'file'
       })
     );

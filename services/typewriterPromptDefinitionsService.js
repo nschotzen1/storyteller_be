@@ -65,6 +65,12 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/immersive-rpg/chat GM orchestration prompt',
     settingsKey: 'immersive_rpg_gm'
   },
+  quest_generation: {
+    key: 'quest_generation',
+    label: 'Quest generation',
+    description: '/api/quest/advance structured branch generation prompt',
+    settingsKey: 'quest_generation'
+  },
   storyteller_mission: {
     key: 'storyteller_mission',
     label: 'Storyteller mission',

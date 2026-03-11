@@ -104,6 +104,16 @@ const PIPELINE_DEFINITIONS = {
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_IMMERSIVE_RPG_PROVIDER || DEFAULT_PROVIDER
   },
+  quest_generation: {
+    key: 'quest_generation',
+    label: 'Quest Generation',
+    description: '/api/quest/advance',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_QUEST_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_QUEST_PROVIDER || DEFAULT_PROVIDER
+  },
   storyteller_mission: {
     key: 'storyteller_mission',
     label: 'Storyteller Mission',

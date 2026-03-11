@@ -97,21 +97,28 @@ import {
   startTypewriterSession
 } from './services/typewriterSessionService.js';
 import {
+  buildMockMessengerSceneBrief,
   DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID,
   DEFAULT_IMMERSIVE_RPG_PLAYER_ID,
   DEFAULT_IMMERSIVE_RPG_PLAYER_NAME,
+  IMMERSIVE_RPG_TURN_CONTRACT_KEY,
   buildImmersiveRpgPromptMessages,
   buildCharacterSheetSkeleton,
   buildCompiledScenePrompt,
   buildSceneBootstrap,
   buildSkeletonSceneTurn,
   createTranscriptEntry,
+  getDefaultImmersiveRpgSceneDefinition,
+  getImmersiveRpgSceneDefinition,
   hasEnoughMessengerSceneBriefForRpg,
   normalizeImmersiveRpgChatResponse,
+  normalizeImmersiveRpgStagePayload,
   normalizeMessengerSceneBriefForRpg,
   resolveRollOutcome,
   simulateDicePoolRoll,
   toImmersiveRpgCharacterSheetPayload,
+  toImmersiveRpgNotebookContractPayload,
+  toImmersiveRpgStageContractPayload,
   toImmersiveRpgScenePayload
 } from './services/immersiveRpgService.js';
 
@@ -962,9 +969,12 @@ async function deleteMessengerConversation(sessionId, sceneId, persistence = 'mo
 const MESSENGER_MIN_SCENE_SUMMARY_WORDS = 28;
 const MESSENGER_MIN_HIDING_SPOT_WORDS = 6;
 const MESSENGER_MIN_SENSORY_DETAILS = 3;
+const MESSENGER_LOCATION_PATTERN = /(window|bay|attic|apartment|room|woods|forest|desert|plateau|harbor|house|flat|studio|tower|lane|street|road|courtyard|monastery|pass|cellar|basement)/i;
+const MESSENGER_HIDING_PATTERN = /(hide|hiding|closet|cupboard|cabinet|wardrobe|locker|crate|cellar|under|beneath|false wall|safe|chest|trunk|crawlspace)/i;
 const MESSENGER_SYSTEM_CONTRACT_TEXT = `Runtime output contract:
-- Return keys: has_chat_ended, message_assistant, scene_brief
-- scene_brief must include: subject, place_name, place_summary, typewriter_hiding_spot, sensory_details, notable_features, scene_established
+- Return keys: has_chat_ended, message_assistant
+- Include scene_brief only when has_chat_ended is true and the destination is fully established
+- If scene_brief is present, it must include: subject, place_name, place_summary, typewriter_hiding_spot, sensory_details, notable_features, scene_established
 - Do not mark has_chat_ended true until the destination is vivid enough to establish a scene and the typewriter hiding place is concrete
 - subject must be short and easy to browse later in storage
 - place_summary must be specific enough for a later system to stage the scene immediately`;
@@ -1141,23 +1151,114 @@ function buildMessengerSceneFollowUp(brief, gaps = []) {
   return 'Just a touch more detail, if you please. We need the room itself and the means of concealment to be unmistakably real before the Society commits the shipment.';
 }
 
-function buildMessengerPromptMessages(historyDocs, promptTemplate, maxHistoryMessages = DEFAULT_MESSENGER_HISTORY_LIMIT) {
+function buildLegacyMessengerSceneBriefFallback(message, historyDocs = [], existingSceneBrief = null, assistantReply = '') {
+  const prior = existingSceneBrief && typeof existingSceneBrief === 'object' ? existingSceneBrief : null;
+  const historyText = (Array.isArray(historyDocs) ? historyDocs : [])
+    .map((entry) => (typeof entry?.content === 'string' ? entry.content.trim() : ''))
+    .filter(Boolean)
+    .join(' ');
+  const combinedText = [historyText, message, assistantReply]
+    .map((entry) => normalizeMessengerBriefText(entry, 1200))
+    .filter(Boolean)
+    .join(' ');
+
+  const mentionsLocation = MESSENGER_LOCATION_PATTERN.test(combinedText);
+  const mentionsHiding = MESSENGER_HIDING_PATTERN.test(combinedText);
+  const placeSummaryFallback = mentionsLocation
+    ? `Proposed destination details gathered so far: ${normalizeMessengerBriefText(historyText || message, 480)}`
+    : '';
+  const hidingFallback = mentionsHiding
+    ? `Possible hiding place noted so far: ${normalizeMessengerBriefText(historyText || message, 320)}`
+    : '';
+
+  return {
+    subject: prior?.subject || (mentionsLocation ? 'Pending delivery room' : 'Unspecified destination'),
+    place_name: prior?.placeName || (mentionsLocation ? 'Proposed typewriter destination' : ''),
+    place_summary: prior?.placeSummary || placeSummaryFallback,
+    typewriter_hiding_spot: prior?.typewriterHidingSpot || hidingFallback,
+    sensory_details: Array.isArray(prior?.sensoryDetails) ? prior.sensoryDetails : [],
+    notable_features: Array.isArray(prior?.notableFeatures) ? prior.notableFeatures : [],
+    scene_established: Boolean(prior?.sceneEstablished)
+  };
+}
+
+export function coerceLegacyMessengerAiResponse(rawResponse, {
+  message = '',
+  historyDocs = [],
+  existingSceneBrief = null
+} = {}) {
+  if (!rawResponse || typeof rawResponse !== 'object') {
+    return rawResponse;
+  }
+
+  const nextResponse = { ...rawResponse };
+
+  if (typeof nextResponse.message_assistant !== 'string') {
+    if (typeof nextResponse.assistant_message === 'string') {
+      nextResponse.message_assistant = nextResponse.assistant_message;
+    } else if (typeof nextResponse.reply === 'string') {
+      nextResponse.message_assistant = nextResponse.reply;
+    }
+  }
+
+  if (typeof nextResponse.has_chat_ended !== 'boolean' && typeof nextResponse.hasChatEnded === 'boolean') {
+    nextResponse.has_chat_ended = nextResponse.hasChatEnded;
+  }
+
+  if (
+    nextResponse.has_chat_ended === true
+    && (!nextResponse.scene_brief || typeof nextResponse.scene_brief !== 'object')
+  ) {
+    nextResponse.scene_brief = buildLegacyMessengerSceneBriefFallback(
+      message,
+      historyDocs,
+      existingSceneBrief,
+      typeof nextResponse.message_assistant === 'string' ? nextResponse.message_assistant : ''
+    );
+  }
+
+  return nextResponse;
+}
+
+function getMessengerIntroHistoryDoc(historyDocs = []) {
+  const docs = Array.isArray(historyDocs) ? historyDocs : [];
+  return docs.find((doc) => doc?.type === 'initial') || docs[0] || null;
+}
+
+function buildMessengerOpeningContext(historyDocs = []) {
+  const introDoc = getMessengerIntroHistoryDoc(historyDocs);
+  const introContent = normalizeMessengerBriefText(introDoc?.content, 2200)
+    || normalizeMessengerBriefText(MESSENGER_INITIAL_MESSAGE, 2200);
+  return `The conversation already began with this premade Society dispatch shown to the user. Treat it as established canon and continue from it:\n"""${introContent}"""`;
+}
+
+export function buildMessengerPromptMessages(historyDocs, promptTemplate, maxHistoryMessages = DEFAULT_MESSENGER_HISTORY_LIMIT) {
   const safePromptBase = typeof promptTemplate === 'string' && promptTemplate.trim()
     ? promptTemplate.trim()
     : 'You are a strange but professional courier for the Storyteller Society. Return JSON only.';
   const safePrompt = `${safePromptBase}\n\n${MESSENGER_SYSTEM_CONTRACT_TEXT}`;
   const safeLimit = normalizeMessengerHistoryLimit(maxHistoryMessages);
-  const formattedHistory = (Array.isArray(historyDocs) ? historyDocs : []).map((doc) => ({
+  const openingContext = buildMessengerOpeningContext(historyDocs);
+  const formattedHistory = (Array.isArray(historyDocs) ? historyDocs : [])
+    .filter((doc) => doc?.type !== 'initial')
+    .map((doc) => ({
     role: doc?.sender === 'user' ? 'user' : 'assistant',
     content: typeof doc?.content === 'string' ? doc.content : ''
-  }));
+    }));
 
-  if (formattedHistory.length <= safeLimit + 1) {
-    return [{ role: 'system', content: safePrompt }, ...formattedHistory];
+  if (formattedHistory.length <= safeLimit) {
+    return [
+      { role: 'system', content: safePrompt },
+      { role: 'system', content: openingContext },
+      ...formattedHistory
+    ];
   }
 
-  const [initialMessage, ...rest] = formattedHistory;
-  return [{ role: 'system', content: safePrompt }, initialMessage, ...rest.slice(-safeLimit)];
+  return [
+    { role: 'system', content: safePrompt },
+    { role: 'system', content: openingContext },
+    ...formattedHistory.slice(-safeLimit)
+  ];
 }
 
 function buildMockMessengerResponse(message, historyDocs = []) {
@@ -1167,10 +1268,8 @@ function buildMockMessengerResponse(message, historyDocs = []) {
     .map((entry) => (typeof entry?.content === 'string' ? entry.content : ''))
     .join(' ');
   const priorUserTurns = (Array.isArray(historyDocs) ? historyDocs : []).filter((entry) => entry?.sender === 'user').length;
-  const locationPattern = /(window|bay|attic|apartment|room|woods|forest|desert|plateau|harbor|house|flat|studio|tower|lane|street|road|courtyard|monastery|pass|cellar|basement)/i;
-  const hidingPattern = /(hide|hiding|closet|cupboard|cabinet|wardrobe|locker|crate|cellar|under|beneath|false wall|safe|chest|trunk|crawlspace)/i;
-  const mentionsLocation = locationPattern.test(normalizedMessage) || locationPattern.test(historyText);
-  const mentionsHiding = hidingPattern.test(normalizedMessage) || hidingPattern.test(historyText);
+  const mentionsLocation = MESSENGER_LOCATION_PATTERN.test(normalizedMessage) || MESSENGER_LOCATION_PATTERN.test(historyText);
+  const mentionsHiding = MESSENGER_HIDING_PATTERN.test(normalizedMessage) || MESSENGER_HIDING_PATTERN.test(historyText);
   const likelyPlaceName = mentionsLocation
     ? 'Attic room above the harbor'
     : 'Undisclosed receiving room';
@@ -1208,8 +1307,7 @@ function buildMockMessengerResponse(message, historyDocs = []) {
     return {
       has_chat_ended: false,
       message_assistant:
-        'Excellent. We are beginning to see the room properly now. One final practical matter: if the typewriter had to vanish at short notice, where exactly would you conceal it, and what in that place would keep it safe from idle hands?',
-      scene_brief: partialSceneBrief
+        'Excellent. We are beginning to see the room properly now. One final practical matter: if the typewriter had to vanish at short notice, where exactly would you conceal it, and what in that place would keep it safe from idle hands?'
     };
   }
 
@@ -1217,16 +1315,14 @@ function buildMockMessengerResponse(message, historyDocs = []) {
     return {
       has_chat_ended: false,
       message_assistant:
-        'Quite. But an address alone is such a blunt instrument. We require the atmosphere as well: the table, the light, the weather at the window, the noises in the corridor, and the sort of room in which the keys will learn your habits.',
-      scene_brief: partialSceneBrief
+        'Quite. But an address alone is such a blunt instrument. We require the atmosphere as well: the table, the light, the weather at the window, the noises in the corridor, and the sort of room in which the keys will learn your habits.'
     };
   }
 
   return {
     has_chat_ended: false,
     message_assistant:
-      'Yes, yes, but where will it actually live once it reaches you? We need the physical truth of it: the room, the surface, the view, the air, and any nearby place in which a very precious typewriter might be hidden without remark.',
-    scene_brief: partialSceneBrief
+      'Yes, yes, but where will it actually live once it reaches you? We need the physical truth of it: the room, the surface, the view, the air, and any nearby place in which a very precious typewriter might be hidden without remark.'
   };
 }
 
@@ -1309,6 +1405,12 @@ async function handleMessengerChatPost(req, res) {
       });
     }
 
+    aiResponse = coerceLegacyMessengerAiResponse(aiResponse, {
+      message,
+      historyDocs,
+      existingSceneBrief
+    });
+
     await validatePayloadForRoute('messenger_chat', aiResponse);
 
     let reply = typeof aiResponse.message_assistant === 'string' ? aiResponse.message_assistant.trim() : '';
@@ -1354,7 +1456,7 @@ async function handleMessengerChatPost(req, res) {
     }
 
     let savedSceneBrief = null;
-    if (mergedSceneBrief) {
+    if (hasChatEnded && mergedSceneBrief?.sceneEstablished) {
       savedSceneBrief = await saveMessengerSceneBrief(sessionId, sceneId, mergedSceneBrief, persistence);
     }
 
@@ -1371,7 +1473,7 @@ async function handleMessengerChatPost(req, res) {
       ...conversation,
       reply,
       has_chat_ended: hasChatEnded,
-      sceneBrief: conversation.sceneBrief || savedSceneBrief,
+      sceneBrief: hasChatEnded ? (conversation.sceneBrief || savedSceneBrief) : null,
       mocked: shouldMock,
       runtime: {
         pipeline: 'messenger_chat',
@@ -1499,14 +1601,115 @@ async function loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId) 
   };
 }
 
-async function resolveImmersiveRpgPromptTemplate() {
+async function resolveImmersiveRpgRuntimeConfig() {
+  const routeConfig = await getRouteConfig(IMMERSIVE_RPG_TURN_CONTRACT_KEY);
   const latestPrompt = await getLatestPromptTemplate('immersive_rpg_gm');
-  if (latestPrompt?.promptTemplate) {
-    return latestPrompt.promptTemplate;
+
+  return {
+    promptTemplate:
+      latestPrompt?.promptTemplate
+      || routeConfig?.promptCore
+      || routeConfig?.promptTemplate
+      || '',
+    routeConfig
+  };
+}
+
+const IMMERSIVE_RPG_CONTEXT_LOADERS = {
+  messenger_scene_brief: async ({
+    sessionId,
+    sceneDefinition
+  }) => {
+    const { brief, storage } = await loadImmersiveRpgMessengerSceneBrief(
+      sessionId,
+      sceneDefinition.messengerSceneId || DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID
+    );
+
+    return {
+      value: hasEnoughMessengerSceneBriefForRpg(brief) ? brief : null,
+      storage
+    };
+  },
+  character_sheet: async ({
+    sessionId,
+    playerId
+  }) => {
+    const effectivePlayerId = playerId || DEFAULT_IMMERSIVE_RPG_PLAYER_ID;
+    const doc = await ImmersiveRpgCharacterSheet.findOne({ sessionId, playerId: effectivePlayerId }).lean();
+    return {
+      value: doc,
+      storage: 'mongo'
+    };
+  }
+};
+
+const IMMERSIVE_RPG_CONTEXT_MOCK_FACTORIES = {
+  messenger_scene_brief: ({ playerName }) => buildMockMessengerSceneBrief({ playerName })
+};
+
+async function resolveImmersiveRpgSceneContext({
+  sessionId,
+  playerId,
+  playerName,
+  sceneDefinition,
+  allowMockDependencies = false
+} = {}) {
+  const resolvedSceneDefinition = getImmersiveRpgSceneDefinition(
+    sceneDefinition?.number || sceneDefinition?.key || null
+  );
+  const requirements = [
+    ...(Array.isArray(resolvedSceneDefinition.needs) ? resolvedSceneDefinition.needs.map((key) => ({ key, required: true })) : []),
+    ...(Array.isArray(resolvedSceneDefinition.optional) ? resolvedSceneDefinition.optional.map((key) => ({ key, required: false })) : [])
+  ];
+  const context = {};
+  const missingContext = [];
+  const mockedContext = [];
+  let sourceStorage = 'mongo';
+
+  for (const requirement of requirements) {
+    const loader = IMMERSIVE_RPG_CONTEXT_LOADERS[requirement.key];
+    const loaded = loader
+      ? await loader({
+        sessionId,
+        playerId,
+        playerName,
+        sceneDefinition: resolvedSceneDefinition
+      })
+      : { value: null, storage: 'mongo' };
+
+    if (loaded?.storage === 'file' && sourceStorage !== 'mock') {
+      sourceStorage = 'file';
+    }
+
+    if (loaded?.value) {
+      context[requirement.key] = loaded.value;
+      continue;
+    }
+
+    if (allowMockDependencies && IMMERSIVE_RPG_CONTEXT_MOCK_FACTORIES[requirement.key]) {
+      context[requirement.key] = IMMERSIVE_RPG_CONTEXT_MOCK_FACTORIES[requirement.key]({
+        sessionId,
+        playerId,
+        playerName,
+        sceneDefinition: resolvedSceneDefinition
+      });
+      mockedContext.push(requirement.key);
+      sourceStorage = 'mock';
+      continue;
+    }
+
+    if (requirement.required) {
+      missingContext.push(requirement.key);
+    }
   }
 
-  const routeConfig = await getRouteConfig('immersive_rpg_chat');
-  return routeConfig?.promptTemplate || '';
+  return {
+    sceneDefinition: resolvedSceneDefinition,
+    context,
+    missingContext,
+    mockedContext,
+    sourceStorage
+  };
 }
 
 function buildMockImmersiveRpgChatResponse(currentScene, message) {
@@ -1514,9 +1717,32 @@ function buildMockImmersiveRpgChatResponse(currentScene, message) {
     ? {
       nextBeat: currentScene.currentBeat,
       pendingRoll: currentScene.pendingRoll,
+      notebook: currentScene.notebook || {
+        mode: 'roll_request',
+        title: currentScene.pendingRoll?.label || 'Roll Required',
+        prompt: 'The moment still hinges on the unresolved roll.',
+        instruction: currentScene.pendingRoll?.instructions || '',
+        scratchLines: ['Mock mode preserved the active roll state.'],
+        focusTags: ['mock', 'pending'],
+        pendingRoll: currentScene.pendingRoll,
+        diceFaces: [],
+        successTrack: {
+          successes: 0,
+          successesRequired: currentScene.pendingRoll?.successesRequired || 1,
+          passed: null
+        },
+        resultSummary: 'Awaiting roll.'
+      },
+      stageLayout: currentScene.stageLayout || 'focus-left',
+      stageModules: currentScene.stageModules || [],
       gmText: `${currentScene.pendingRoll.instructions} The moment still hinges on that outcome. What do you do?`
     }
     : buildSkeletonSceneTurn(currentScene, message);
+
+  const stagePayload = toImmersiveRpgStageContractPayload({
+    stageLayout: turn.stageLayout,
+    stageModules: turn.stageModules
+  });
 
   return {
     gm_reply: turn.gmText,
@@ -1534,6 +1760,8 @@ function buildMockImmersiveRpgChatResponse(currentScene, message) {
         instructions: turn.pendingRoll.instructions
       }
       : null,
+    notebook: toImmersiveRpgNotebookContractPayload(turn.notebook),
+    ...stagePayload,
     scene_flags_patch: {},
     keeper_notes: [
       'Mock mode uses the deterministic immersive RPG scene scaffold.'
@@ -1589,47 +1817,59 @@ async function createOrLoadImmersiveRpgScene({
   playerName,
   messengerSceneId,
   promptTemplate = '',
-  bootstrapIfMissing = false,
+  routeConfig = null,
+  allowMockDependencies = false,
   forceReset = false
 } = {}) {
   let sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
+  const sceneDefinition = getImmersiveRpgSceneDefinition(
+    sceneDoc?.currentSceneNumber || sceneDoc?.currentSceneKey || null
+  );
   const effectivePlayerId = sceneDoc?.playerId || playerId || DEFAULT_IMMERSIVE_RPG_PLAYER_ID;
   const effectivePlayerName = playerName || '';
-  const { brief, storage } = await loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId);
+  const resolvedContext = await resolveImmersiveRpgSceneContext({
+    sessionId,
+    playerId: effectivePlayerId,
+    playerName: effectivePlayerName,
+    sceneDefinition,
+    allowMockDependencies
+  });
+  const brief = normalizeMessengerSceneBriefForRpg(
+    resolvedContext.context.messenger_scene_brief
+  );
 
-  if (!sceneDoc && !bootstrapIfMissing && !forceReset) {
+  if (resolvedContext.missingContext.length) {
     return {
       sceneDoc: null,
       characterSheetDoc: null,
       bootstrapped: false,
+      ready: false,
+      sceneDefinition: resolvedContext.sceneDefinition,
+      missingContext: resolvedContext.missingContext,
+      mockedContext: resolvedContext.mockedContext,
       messengerSceneBrief: brief,
-      messengerStorage: storage
+      messengerStorage: resolvedContext.sourceStorage
     };
   }
 
-  if (!hasEnoughMessengerSceneBriefForRpg(brief)) {
-    const error = new Error('Messenger scene brief is missing or too thin to seed the immersive RPG scene.');
-    error.code = 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED';
-    error.statusCode = 409;
-    throw error;
-  }
-
-    const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
-      sessionId,
-      playerId: effectivePlayerId,
-      playerName: effectivePlayerName,
-      sourceSceneBrief: brief
-    });
+  const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
+    sessionId,
+    playerId: effectivePlayerId,
+    playerName: effectivePlayerName,
+    sourceSceneBrief: brief
+  });
 
   if (!sceneDoc || forceReset) {
     const bootstrap = buildSceneBootstrap({
       sessionId,
       playerId: effectivePlayerId,
       playerName: effectivePlayerName,
-      messengerSceneId,
+      messengerSceneId: normalizeImmersiveRpgMessengerSceneId(messengerSceneId) || resolvedContext.sceneDefinition.messengerSceneId,
+      sceneDefinition: resolvedContext.sceneDefinition,
       sceneBrief: brief,
       currentCharacterSheet: characterSheetDoc,
-      promptTemplate
+      promptTemplate,
+      routeContract: routeConfig
     });
     sceneDoc = await ImmersiveRpgSceneSession.findOneAndUpdate(
       { sessionId },
@@ -1644,13 +1884,18 @@ async function createOrLoadImmersiveRpgScene({
       sceneDoc,
       characterSheetDoc,
       bootstrapped: true,
+      ready: true,
+      sceneDefinition: resolvedContext.sceneDefinition,
+      missingContext: [],
+      mockedContext: resolvedContext.mockedContext,
       messengerSceneBrief: brief,
-      messengerStorage: storage
+      messengerStorage: resolvedContext.sourceStorage
     };
   }
 
   const compiledPrompt = buildCompiledScenePrompt({
     promptTemplate,
+    routeContract: routeConfig,
     sceneBrief: sceneDoc.sourceSceneBrief || brief,
     characterSheet: characterSheetDoc,
     currentBeat: sceneDoc.currentBeat,
@@ -1662,7 +1907,12 @@ async function createOrLoadImmersiveRpgScene({
       { sessionId },
       {
         $set: {
-          compiledPrompt
+          compiledPrompt,
+          currentSceneNumber: resolvedContext.sceneDefinition.number,
+          currentSceneKey: resolvedContext.sceneDefinition.key,
+          sceneTitle: resolvedContext.sceneDefinition.title,
+          promptKey: resolvedContext.sceneDefinition.promptKey,
+          messengerSceneId: resolvedContext.sceneDefinition.messengerSceneId
         }
       },
       { new: true }
@@ -1673,8 +1923,12 @@ async function createOrLoadImmersiveRpgScene({
     sceneDoc,
     characterSheetDoc,
     bootstrapped: false,
+    ready: true,
+    sceneDefinition: resolvedContext.sceneDefinition,
+    missingContext: [],
+    mockedContext: resolvedContext.mockedContext,
     messengerSceneBrief: brief,
-    messengerStorage: storage
+    messengerStorage: resolvedContext.sourceStorage
   };
 }
 
@@ -1692,9 +1946,8 @@ app.get('/api/immersive-rpg/scene', async (req, res) => {
     const sessionId = normalizeImmersiveRpgSessionId(req.query?.sessionId);
     const playerId = normalizeImmersiveRpgPlayerId(req.query?.playerId);
     const playerName = normalizeImmersiveRpgPlayerName(req.query?.playerName);
-    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(req.query?.messengerSceneId);
-    const bootstrapIfMissing = normalizeBooleanFlag(req.query?.bootstrap, false);
-    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+    const { promptTemplate, routeConfig } = await resolveImmersiveRpgRuntimeConfig();
+    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
 
     if (!sessionId) {
       return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
@@ -1704,69 +1957,38 @@ app.get('/api/immersive-rpg/scene', async (req, res) => {
       sessionId,
       playerId,
       playerName,
-      messengerSceneId,
       promptTemplate,
-      bootstrapIfMissing
+      routeConfig,
+      allowMockDependencies: Boolean(immersiveRpgPipeline?.useMock)
     });
 
     if (!result.sceneDoc) {
-      return res.status(404).json({ message: 'Immersive RPG scene not found for this session.' });
+      return res.status(200).json(buildImmersiveRpgEnvelope(null, null, {
+        sessionId,
+        ready: false,
+        currentSceneNumber: result.sceneDefinition?.number || getDefaultImmersiveRpgSceneDefinition().number,
+        currentSceneKey: result.sceneDefinition?.key || getDefaultImmersiveRpgSceneDefinition().key,
+        missingContext: result.missingContext || [],
+        mockedContext: result.mockedContext || [],
+        storage: 'mongo',
+        sourceStorage: result.messengerStorage
+      }));
     }
 
     return res.status(200).json(buildImmersiveRpgEnvelope(result.sceneDoc, result.characterSheetDoc, {
       sessionId,
-      messengerSceneId,
+      ready: true,
+      currentSceneNumber: result.sceneDefinition?.number || result.sceneDoc?.currentSceneNumber,
+      currentSceneKey: result.sceneDefinition?.key || result.sceneDoc?.currentSceneKey,
       bootstrapped: result.bootstrapped,
+      mockedContext: result.mockedContext || [],
       messengerReady: Boolean(result.messengerSceneBrief?.sceneEstablished),
       storage: 'mongo',
       sourceStorage: result.messengerStorage
     }));
   } catch (error) {
-    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
-      return res.status(error.statusCode || 409).json({ message: error.message });
-    }
     console.error('Error in GET /api/immersive-rpg/scene:', error);
     return res.status(500).json({ message: 'Server error while loading immersive RPG scene.' });
-  }
-});
-
-app.post('/api/immersive-rpg/scene/bootstrap', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
-    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
-    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
-    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
-    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
-
-    if (!sessionId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
-    }
-
-    const result = await createOrLoadImmersiveRpgScene({
-      sessionId,
-      playerId,
-      playerName,
-      messengerSceneId,
-      promptTemplate,
-      bootstrapIfMissing: true,
-      forceReset: normalizeBooleanFlag(body.forceReset, false)
-    });
-
-    return res.status(200).json(buildImmersiveRpgEnvelope(result.sceneDoc, result.characterSheetDoc, {
-      sessionId,
-      messengerSceneId,
-      bootstrapped: true,
-      messengerReady: Boolean(result.messengerSceneBrief?.sceneEstablished),
-      storage: 'mongo',
-      sourceStorage: result.messengerStorage
-    }));
-  } catch (error) {
-    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
-      return res.status(error.statusCode || 409).json({ message: error.message });
-    }
-    console.error('Error in POST /api/immersive-rpg/scene/bootstrap:', error);
-    return res.status(500).json({ message: 'Server error while bootstrapping immersive RPG scene.' });
   }
 });
 
@@ -1783,15 +2005,29 @@ app.post('/api/immersive-rpg/chat', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameters: sessionId or message.' });
     }
 
-    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+    const { promptTemplate, routeConfig } = await resolveImmersiveRpgRuntimeConfig();
+    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
+    const immersiveRpgProvider = typeof immersiveRpgPipeline?.provider === 'string'
+      ? immersiveRpgPipeline.provider
+      : 'openai';
+    const shouldMock = resolveMockMode(body, immersiveRpgPipeline.useMock);
     let result = await createOrLoadImmersiveRpgScene({
       sessionId,
       playerId,
       playerName,
       messengerSceneId,
       promptTemplate,
-      bootstrapIfMissing: true
+      routeConfig,
+      allowMockDependencies: shouldMock
     });
+
+    if (!result.ready || !result.sceneDoc) {
+      return res.status(409).json({
+        message: 'Immersive RPG scene is missing required persisted context.',
+        missingContext: result.missingContext || [],
+        mockedContext: result.mockedContext || []
+      });
+    }
 
     const currentScene = result.sceneDoc;
     const playerEntry = createTranscriptEntry({
@@ -1800,19 +2036,14 @@ app.post('/api/immersive-rpg/chat', async (req, res) => {
       text: message
     });
     const requestTranscript = [...(Array.isArray(currentScene.transcript) ? currentScene.transcript : []), playerEntry];
-    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
-    const immersiveRpgProvider = typeof immersiveRpgPipeline?.provider === 'string'
-      ? immersiveRpgPipeline.provider
-      : 'openai';
-    const shouldMock = resolveMockMode(body, immersiveRpgPipeline.useMock);
 
     let rawResponse;
     if (shouldMock) {
       rawResponse = buildMockImmersiveRpgChatResponse(currentScene, message);
     } else {
-      const routeConfig = await getRouteConfig('immersive_rpg_chat');
       const promptMessages = buildImmersiveRpgPromptMessages({
-        promptTemplate: promptTemplate || routeConfig?.promptTemplate || '',
+        promptTemplate,
+        routeContract: routeConfig,
         sceneBrief: currentScene.sourceSceneBrief,
         characterSheet: result.characterSheetDoc,
         currentBeat: currentScene.currentBeat,
@@ -1840,7 +2071,7 @@ app.post('/api/immersive-rpg/chat', async (req, res) => {
       });
     }
 
-    await validatePayloadForRoute('immersive_rpg_chat', rawResponse);
+    await validatePayloadForRoute(IMMERSIVE_RPG_TURN_CONTRACT_KEY, rawResponse);
     const normalizedResponse = normalizeImmersiveRpgChatResponse(rawResponse);
     if (!normalizedResponse.gmReply) {
       return res.status(502).json({
@@ -1868,6 +2099,7 @@ app.post('/api/immersive-rpg/chat', async (req, res) => {
     const nextTranscript = [...requestTranscript, gmEntry];
     const compiledPrompt = buildCompiledScenePrompt({
       promptTemplate,
+      routeContract: routeConfig,
       sceneBrief: currentScene.sourceSceneBrief,
       characterSheet: result.characterSheetDoc,
       currentBeat: normalizedResponse.currentBeat,
@@ -1890,6 +2122,9 @@ app.post('/api/immersive-rpg/chat', async (req, res) => {
         $set: {
           currentBeat: normalizedResponse.currentBeat,
           pendingRoll: normalizedResponse.pendingRoll,
+          notebook: normalizedResponse.notebook,
+          stageLayout: normalizedResponse.stageLayout,
+          stageModules: normalizedResponse.stageModules,
           compiledPrompt,
           sceneFlags: nextSceneFlags,
           notes: nextNotes
@@ -1942,15 +2177,25 @@ app.post('/api/immersive-rpg/rolls', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
 
-    const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+    const { promptTemplate, routeConfig } = await resolveImmersiveRpgRuntimeConfig();
+    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
     const result = await createOrLoadImmersiveRpgScene({
       sessionId,
       playerId,
       playerName,
       messengerSceneId,
       promptTemplate,
-      bootstrapIfMissing: true
+      routeConfig,
+      allowMockDependencies: Boolean(immersiveRpgPipeline?.useMock)
     });
+
+    if (!result.ready || !result.sceneDoc) {
+      return res.status(409).json({
+        message: 'Immersive RPG scene is missing required persisted context.',
+        missingContext: result.missingContext || [],
+        mockedContext: result.mockedContext || []
+      });
+    }
 
     const currentScene = result.sceneDoc;
     const pendingRoll = currentScene.pendingRoll && typeof currentScene.pendingRoll === 'object'
@@ -1996,6 +2241,7 @@ app.post('/api/immersive-rpg/rolls', async (req, res) => {
     };
     const compiledPrompt = buildCompiledScenePrompt({
       promptTemplate,
+      routeContract: routeConfig,
       sceneBrief: currentScene.sourceSceneBrief,
       characterSheet: result.characterSheetDoc,
       currentBeat: resolution.nextBeat,
@@ -2008,6 +2254,9 @@ app.post('/api/immersive-rpg/rolls', async (req, res) => {
         $set: {
           currentBeat: resolution.nextBeat,
           pendingRoll: null,
+          notebook: resolution.notebook,
+          stageLayout: resolution.stageLayout,
+          stageModules: resolution.stageModules,
           sceneFlags: nextSceneFlags,
           compiledPrompt
         },
@@ -2050,15 +2299,24 @@ app.get('/api/immersive-rpg/character-sheet', async (req, res) => {
     const sessionId = normalizeImmersiveRpgSessionId(req.query?.sessionId);
     const playerId = normalizeImmersiveRpgPlayerId(req.query?.playerId);
     const playerName = normalizeImmersiveRpgPlayerName(req.query?.playerName);
-    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(req.query?.messengerSceneId);
 
     if (!sessionId) {
       return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
 
     const sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
-    const sourceSceneBrief = sceneDoc?.sourceSceneBrief
-      || (await loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId)).brief;
+    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
+    const sceneDefinition = getImmersiveRpgSceneDefinition(
+      sceneDoc?.currentSceneNumber || sceneDoc?.currentSceneKey || null
+    );
+    const resolvedContext = await resolveImmersiveRpgSceneContext({
+      sessionId,
+      playerId,
+      playerName,
+      sceneDefinition,
+      allowMockDependencies: Boolean(immersiveRpgPipeline?.useMock)
+    });
+    const sourceSceneBrief = sceneDoc?.sourceSceneBrief || resolvedContext.context.messenger_scene_brief || {};
     const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
       sessionId,
       playerId,
@@ -2083,15 +2341,24 @@ app.put('/api/immersive-rpg/character-sheet', async (req, res) => {
     const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
     const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
     const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
-    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
 
     if (!sessionId) {
       return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
     }
 
     const sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
-    const sourceSceneBrief = sceneDoc?.sourceSceneBrief
-      || (await loadImmersiveRpgMessengerSceneBrief(sessionId, messengerSceneId)).brief;
+    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
+    const sceneDefinition = getImmersiveRpgSceneDefinition(
+      sceneDoc?.currentSceneNumber || sceneDoc?.currentSceneKey || null
+    );
+    const resolvedContext = await resolveImmersiveRpgSceneContext({
+      sessionId,
+      playerId,
+      playerName,
+      sceneDefinition,
+      allowMockDependencies: Boolean(immersiveRpgPipeline?.useMock)
+    });
+    const sourceSceneBrief = sceneDoc?.sourceSceneBrief || resolvedContext.context.messenger_scene_brief || {};
     const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
       sessionId,
       playerId,
@@ -2101,13 +2368,14 @@ app.put('/api/immersive-rpg/character-sheet', async (req, res) => {
     });
 
     if (sceneDoc) {
-      const promptTemplate = await resolveImmersiveRpgPromptTemplate();
+      const { promptTemplate, routeConfig } = await resolveImmersiveRpgRuntimeConfig();
       await ImmersiveRpgSceneSession.updateOne(
         { sessionId },
         {
           $set: {
             compiledPrompt: buildCompiledScenePrompt({
               promptTemplate,
+              routeContract: routeConfig,
               sceneBrief: sceneDoc.sourceSceneBrief,
               characterSheet: characterSheetDoc,
               currentBeat: sceneDoc.currentBeat,
@@ -3190,6 +3458,8 @@ function cloneDefaultQuestConfig() {
   return JSON.parse(JSON.stringify(DEFAULT_QUEST_CONFIG));
 }
 
+const QUEST_ADVANCE_CONTRACT_KEY = 'quest_advance';
+
 function normalizeQuestScope(payload = {}, fallback = {}) {
   const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim()
     ? payload.sessionId.trim()
@@ -3244,6 +3514,26 @@ function normalizeQuestScreen(screen) {
   const textPromptPlaceholder = typeof screen.textPromptPlaceholder === 'string' && screen.textPromptPlaceholder.trim()
     ? screen.textPromptPlaceholder.trim()
     : 'What do you do?';
+  const screenType = screen.screenType === 'generated' ? 'generated' : 'authored';
+  const parentScreenId = typeof screen.parentScreenId === 'string' ? screen.parentScreenId.trim() : '';
+  const anchorScreenId = typeof screen.anchorScreenId === 'string' ? screen.anchorScreenId.trim() : '';
+  const expectationSummary = typeof screen.expectationSummary === 'string'
+    ? screen.expectationSummary.trim()
+    : '';
+  const continuitySummary = typeof screen.continuitySummary === 'string'
+    ? screen.continuitySummary.trim()
+    : '';
+  const generatedFromPrompt = typeof screen.generatedFromPrompt === 'string'
+    ? screen.generatedFromPrompt.trim()
+    : '';
+  const generatedByPlayerId = typeof screen.generatedByPlayerId === 'string'
+    ? screen.generatedByPlayerId.trim()
+    : '';
+  const generatedAt = typeof screen.generatedAt === 'string' ? screen.generatedAt.trim() : '';
+  const normalizedStage = normalizeImmersiveRpgStagePayload({
+    stage_layout: screen.stage_layout || screen.stageLayout,
+    stage_modules: screen.stage_modules || screen.stageModules
+  });
   const directions = Array.isArray(screen.directions)
     ? screen.directions.map(normalizeQuestDirection).filter(Boolean)
     : [];
@@ -3254,7 +3544,690 @@ function normalizeQuestScreen(screen) {
     imageUrl,
     image_prompt,
     textPromptPlaceholder,
-    directions
+    directions,
+    screenType,
+    parentScreenId,
+    anchorScreenId,
+    expectationSummary,
+    continuitySummary,
+    generatedFromPrompt,
+    generatedByPlayerId,
+    generatedAt,
+    stageLayout: normalizedStage.stageLayout,
+    stageModules: normalizedStage.stageModules
+  };
+}
+
+function truncateQuestText(value, maxLength = 96) {
+  const source = typeof value === 'string' ? value.trim() : '';
+  if (!source) return '';
+  if (source.length <= maxLength) return source;
+  return `${source.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function firstNonEmptyQuestString(...values) {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return '';
+}
+
+function slugifyQuestSegment(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48);
+}
+
+function titleCaseQuestText(value, maxWords = 4) {
+  return String(value || '')
+    .trim()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .slice(0, maxWords)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function buildQuestScreenMap(config = {}) {
+  const map = new Map();
+  const screens = Array.isArray(config?.screens) ? config.screens : [];
+  for (const screen of screens) {
+    if (!screen || typeof screen.id !== 'string') continue;
+    map.set(screen.id, screen);
+  }
+  return map;
+}
+
+function resolveQuestAnchorScreen(screen, screenMap) {
+  if (!screen || !screenMap || !(screenMap instanceof Map)) {
+    return screen || null;
+  }
+
+  const declaredAnchorId = typeof screen.anchorScreenId === 'string' ? screen.anchorScreenId.trim() : '';
+  if (declaredAnchorId && screenMap.has(declaredAnchorId)) {
+    return screenMap.get(declaredAnchorId);
+  }
+
+  let cursor = screen;
+  const visited = new Set();
+  while (cursor && typeof cursor.id === 'string' && !visited.has(cursor.id)) {
+    visited.add(cursor.id);
+    if (cursor.screenType !== 'generated') {
+      return cursor;
+    }
+    const nextParentId = typeof cursor.parentScreenId === 'string' ? cursor.parentScreenId.trim() : '';
+    if (!nextParentId || !screenMap.has(nextParentId)) {
+      break;
+    }
+    cursor = screenMap.get(nextParentId);
+  }
+
+  return screen;
+}
+
+function inferQuestPromptFocus(promptText = '') {
+  const lowered = String(promptText || '').toLowerCase();
+  if (/(speak|ask|call|whisper|say|listen|sing)/.test(lowered)) {
+    return {
+      label: 'Echo Encounter',
+      noun: 'encounter',
+      expectation: 'a response, omen, or witness tied to the place'
+    };
+  }
+  if (/(climb|descend|enter|inside|crawl|squeeze|follow|trail|passage|door|gate|stairs?)/.test(lowered)) {
+    return {
+      label: 'Hidden Passage',
+      noun: 'passage',
+      expectation: 'a navigable route that extends the known area without breaking its geography'
+    };
+  }
+  if (/(touch|take|open|inspect|search|study|examine|read|look|peer)/.test(lowered)) {
+    return {
+      label: 'Close Discovery',
+      noun: 'discovery',
+      expectation: 'a tighter, more specific discovery nested inside the current location'
+    };
+  }
+  return {
+    label: 'New Thread',
+    noun: 'thread',
+    expectation: 'a local branch that reveals more texture in the same area'
+  };
+}
+
+function createGeneratedQuestScreenId(existingIds, parentScreenId, promptText) {
+  const promptSlug = slugifyQuestSegment(promptText) || 'new_thread';
+  const parentSlug = slugifyQuestSegment(parentScreenId) || 'screen';
+  let nextId = `${parentSlug}_${promptSlug}`;
+  let suffix = 2;
+  while (existingIds.has(nextId)) {
+    nextId = `${parentSlug}_${promptSlug}_${suffix}`;
+    suffix += 1;
+  }
+  return nextId;
+}
+
+function buildQuestGeneratedDirectionLabel(promptText) {
+  return truncateQuestText(`Pursue: ${promptText}`, 56);
+}
+
+function buildQuestGeneratedTitle(promptText, focus) {
+  const promptTitle = titleCaseQuestText(promptText, 5);
+  if (promptTitle) {
+    return truncateQuestText(promptTitle, 56);
+  }
+  return focus?.label || 'New Thread';
+}
+
+function buildQuestExpectationSummary({ currentScreen, anchorScreen, promptText, focus }) {
+  const anchorTitle = anchorScreen?.title || currentScreen?.title || 'this area';
+  const actionPreview = truncateQuestText(promptText, 72);
+  return `${anchorTitle} now suggests ${focus.expectation}. This branch was opened by "${actionPreview}".`;
+}
+
+function buildQuestContinuitySummary({ currentScreen, anchorScreen, promptText }) {
+  const fromTitle = currentScreen?.title || 'the current screen';
+  const anchorTitle = anchorScreen?.title || fromTitle;
+  const actionPreview = truncateQuestText(promptText, 72);
+  return `This scene branches from ${fromTitle} and remains anchored to ${anchorTitle}. It grows directly out of "${actionPreview}".`;
+}
+
+function buildQuestGeneratedImagePrompt({ currentScreen, anchorScreen, promptText, focus, title }) {
+  const basePrompt = currentScreen?.image_prompt || anchorScreen?.image_prompt || 'Cinematic fantasy quest scene.';
+  const anchorTitle = anchorScreen?.title || currentScreen?.title || 'the surrounding ruins';
+  return truncateQuestText(
+    `${basePrompt} Continue the same place and lighting, but reveal a newly discovered ${focus.noun} titled "${title}" within ${anchorTitle}. Player action: ${promptText}. Preserve continuity of architecture, weather, and mood.`,
+    600
+  );
+}
+
+function buildQuestGeneratedStage({ screenId, currentScreen, anchorScreen, promptText, title, expectationSummary, continuitySummary }) {
+  const imageUrl = currentScreen?.imageUrl || anchorScreen?.imageUrl || '';
+  return normalizeImmersiveRpgStagePayload({
+    stage_layout: 'focus-left',
+    stage_modules: [
+      {
+        module_id: `${screenId}-illustration`,
+        type: 'illustration',
+        variant: 'landscape',
+        title,
+        caption: expectationSummary,
+        image_url: imageUrl,
+        alt_text: `${title} quest scene`,
+        emphasis: 'primary',
+        rotate_deg: -1,
+        tone: 'quest',
+        body: '',
+        meta: {}
+      },
+      {
+        module_id: `${screenId}-continuity`,
+        type: 'evidence_note',
+        title: 'Continuity',
+        body: continuitySummary,
+        caption: `Anchor: ${anchorScreen?.title || currentScreen?.title || 'Unknown'}`,
+        meta: {}
+      },
+      {
+        module_id: `${screenId}-impulse`,
+        type: 'quote_panel',
+        title: 'Player Impulse',
+        body: truncateQuestText(promptText, 220),
+        caption: 'This action now exists as a persistent branch.',
+        meta: {}
+      }
+    ]
+  });
+}
+
+async function resolveQuestAdvanceRuntimeConfig() {
+  const routeConfig = await getRouteConfig(QUEST_ADVANCE_CONTRACT_KEY);
+  const latestPrompt = await getLatestPromptTemplate('quest_generation');
+
+  return {
+    promptTemplate:
+      latestPrompt?.promptTemplate
+      || routeConfig?.promptCore
+      || routeConfig?.promptTemplate
+      || '',
+    routeConfig
+  };
+}
+
+function buildQuestAdvanceRuntime(pipeline = {}, mocked = false) {
+  return {
+    pipeline: 'quest_generation',
+    provider: typeof pipeline?.provider === 'string' ? pipeline.provider : 'openai',
+    model: typeof pipeline?.model === 'string' ? pipeline.model : '',
+    mocked: Boolean(mocked)
+  };
+}
+
+function buildQuestDirectionsPromptSummary(directions = [], screenMap = new Map()) {
+  const summary = (Array.isArray(directions) ? directions : []).map((direction) => {
+    const targetScreenId = typeof direction?.targetScreenId === 'string' ? direction.targetScreenId.trim() : '';
+    const targetScreen = targetScreenId ? screenMap.get(targetScreenId) : null;
+    return {
+      direction: typeof direction?.direction === 'string' ? direction.direction : '',
+      label: typeof direction?.label === 'string' ? direction.label : '',
+      target_screen_id: targetScreenId,
+      target_screen_title: targetScreen?.title || ''
+    };
+  });
+  return JSON.stringify(summary, null, 2);
+}
+
+function buildQuestTraversalPromptSummary(traversal = [], screenMap = new Map()) {
+  const summary = (Array.isArray(traversal) ? traversal : []).slice(-6).map((entry) => {
+    const fromScreen = entry?.fromScreenId ? screenMap.get(entry.fromScreenId) : null;
+    const toScreen = entry?.toScreenId ? screenMap.get(entry.toScreenId) : null;
+    return {
+      from_screen_id: entry?.fromScreenId || '',
+      from_screen_title: fromScreen?.title || '',
+      to_screen_id: entry?.toScreenId || '',
+      to_screen_title: toScreen?.title || '',
+      direction: entry?.direction || '',
+      prompt_text: entry?.promptText || '',
+      created_at: entry?.createdAt || ''
+    };
+  });
+  return JSON.stringify(summary, null, 2);
+}
+
+function buildQuestAdvancePromptPayload({
+  currentScreen,
+  anchorScreen,
+  promptText,
+  traversal = [],
+  screenMap = new Map()
+}) {
+  return {
+    currentScreenId: currentScreen?.id || '',
+    currentScreenTitle: currentScreen?.title || '',
+    currentScreenType: currentScreen?.screenType || 'authored',
+    currentScreenPrompt: currentScreen?.prompt || '',
+    currentScreenImagePrompt: currentScreen?.image_prompt || '',
+    currentScreenExpectationSummary: currentScreen?.expectationSummary || '',
+    currentScreenContinuitySummary: currentScreen?.continuitySummary || '',
+    currentDirections: buildQuestDirectionsPromptSummary(currentScreen?.directions, screenMap),
+    anchorScreenId: anchorScreen?.id || currentScreen?.id || '',
+    anchorScreenTitle: anchorScreen?.title || currentScreen?.title || '',
+    anchorScreenPrompt: anchorScreen?.prompt || currentScreen?.prompt || '',
+    anchorScreenImagePrompt: anchorScreen?.image_prompt || currentScreen?.image_prompt || '',
+    recentTraversal: buildQuestTraversalPromptSummary(traversal, screenMap),
+    playerPrompt: promptText
+  };
+}
+
+function buildQuestAdvancePromptMessages({ promptTemplate = '', promptPayload = {} }) {
+  const compiledPrompt = renderPromptTemplateString(promptTemplate, promptPayload);
+  return {
+    compiledPrompt,
+    prompts: [
+      { role: 'system', content: compiledPrompt },
+      {
+        role: 'user',
+        content: JSON.stringify(promptPayload)
+      }
+    ]
+  };
+}
+
+function buildQuestAdvanceSeed({ currentScreen, anchorScreen, promptText, screenId = 'quest-seed' }) {
+  const focus = inferQuestPromptFocus(promptText);
+  const title = buildQuestGeneratedTitle(promptText, focus);
+  const expectationSummary = buildQuestExpectationSummary({
+    currentScreen,
+    anchorScreen,
+    promptText,
+    focus
+  });
+  const continuitySummary = buildQuestContinuitySummary({
+    currentScreen,
+    anchorScreen,
+    promptText
+  });
+  const stage = buildQuestGeneratedStage({
+    screenId,
+    currentScreen,
+    anchorScreen,
+    promptText,
+    title,
+    expectationSummary,
+    continuitySummary
+  });
+  return {
+    title,
+    prompt: truncateQuestText(
+      `${currentScreen?.prompt || 'The area shifts.'} ${continuitySummary} ${expectationSummary}`,
+      900
+    ),
+    image_prompt: buildQuestGeneratedImagePrompt({
+      currentScreen,
+      anchorScreen,
+      promptText,
+      focus,
+      title
+    }),
+    text_prompt_placeholder: 'What do you do next in this thread?',
+    expectation_summary: expectationSummary,
+    continuity_summary: continuitySummary,
+    direction_label: buildQuestGeneratedDirectionLabel(promptText),
+    stage_layout: stage.stageLayout,
+    stage_modules: stage.stageModules
+  };
+}
+
+function normalizeQuestAdvancePlan(rawPlan = {}, fallbackPlan = {}) {
+  const source = rawPlan && typeof rawPlan === 'object' ? rawPlan : {};
+  const fallback = fallbackPlan && typeof fallbackPlan === 'object' ? fallbackPlan : {};
+  const normalizedStage = normalizeImmersiveRpgStagePayload({
+    stage_layout: source.stage_layout || source.stageLayout || fallback.stage_layout || fallback.stageLayout,
+    stage_modules: source.stage_modules || source.stageModules || fallback.stage_modules || fallback.stageModules
+  });
+
+  return {
+    title: truncateQuestText(
+      firstNonEmptyQuestString(source.title, fallback.title, 'New Thread'),
+      56
+    ),
+    prompt: truncateQuestText(
+      firstNonEmptyQuestString(source.prompt, fallback.prompt, 'The area shifts around your action.'),
+      900
+    ),
+    image_prompt: truncateQuestText(
+      firstNonEmptyQuestString(source.image_prompt, source.imagePrompt, fallback.image_prompt, fallback.imagePrompt),
+      600
+    ),
+    text_prompt_placeholder: firstNonEmptyQuestString(
+      source.text_prompt_placeholder,
+      source.textPromptPlaceholder,
+      fallback.text_prompt_placeholder,
+      fallback.textPromptPlaceholder,
+      'What do you do next in this thread?'
+    ),
+    expectation_summary: firstNonEmptyQuestString(
+      source.expectation_summary,
+      source.expectationSummary,
+      fallback.expectation_summary,
+      fallback.expectationSummary,
+      'A local branch opens from the current area.'
+    ),
+    continuity_summary: firstNonEmptyQuestString(
+      source.continuity_summary,
+      source.continuitySummary,
+      fallback.continuity_summary,
+      fallback.continuitySummary,
+      'This branch grows directly from the current scene.'
+    ),
+    direction_label: truncateQuestText(
+      firstNonEmptyQuestString(
+        source.direction_label,
+        source.directionLabel,
+        fallback.direction_label,
+        fallback.directionLabel,
+        'Pursue this thread'
+      ),
+      56
+    ),
+    stageLayout: normalizedStage.stageLayout,
+    stageModules: normalizedStage.stageModules
+  };
+}
+
+function buildQuestAdvanceMockedData({
+  promptPayload = {},
+  plan = {},
+  currentScreen,
+  anchorScreen
+}) {
+  return {
+    source: 'deterministic-quest-generator',
+    currentScreenId: currentScreen?.id || '',
+    anchorScreenId: anchorScreen?.id || currentScreen?.id || '',
+    promptPayload,
+    plan: {
+      title: plan.title || '',
+      direction_label: plan.direction_label || plan.directionLabel || '',
+      expectation_summary: plan.expectation_summary || plan.expectationSummary || '',
+      continuity_summary: plan.continuity_summary || plan.continuitySummary || '',
+      image_prompt: plan.image_prompt || plan.imagePrompt || '',
+      stage_layout: plan.stageLayout || plan.stage_layout || '',
+      stage_module_count: Array.isArray(plan.stageModules || plan.stage_modules)
+        ? (plan.stageModules || plan.stage_modules).length
+        : 0
+    }
+  };
+}
+
+function createQuestAdvanceError(message, {
+  code = 'QUEST_ADVANCE_GENERATION_FAILED',
+  statusCode = 502,
+  runtime = null,
+  details = null
+} = {}) {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  if (runtime) {
+    error.runtime = runtime;
+  }
+  if (details) {
+    error.details = details;
+  }
+  return error;
+}
+
+function buildGeneratedQuestScreen(config, currentScreen, promptText, playerId = '', generationPlan = null) {
+  const screenMap = buildQuestScreenMap(config);
+  const anchorScreen = resolveQuestAnchorScreen(currentScreen, screenMap) || currentScreen;
+  const existingIds = new Set(Array.isArray(config?.screens) ? config.screens.map((screen) => screen.id) : []);
+  const screenId = createGeneratedQuestScreenId(existingIds, currentScreen?.id, promptText);
+  const fallbackPlan = buildQuestAdvanceSeed({
+    currentScreen,
+    anchorScreen,
+    promptText,
+    screenId
+  });
+  const plan = normalizeQuestAdvancePlan(generationPlan, fallbackPlan);
+
+  return {
+    screen: {
+      id: screenId,
+      title: plan.title,
+      prompt: plan.prompt,
+      imageUrl: currentScreen?.imageUrl || anchorScreen?.imageUrl || '',
+      image_prompt: plan.image_prompt,
+      textPromptPlaceholder: plan.text_prompt_placeholder,
+      directions: [
+        {
+          direction: 'back',
+          label: `Return to ${currentScreen?.title || 'previous screen'}`,
+          targetScreenId: currentScreen?.id || anchorScreen?.id || ''
+        }
+      ],
+      screenType: 'generated',
+      parentScreenId: currentScreen?.id || '',
+      anchorScreenId: anchorScreen?.id || currentScreen?.id || '',
+      expectationSummary: plan.expectation_summary,
+      continuitySummary: plan.continuity_summary,
+      generatedFromPrompt: truncateQuestText(promptText, 400),
+      generatedByPlayerId: typeof playerId === 'string' ? playerId.trim() : '',
+      generatedAt: new Date().toISOString(),
+      stageLayout: plan.stageLayout,
+      stageModules: plan.stageModules
+    },
+    direction: {
+      direction: 'prompt',
+      label: plan.direction_label,
+      targetScreenId: screenId
+    },
+    plan,
+    anchorScreen
+  };
+}
+
+function applyQuestDirectionAdvance(config, currentScreen, direction) {
+  const targetScreenId = typeof direction?.targetScreenId === 'string' ? direction.targetScreenId.trim() : '';
+  if (!targetScreenId) {
+    return null;
+  }
+  const screenMap = buildQuestScreenMap(config);
+  const targetScreen = screenMap.get(targetScreenId);
+  if (!targetScreen) {
+    return null;
+  }
+  return {
+    config,
+    screen: targetScreen,
+    createdScreen: null,
+    direction
+  };
+}
+
+async function advanceQuest(payload = {}) {
+  const scope = normalizeQuestScope(payload);
+  const config = await ensureQuestConfig(scope);
+  const screenMap = buildQuestScreenMap(config);
+  const currentScreenId = typeof payload.currentScreenId === 'string' ? payload.currentScreenId.trim() : '';
+  const currentScreen = screenMap.get(currentScreenId)
+    || screenMap.get(config.startScreenId)
+    || config.screens[0]
+    || null;
+
+  if (!currentScreen) {
+    const error = new Error('Quest screen not found.');
+    error.statusCode = 404;
+    error.code = 'QUEST_SCREEN_NOT_FOUND';
+    throw error;
+  }
+
+  const playerId = typeof payload.playerId === 'string' ? payload.playerId.trim() : '';
+  const requestedActionType = typeof payload.actionType === 'string' ? payload.actionType.trim().toLowerCase() : '';
+  const actionType = requestedActionType === 'direction' ? 'direction' : 'prompt';
+
+  if (actionType === 'direction') {
+    const requestedTargetScreenId = typeof payload.targetScreenId === 'string' ? payload.targetScreenId.trim() : '';
+    const requestedDirection = typeof payload.direction === 'string' ? payload.direction.trim().toLowerCase() : '';
+    const direction = (Array.isArray(currentScreen.directions) ? currentScreen.directions : []).find((candidate) => {
+      if (!candidate || typeof candidate !== 'object') return false;
+      if (requestedTargetScreenId && candidate.targetScreenId === requestedTargetScreenId) return true;
+      if (requestedDirection && candidate.direction === requestedDirection) return true;
+      return false;
+    });
+
+    if (!direction) {
+      const error = new Error('Quest direction not found.');
+      error.statusCode = 404;
+      error.code = 'QUEST_DIRECTION_NOT_FOUND';
+      throw error;
+    }
+
+    const next = applyQuestDirectionAdvance(config, currentScreen, direction);
+    if (!next?.screen) {
+      const error = new Error('Quest direction target not found.');
+      error.statusCode = 404;
+      error.code = 'QUEST_DIRECTION_TARGET_NOT_FOUND';
+      throw error;
+    }
+
+    const eventResult = await appendQuestTraversalEvent({
+      ...scope,
+      playerId,
+      fromScreenId: currentScreen.id,
+      toScreenId: next.screen.id,
+      direction: direction.direction
+    });
+
+    return {
+      sessionId: scope.sessionId,
+      questId: scope.questId,
+      actionType,
+      config: next.config,
+      screen: next.screen,
+      createdScreen: null,
+      event: eventResult?.event || null,
+      traversalCount: eventResult?.traversalCount || 0,
+      mocked: false,
+      runtime: null,
+      mockedData: null
+    };
+  }
+
+  const promptText = typeof payload.promptText === 'string' ? payload.promptText.trim() : '';
+  if (!promptText) {
+    const error = new Error('Missing required parameter: promptText.');
+    error.statusCode = 400;
+    error.code = 'QUEST_PROMPT_REQUIRED';
+    throw error;
+  }
+
+  const anchorScreen = resolveQuestAnchorScreen(currentScreen, screenMap) || currentScreen;
+  const traversalPayload = await getQuestTraversal(scope);
+  const traversal = Array.isArray(traversalPayload?.traversal) ? traversalPayload.traversal : [];
+  const questPipeline = await getAiPipelineSettings('quest_generation');
+  const runtime = buildQuestAdvanceRuntime(
+    questPipeline,
+    resolveMockMode(payload, questPipeline.useMock)
+  );
+  const promptPayload = buildQuestAdvancePromptPayload({
+    currentScreen,
+    anchorScreen,
+    promptText,
+    traversal,
+    screenMap
+  });
+
+  let generationPlan = null;
+  let mockedData = null;
+  if (runtime.mocked) {
+    generationPlan = buildQuestAdvanceSeed({
+      currentScreen,
+      anchorScreen,
+      promptText
+    });
+    mockedData = buildQuestAdvanceMockedData({
+      promptPayload,
+      plan: generationPlan,
+      currentScreen,
+      anchorScreen
+    });
+  } else {
+    const { promptTemplate } = await resolveQuestAdvanceRuntimeConfig();
+    const promptMessages = buildQuestAdvancePromptMessages({
+      promptTemplate,
+      promptPayload
+    });
+    const rawResponse = await callJsonLlm({
+      prompts: promptMessages.prompts,
+      provider: runtime.provider,
+      model: runtime.model || '',
+      max_tokens: 1800,
+      explicitJsonObjectFormat: true
+    });
+
+    if (!rawResponse || typeof rawResponse !== 'object') {
+      throw createQuestAdvanceError('Quest advance generation failed.', { runtime });
+    }
+
+    try {
+      await validatePayloadForRoute(QUEST_ADVANCE_CONTRACT_KEY, rawResponse);
+    } catch (error) {
+      error.statusCode = error.statusCode || 502;
+      error.runtime = runtime;
+      throw error;
+    }
+
+    generationPlan = rawResponse;
+  }
+
+  const generated = buildGeneratedQuestScreen(config, currentScreen, promptText, playerId, generationPlan);
+  const nextScreens = (Array.isArray(config.screens) ? config.screens : []).map((screen) => {
+    if (screen.id !== currentScreen.id) return screen;
+    return {
+      ...screen,
+      directions: [...(Array.isArray(screen.directions) ? screen.directions : []), generated.direction]
+    };
+  });
+  nextScreens.push(generated.screen);
+
+  const savedConfig = await saveQuestConfig({
+    ...config,
+    sessionId: scope.sessionId,
+    questId: scope.questId,
+    screens: nextScreens
+  }, scope);
+
+  const savedScreenMap = buildQuestScreenMap(savedConfig);
+  const savedScreen = savedScreenMap.get(generated.screen.id) || generated.screen;
+  const eventResult = await appendQuestTraversalEvent({
+    ...scope,
+    playerId,
+    fromScreenId: currentScreen.id,
+    toScreenId: savedScreen.id,
+    direction: 'prompt',
+    promptText
+  });
+
+  return {
+    sessionId: scope.sessionId,
+    questId: scope.questId,
+    actionType,
+    config: savedConfig,
+    screen: savedScreen,
+    createdScreen: savedScreen,
+    event: eventResult?.event || null,
+    traversalCount: eventResult?.traversalCount || 0,
+    mocked: runtime.mocked,
+    runtime,
+    mockedData
   };
 }
 
@@ -4149,6 +5122,39 @@ app.get('/api/quest/traversal', async (req, res) => {
   } catch (error) {
     console.error('Error in GET /api/quest/traversal:', error);
     return res.status(500).json({ message: 'Server error while loading traversal events.' });
+  }
+});
+
+app.post('/api/quest/advance', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const result = await advanceQuest(payload);
+    return res.status(200).json(result);
+  } catch (error) {
+    if (
+      error.code === 'QUEST_SCREEN_NOT_FOUND'
+      || error.code === 'QUEST_DIRECTION_NOT_FOUND'
+      || error.code === 'QUEST_DIRECTION_TARGET_NOT_FOUND'
+    ) {
+      return res.status(error.statusCode || 404).json({ message: error.message });
+    }
+    if (error.code === 'QUEST_PROMPT_REQUIRED') {
+      return res.status(error.statusCode || 400).json({ message: error.message });
+    }
+    if (error.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
+      return res.status(error.statusCode || 502).json({
+        message: resolveSchemaErrorMessage(error, 'Quest advance schema validation failed.'),
+        runtime: error.runtime || null
+      });
+    }
+    if (error.code === 'QUEST_ADVANCE_GENERATION_FAILED') {
+      return res.status(error.statusCode || 502).json({
+        message: error.message,
+        runtime: error.runtime || null
+      });
+    }
+    console.error('Error in POST /api/quest/advance:', error);
+    return res.status(500).json({ message: 'Server error while advancing quest state.' });
   }
 });
 

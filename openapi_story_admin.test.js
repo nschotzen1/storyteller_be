@@ -4,11 +4,12 @@ import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefin
 import { listRouteConfigs } from './services/llmRouteConfigService.js';
 
 describe('story admin API metadata', () => {
-  test('includes storyteller intervention, mission, and immersive RPG GM in runtime AI pipeline definitions', () => {
+  test('includes storyteller intervention, mission, immersive RPG GM, and quest generation in runtime AI pipeline definitions', () => {
     const definitions = getTypewriterPipelineDefinitions();
     const storytellerIntervention = definitions.find((definition) => definition.key === 'storyteller_intervention');
     const storytellerMission = definitions.find((definition) => definition.key === 'storyteller_mission');
     const immersiveRpgGm = definitions.find((definition) => definition.key === 'immersive_rpg_gm');
+    const questGeneration = definitions.find((definition) => definition.key === 'quest_generation');
 
     expect(storytellerIntervention).toBeDefined();
     expect(storytellerIntervention.modelKind).toBe('text');
@@ -19,22 +20,39 @@ describe('story admin API metadata', () => {
     expect(immersiveRpgGm).toBeDefined();
     expect(immersiveRpgGm.modelKind).toBe('text');
     expect(immersiveRpgGm.supportedProviders).toEqual(expect.arrayContaining(['openai', 'anthropic']));
+    expect(questGeneration).toBeDefined();
+    expect(questGeneration.modelKind).toBe('text');
+    expect(questGeneration.supportedProviders).toEqual(expect.arrayContaining(['openai', 'anthropic']));
   });
 
-  test('includes storyteller intervention, immersive RPG GM, storyteller mission and relationship evaluation in prompt definitions', () => {
+  test('includes storyteller intervention, immersive RPG GM, quest generation, storyteller mission and relationship evaluation in prompt definitions', () => {
     const definitions = getTypewriterPromptDefinitions();
 
     expect(definitions.map((definition) => definition.key)).toEqual(
-      expect.arrayContaining(['storyteller_intervention', 'immersive_rpg_gm', 'storyteller_mission', 'relationship_evaluation'])
+      expect.arrayContaining([
+        'storyteller_intervention',
+        'immersive_rpg_gm',
+        'quest_generation',
+        'storyteller_mission',
+        'relationship_evaluation'
+      ])
     );
   });
 
-  test('includes immersive RPG chat and storyteller intervention in route contracts and keeps storyteller key schema fields aligned', async () => {
+  test('includes immersive RPG turn, quest advance, and storyteller intervention in route contracts and keeps storyteller key schema fields aligned', async () => {
     const routeConfigs = await listRouteConfigs();
 
-    expect(routeConfigs.immersive_rpg_chat).toBeDefined();
-    expect(routeConfigs.immersive_rpg_chat.routePath).toBe('/api/immersive-rpg/chat');
-    expect(routeConfigs.immersive_rpg_chat.responseSchema?.properties?.pending_roll).toBeDefined();
+    expect(routeConfigs.immersive_rpg_turn).toBeDefined();
+    expect(routeConfigs.immersive_rpg_turn.routePath).toBe('/api/immersive-rpg/chat');
+    expect(routeConfigs.immersive_rpg_turn.responseSchema?.properties?.pending_roll).toBeDefined();
+    expect(routeConfigs.immersive_rpg_turn.responseSchema?.properties?.notebook).toBeDefined();
+    expect(routeConfigs.immersive_rpg_turn.responseSchema?.properties?.stage_layout).toBeDefined();
+    expect(routeConfigs.immersive_rpg_turn.responseSchema?.properties?.stage_modules).toBeDefined();
+    expect(routeConfigs.quest_advance).toBeDefined();
+    expect(routeConfigs.quest_advance.routePath).toBe('/api/quest/advance');
+    expect(routeConfigs.quest_advance.responseSchema?.properties?.image_prompt).toBeDefined();
+    expect(routeConfigs.quest_advance.responseSchema?.properties?.stage_layout).toBeDefined();
+    expect(routeConfigs.quest_advance.responseSchema?.properties?.stage_modules).toBeDefined();
     expect(routeConfigs.storyteller_typewriter_intervention).toBeDefined();
     expect(routeConfigs.storyteller_typewriter_intervention.routePath).toBe('/api/send_storyteller_typewriter_text');
     expect(
@@ -74,10 +92,10 @@ describe('story admin API metadata', () => {
       '/api/send_storyteller_typewriter_text',
       '/api/send_typewriter_text',
       '/api/immersive-rpg/scene',
-      '/api/immersive-rpg/scene/bootstrap',
       '/api/immersive-rpg/chat',
       '/api/immersive-rpg/rolls',
-      '/api/immersive-rpg/character-sheet'
+      '/api/immersive-rpg/character-sheet',
+      '/api/quest/advance'
     ];
 
     for (const path of expectedPaths) {
@@ -87,6 +105,8 @@ describe('story admin API metadata', () => {
     expect(spec.paths['/api/entities']).toBeDefined();
     expect(spec.components.schemas.NarrativeEntity).toBeDefined();
     expect(spec.components.schemas.NarrativeEntityListResponse).toBeDefined();
+    expect(spec.components.schemas.ImmersiveRpgNotebook).toBeDefined();
+    expect(spec.components.schemas.ImmersiveRpgStageModule).toBeDefined();
     expect(spec.paths['/api/entities'].get.responses['200'].content['application/json'].schema).toEqual(
       { $ref: '#/components/schemas/NarrativeEntityListResponse' }
     );

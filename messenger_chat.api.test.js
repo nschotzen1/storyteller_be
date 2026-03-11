@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 
 let app;
+let coerceLegacyMessengerAiResponse;
+let buildMessengerPromptMessages;
 let ChatMessage;
 let MessengerSceneBrief;
 let TypewriterPromptTemplate;
@@ -106,7 +108,7 @@ beforeAll(async () => {
   mongoServer = await MongoMemoryServer.create();
   const mongoUri = mongoServer.getUri();
 
-  ({ app } = await import('./server_new.js'));
+  ({ app, coerceLegacyMessengerAiResponse, buildMessengerPromptMessages } = await import('./server_new.js'));
   ({ ChatMessage, MessengerSceneBrief, TypewriterPromptTemplate } = await import('./models/models.js'));
 
   if (mongoose.connection.readyState !== 0) {
@@ -138,6 +140,90 @@ afterAll(async () => {
 });
 
 describe('messenger chat routes and admin exposure', () => {
+  test('includes the premade messenger opener as explicit LLM context', () => {
+    const prompts = buildMessengerPromptMessages(
+      [
+        {
+          type: 'initial',
+          sender: 'system',
+          content: 'We are pleased to inform you that the typewriter is ready for dispatch.'
+        },
+        {
+          type: 'user',
+          sender: 'user',
+          content: 'Send it to the attic above the harbor.'
+        },
+        {
+          type: 'response',
+          sender: 'system',
+          content: 'Describe the room more vividly.'
+        },
+        {
+          type: 'user',
+          sender: 'user',
+          content: 'There is a cedar wardrobe with a false back.'
+        }
+      ],
+      'You are the Society courier. Return JSON only.',
+      2
+    );
+
+    expect(prompts[0]).toEqual(
+      expect.objectContaining({
+        role: 'system',
+        content: expect.stringContaining('You are the Society courier')
+      })
+    );
+    expect(prompts[1]).toEqual(
+      expect.objectContaining({
+        role: 'system',
+        content: expect.stringContaining('typewriter is ready for dispatch')
+      })
+    );
+    expect(prompts.slice(2)).toEqual([
+      {
+        role: 'user',
+        content: 'Send it to the attic above the harbor.'
+      },
+      {
+        role: 'assistant',
+        content: 'Describe the room more vividly.'
+      },
+      {
+        role: 'user',
+        content: 'There is a cedar wardrobe with a false back.'
+      }
+    ]);
+  });
+
+  test('coerces legacy final messenger payloads without scene_brief', () => {
+    const coerced = coerceLegacyMessengerAiResponse(
+      {
+        has_chat_ended: true,
+        message_assistant: 'Splendid. The Society has what it needs.'
+      },
+      {
+        message: 'There is a cedar wardrobe with a false back in the attic room above the harbor.',
+        historyDocs: [
+          {
+            sender: 'user',
+            content: 'It will live in an attic room above the harbor beside a rain-marked window.'
+          }
+        ],
+        existingSceneBrief: null
+      }
+    );
+
+    expect(coerced.scene_brief).toEqual(
+      expect.objectContaining({
+        subject: expect.any(String),
+        place_name: expect.any(String),
+        place_summary: expect.any(String),
+        typewriter_hiding_spot: expect.any(String)
+      })
+    );
+  });
+
   test('supports canonical messenger flow, legacy alias, and reset', async () => {
     const sessionId = 'messanger-debug-flow';
 
@@ -174,13 +260,7 @@ describe('messenger chat routes and admin exposure', () => {
     );
     expect(firstReply.body.messages.filter((message) => message.sender === 'user')).toHaveLength(1);
     expect(firstReply.body.has_chat_ended).toBe(false);
-    expect(firstReply.body.sceneBrief).toEqual(
-      expect.objectContaining({
-        subject: expect.any(String),
-        placeSummary: expect.stringMatching(/harbor|attic/i),
-        sceneEstablished: false
-      })
-    );
+    expect(firstReply.body.sceneBrief).toBeNull();
 
     const legacyAliasReply = await invokeRoute('post', '/api/sendMessage', {
       body: {
@@ -223,6 +303,58 @@ describe('messenger chat routes and admin exposure', () => {
     expect(reloadedHistory.body.messages).toHaveLength(1);
     expect(reloadedHistory.body.hasChatEnded).toBe(false);
     expect(reloadedHistory.body.sceneBrief).toBeNull();
+  });
+
+  test('sanitizes stale mongo messenger route configs that still require scene_brief', async () => {
+    const staleConfigSave = await invokeRoute('post', '/api/admin/llm-config/:routeKey', {
+      params: { routeKey: 'messenger_chat' },
+      body: {
+        promptMode: 'manual',
+        promptTemplate: 'You are the Society courier. Return JSON only.',
+        responseSchema: {
+          type: 'object',
+          required: ['has_chat_ended', 'message_assistant', 'scene_brief'],
+          properties: {
+            has_chat_ended: { type: 'boolean' },
+            message_assistant: { type: 'string' },
+            scene_brief: {
+              type: 'object',
+              required: ['subject', 'place_name', 'place_summary', 'typewriter_hiding_spot', 'sensory_details', 'notable_features', 'scene_established'],
+              properties: {
+                subject: { type: 'string' },
+                place_name: { type: 'string' },
+                place_summary: { type: 'string' },
+                typewriter_hiding_spot: { type: 'string' },
+                sensory_details: { type: 'array', items: { type: 'string' } },
+                notable_features: { type: 'array', items: { type: 'string' } },
+                scene_established: { type: 'boolean' }
+              },
+              additionalProperties: true
+            }
+          },
+          additionalProperties: true
+        },
+        updatedBy: 'mongo-stale-config-test'
+      }
+    });
+
+    expect(staleConfigSave.status).toBe(200);
+    expect(staleConfigSave.body.responseSchema.required).toEqual(
+      expect.arrayContaining(['has_chat_ended', 'message_assistant'])
+    );
+    expect(staleConfigSave.body.responseSchema.required).not.toContain('scene_brief');
+
+    const reply = await invokeRoute('post', '/api/messenger/chat', {
+      body: {
+        sessionId: 'mongo-stale-schema',
+        message: 'Send it to the attic room above the harbor.',
+        mocked_api_calls: true
+      }
+    });
+
+    expect(reply.status).toBe(200);
+    expect(reply.body.has_chat_ended).toBe(false);
+    expect(reply.body.sceneBrief).toBeNull();
   });
 
   test('exposes messenger controls through story admin and swagger', async () => {

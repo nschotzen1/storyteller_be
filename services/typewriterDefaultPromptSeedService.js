@@ -253,6 +253,11 @@ async function buildStorytellerMissionPromptTemplate() {
   return routeConfig?.promptTemplate || '';
 }
 
+async function buildQuestGenerationPromptTemplate() {
+  const routeConfig = await getRouteConfig('quest_advance');
+  return routeConfig?.promptTemplate || '';
+}
+
 function buildRelationshipEvaluationPromptTemplate() {
   return `You are a worldbuilding judge for a collaborative storytelling game.
 
@@ -450,6 +455,27 @@ export async function getCurrentTypewriterPromptTemplates() {
       promptTemplate: buildImmersiveRpgGmPromptTemplate(),
       source: 'services/immersiveRpgService.js:getDefaultImmersiveRpgGmPromptTemplate',
       variables: []
+    },
+    quest_generation: {
+      pipelineKey: 'quest_generation',
+      promptTemplate: await buildQuestGenerationPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:quest_advance.promptTemplate',
+      variables: [
+        'currentScreenId',
+        'currentScreenTitle',
+        'currentScreenType',
+        'currentScreenPrompt',
+        'currentScreenImagePrompt',
+        'currentScreenExpectationSummary',
+        'currentScreenContinuitySummary',
+        'currentDirections',
+        'anchorScreenId',
+        'anchorScreenTitle',
+        'anchorScreenPrompt',
+        'anchorScreenImagePrompt',
+        'recentTraversal',
+        'playerPrompt'
+      ]
     },
     storyteller_mission: {
       pipelineKey: 'storyteller_mission',
