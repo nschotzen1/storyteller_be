@@ -113,9 +113,76 @@ const IMMERSIVE_RPG_PENDING_ROLL_SCHEMA = {
   additionalProperties: true
 };
 
-const IMMERSIVE_RPG_CHAT_RESPONSE_SCHEMA = {
+const IMMERSIVE_RPG_NOTEBOOK_SCHEMA = {
   type: 'object',
-  required: ['gm_reply', 'current_beat', 'should_pause_for_choice', 'scene_flags_patch'],
+  required: [
+    'mode',
+    'title',
+    'prompt',
+    'instruction',
+    'scratch_lines',
+    'focus_tags',
+    'pending_roll',
+    'dice_faces',
+    'success_track',
+    'result_summary',
+    'updated_at'
+  ],
+  properties: {
+    mode: {
+      type: 'string',
+      enum: ['idle', 'story_prompt', 'roll_request', 'roll_result', 'discovery']
+    },
+    title: { type: 'string', minLength: 1 },
+    prompt: { type: 'string' },
+    instruction: { type: 'string' },
+    scratch_lines: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    focus_tags: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    pending_roll: {
+      anyOf: [
+        IMMERSIVE_RPG_PENDING_ROLL_SCHEMA,
+        { type: 'null' }
+      ]
+    },
+    dice_faces: {
+      type: 'array',
+      items: { type: 'integer', minimum: 1 }
+    },
+    success_track: {
+      anyOf: [
+        {
+          type: 'object',
+          required: ['successes', 'successes_required', 'passed'],
+          properties: {
+            successes: { type: 'integer', minimum: 0 },
+            successes_required: { type: 'integer', minimum: 1 },
+            passed: {
+              anyOf: [
+                { type: 'boolean' },
+                { type: 'null' }
+              ]
+            }
+          },
+          additionalProperties: true
+        },
+        { type: 'null' }
+      ]
+    },
+    result_summary: { type: 'string' },
+    updated_at: { type: 'string', minLength: 1 }
+  },
+  additionalProperties: true
+};
+
+const IMMERSIVE_RPG_TURN_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['gm_reply', 'current_beat', 'should_pause_for_choice', 'notebook', 'stage_layout', 'stage_modules', 'scene_flags_patch'],
   properties: {
     gm_reply: { type: 'string', minLength: 1 },
     current_beat: { type: 'string', minLength: 1 },
@@ -125,6 +192,41 @@ const IMMERSIVE_RPG_CHAT_RESPONSE_SCHEMA = {
         IMMERSIVE_RPG_PENDING_ROLL_SCHEMA,
         { type: 'null' }
       ]
+    },
+    notebook: IMMERSIVE_RPG_NOTEBOOK_SCHEMA,
+    stage_layout: {
+      type: 'string',
+      enum: ['focus-left', 'focus-right', 'triptych', 'stacked']
+    },
+    stage_modules: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 4,
+      items: {
+        type: 'object',
+        required: ['module_id', 'type', 'variant', 'title', 'caption', 'image_url', 'alt_text', 'emphasis', 'rotate_deg', 'tone', 'body', 'meta'],
+        properties: {
+          module_id: { type: 'string', minLength: 1 },
+          type: {
+            type: 'string',
+            enum: ['illustration', 'evidence_note', 'quote_panel']
+          },
+          variant: { type: 'string', minLength: 1 },
+          title: { type: 'string' },
+          caption: { type: 'string' },
+          image_url: { type: 'string' },
+          alt_text: { type: 'string' },
+          emphasis: { type: 'string' },
+          rotate_deg: { type: 'number', minimum: -12, maximum: 12 },
+          tone: { type: 'string' },
+          body: { type: 'string' },
+          meta: {
+            type: 'object',
+            additionalProperties: true
+          }
+        },
+        additionalProperties: true
+      }
     },
     scene_flags_patch: {
       type: 'object',
@@ -143,6 +245,10 @@ const IMMERSIVE_RPG_CHAT_RESPONSE_SCHEMA = {
   },
   additionalProperties: true
 };
+
+const ROUTE_KEY_ALIASES = Object.freeze({
+  immersive_rpg_turn: Object.freeze(['immersive_rpg_chat'])
+});
 
 const DEFAULT_ROUTE_CONFIGS = {
   worlds_create: {
@@ -385,7 +491,7 @@ Return JSON only in this exact shape:
     promptCore: '',
     fieldDocs: {
       message_assistant: 'The next in-character reply shown in the messenger thread.',
-      scene_brief: 'Running structured capture of the destination scene and the typewriter hideaway.',
+      scene_brief: 'Only return on the final turn, once the destination scene is complete and the chat is ending.',
       'scene_brief.subject': 'Short browsable label for the place.',
       'scene_brief.place_summary': 'Vivid establishing description of the room/place.',
       'scene_brief.typewriter_hiding_spot': 'Concrete concealment location and why it works.'
@@ -405,11 +511,12 @@ Return JSON only in this exact shape:
     },
     outputRules: [
       'Do not end the chat until the place is vivid enough to stage a scene and the typewriter hiding place is concrete.',
+      'Only include scene_brief on the final turn when has_chat_ended is true.',
       'scene_brief.subject must be concise and easy to browse later in Mongo.'
     ],
     responseSchema: {
       type: 'object',
-      required: ['has_chat_ended', 'message_assistant', 'scene_brief'],
+      required: ['has_chat_ended', 'message_assistant'],
       properties: {
         has_chat_ended: { type: 'boolean' },
         message_assistant: { type: 'string', minLength: 1 },
@@ -418,11 +525,11 @@ Return JSON only in this exact shape:
       additionalProperties: true
     }
   },
-  immersive_rpg_chat: {
-    routeKey: 'immersive_rpg_chat',
+  immersive_rpg_turn: {
+    routeKey: 'immersive_rpg_turn',
     routePath: '/api/immersive-rpg/chat',
     method: 'POST',
-    description: 'Reserved GM structured-output contract for the immersive RPG chat loop.',
+    description: 'Reserved GM structured-output contract for the immersive RPG turn loop.',
     promptMode: 'manual',
     promptTemplate: getDefaultImmersiveRpgGmPromptTemplate(),
     promptCore: '',
@@ -430,8 +537,18 @@ Return JSON only in this exact shape:
       gm_reply: 'The next atmospheric GM response shown to the player.',
       current_beat: 'Scene-state beat identifier to persist into Mongo.',
       should_pause_for_choice: 'True when the GM should stop and wait for the PC to answer "What do you do?"',
-      pending_roll: 'Include only when a roll should appear in the notebook panel.',
+      pending_roll: 'Include when a roll must be persisted for mechanical resolution. Keep it aligned with notebook.pending_roll.',
       'pending_roll.context_key': 'Stable key for roll resolution logic.',
+      notebook: 'Structured notebook state for the square paper panel in the UI. Always include it.',
+      'notebook.mode': 'Use story_prompt for atmosphere, roll_request when a roll is pending, and roll_result after a roll has been resolved.',
+      'notebook.pending_roll': 'Duplicate the active roll request here when notebook.mode is roll_request.',
+      'notebook.scratch_lines': 'Short handwritten-style notes or stakes to draw on the notebook.',
+      'notebook.dice_faces': 'Leave empty until a roll result exists.',
+      'notebook.success_track': 'Show current successes and required successes; passed can be null before a roll.',
+      stage_layout: 'Pick a supported visual layout for the stage module area: focus-left, focus-right, triptych, or stacked.',
+      stage_modules: 'Return 1-4 stage modules that the UI can render in the scene collage. Favor 1-3 illustration modules plus optional note/quote support.',
+      'stage_modules[].type': 'Use illustration for pictures, evidence_note for handwritten inserts, and quote_panel for typed or quoted atmospheric fragments.',
+      'stage_modules[].image_url': 'For illustration modules, provide an image or mock asset URL. Leave blank for non-image modules.',
       scene_flags_patch: 'Shallow patch of scene flags to persist after the GM turn.'
     },
     examplePayload: {
@@ -450,6 +567,82 @@ Return JSON only in this exact shape:
         instructions:
           'Roll 5d6 Awareness. Count 5s and 6s as successes. You need 2 successes to reach the journal, see enough of it, and stay unnoticed.'
       },
+      notebook: {
+        mode: 'roll_request',
+        title: 'Journal Margin Test',
+        prompt: 'The journal is within reach, but only for a moment.',
+        instruction:
+          'Roll 5d6 Awareness. Count 5s and 6s as successes. You need 2 successes to reach the journal, see enough of it, and stay unnoticed.',
+        scratch_lines: [
+          'Failure means the stranger catches the movement.',
+          'Success buys only a few seconds with the pages.'
+        ],
+        focus_tags: ['awareness', 'speed', 'concealment'],
+        pending_roll: {
+          context_key: 'journal_retrieval',
+          skill: 'awareness',
+          label: 'Retrieve the journal unnoticed',
+          dice_notation: '5d6',
+          difficulty: 'moderate-high',
+          success_threshold: 5,
+          successes_required: 2,
+          instructions:
+            'Roll 5d6 Awareness. Count 5s and 6s as successes. You need 2 successes to reach the journal, see enough of it, and stay unnoticed.'
+        },
+        dice_faces: [],
+        success_track: {
+          successes: 0,
+          successes_required: 2,
+          passed: null
+        },
+        result_summary: 'Awaiting roll.',
+        updated_at: '2026-03-10T10:00:00.000Z'
+      },
+      stage_layout: 'focus-left',
+      stage_modules: [
+        {
+          module_id: 'opening-terrain',
+          type: 'illustration',
+          variant: 'landscape',
+          title: 'Approach to Home',
+          caption: 'The house is close enough to promise safety, which makes the stranger’s presence worse.',
+          image_url: '/assets/mocks/memory_cards/memory_front_01.png',
+          alt_text: 'Atmospheric illustration of the path leading toward home.',
+          emphasis: 'primary',
+          rotate_deg: -2,
+          tone: 'uneasy',
+          body: '',
+          meta: {}
+        },
+        {
+          module_id: 'opening-journal',
+          type: 'illustration',
+          variant: 'polaroid',
+          title: 'Fallen Journal',
+          caption: 'Half-screened by brush, better seen from the PC angle than the stranger’s.',
+          image_url: '/assets/mocks/memory_cards/memory_front_02.png',
+          alt_text: 'Close view of a journal lying partly hidden near the path.',
+          emphasis: 'secondary',
+          rotate_deg: 3,
+          tone: 'watchful',
+          body: '',
+          meta: {}
+        },
+        {
+          module_id: 'opening-note',
+          type: 'evidence_note',
+          variant: 'scribble',
+          title: 'Keeper Margin',
+          caption: 'Pace the dread.',
+          image_url: '',
+          alt_text: '',
+          emphasis: 'secondary',
+          rotate_deg: -1,
+          tone: 'gaslight',
+          body: 'The place is ordinary enough to be intimate. The intrusion must arrive by degrees, not all at once.',
+          meta: {}
+        }
+      ],
       scene_flags_patch: {
         strangerSpottedPc: false,
         sawJournalSketches: false
@@ -462,10 +655,150 @@ Return JSON only in this exact shape:
     outputRules: [
       'Maintain suggestive, Hitchcock-like dread without removing player agency.',
       'Never present explicit choice lists.',
-      'If a roll is required, include pending_roll and state the stakes plainly.',
+      'If a roll is required, include pending_roll and set notebook.mode to roll_request with matching notebook.pending_roll.',
+      'If no roll is required, notebook should still carry atmospheric handwritten notes for the current state.',
+      'Always choose a supported stage_layout and provide stage_modules that visually reinforce the current beat.',
+      'Stage modules are declarative UI instructions, not prose comments. Keep them renderable by the client without code execution.',
       'GM output must stay in-world and must not mention prompts, APIs, JSON, or tooling.'
     ],
-    responseSchema: IMMERSIVE_RPG_CHAT_RESPONSE_SCHEMA
+    responseSchema: IMMERSIVE_RPG_TURN_RESPONSE_SCHEMA
+  },
+  quest_advance: {
+    routeKey: 'quest_advance',
+    routePath: '/api/quest/advance',
+    method: 'POST',
+    description: 'Generate a persistent quest child screen and matching GM surface for a player prompt.',
+    promptMode: 'manual',
+    promptTemplate: `You are a quest scene designer for a King's Quest-like adventure. Return JSON only.
+The quest uses a stable authored map with local generated child scenes.
+
+Current screen:
+- id: {{currentScreenId}}
+- title: {{currentScreenTitle}}
+- screen_type: {{currentScreenType}}
+- prompt: {{currentScreenPrompt}}
+- image_prompt: {{currentScreenImagePrompt}}
+- expectation_summary: {{currentScreenExpectationSummary}}
+- continuity_summary: {{currentScreenContinuitySummary}}
+- directions: {{currentDirections}}
+
+Anchor screen:
+- id: {{anchorScreenId}}
+- title: {{anchorScreenTitle}}
+- prompt: {{anchorScreenPrompt}}
+- image_prompt: {{anchorScreenImagePrompt}}
+
+Recent traversal:
+{{recentTraversal}}
+
+Player action:
+{{playerPrompt}}
+
+Return one JSON object with these exact keys:
+- title
+- prompt
+- image_prompt
+- text_prompt_placeholder
+- expectation_summary
+- continuity_summary
+- direction_label
+- stage_layout
+- stage_modules
+
+Rules:
+- Keep continuity with the current screen and anchor area.
+- This is a local discovery or branch, not a teleport to a different region.
+- Preserve architecture, weather, time of day, and mood from the current area in image_prompt.
+- direction_label should read like a short UI button label.
+- stage_layout must be one of: focus-left, focus-right, triptych, stacked.
+- stage_modules must be 1 to 4 declarative modules that the existing client can render directly.
+- Do not mention JSON, APIs, prompts, schemas, tools, or models in player-facing text.
+Output JSON only.`,
+    promptCore: '',
+    fieldDocs: {
+      title: 'Short title for the generated child scene.',
+      prompt: 'Main scene text shown on the quest screen.',
+      image_prompt: 'Text-to-image prompt for the generated scene; preserve area continuity.',
+      text_prompt_placeholder: 'Prompt-box helper text for the next action.',
+      expectation_summary: 'Short summary of what the player can expect in this branch.',
+      continuity_summary: 'Short continuity note connecting this branch to the current and anchor screen.',
+      direction_label: 'Label for the new prompt-created direction button on the parent screen.',
+      stage_layout: 'Supported layout for the GM surface: focus-left, focus-right, triptych, or stacked.',
+      stage_modules: 'Declarative 1-4 item stage module array for the existing immersive RPG renderer.'
+    },
+    examplePayload: {
+      title: 'Lantern Niche',
+      prompt:
+        'Behind the cracked mural niche, the lantern has collapsed into a bed of cold brass petals and soot. A draft moves through the stonework from somewhere deeper in the wall, carrying dust, old wax, and the sense that this recess was opened and closed many times before you found it.',
+      image_prompt:
+        'Cinematic fantasy ruined rose-court mural wall at dusk, same weathered stone and twilight mood as the parent scene, but now revealing a cracked lantern niche with collapsed brass petals, soot, drifting dust, and a hidden draft in the wall, tactile realism, moody continuity.',
+      text_prompt_placeholder: 'What do you do with the niche?',
+      expectation_summary: 'A close discovery nested inside the mural wall, with evidence of hidden use and a possible further opening.',
+      continuity_summary: 'This branch remains inside the same gate mural chamber and extends the player’s inspection into a newly revealed recess.',
+      direction_label: 'Inspect the lantern niche',
+      stage_layout: 'focus-left',
+      stage_modules: [
+        {
+          module_id: 'lantern-niche-illustration',
+          type: 'illustration',
+          variant: 'landscape',
+          title: 'Lantern Niche',
+          caption: 'A hidden recess opens behind the mural stones.',
+          image_url: '/assets/mocks/memory_cards/memory_front_01.png',
+          alt_text: 'A hidden lantern niche revealed behind ruined mural stone.',
+          emphasis: 'primary',
+          rotate_deg: -1,
+          tone: 'dusty',
+          body: '',
+          meta: {}
+        },
+        {
+          module_id: 'lantern-niche-note',
+          type: 'evidence_note',
+          variant: 'scribble',
+          title: 'GM Note',
+          caption: 'Local branch',
+          image_url: '',
+          alt_text: '',
+          emphasis: 'secondary',
+          rotate_deg: 1,
+          tone: 'quest',
+          body: 'The discovery stays inside the same geography and suggests a further opening.',
+          meta: {}
+        }
+      ]
+    },
+    outputRules: [
+      'Favor local discoveries, hidden recesses, overheard traces, or tight scene extensions over remote location changes.',
+      'Expectation and continuity summaries should be brief and legible in UI.',
+      'Stage modules are UI instructions, not internal commentary.'
+    ],
+    responseSchema: {
+      type: 'object',
+      required: [
+        'title',
+        'prompt',
+        'image_prompt',
+        'text_prompt_placeholder',
+        'expectation_summary',
+        'continuity_summary',
+        'direction_label',
+        'stage_layout',
+        'stage_modules'
+      ],
+      properties: {
+        title: { type: 'string', minLength: 1 },
+        prompt: { type: 'string', minLength: 1 },
+        image_prompt: { type: 'string', minLength: 1 },
+        text_prompt_placeholder: { type: 'string', minLength: 1 },
+        expectation_summary: { type: 'string', minLength: 1 },
+        continuity_summary: { type: 'string', minLength: 1 },
+        direction_label: { type: 'string', minLength: 1 },
+        stage_layout: IMMERSIVE_RPG_TURN_RESPONSE_SCHEMA.properties.stage_layout,
+        stage_modules: IMMERSIVE_RPG_TURN_RESPONSE_SCHEMA.properties.stage_modules
+      },
+      additionalProperties: true
+    }
   },
   storyteller_mission: {
     routeKey: 'storyteller_mission',
@@ -691,6 +1024,93 @@ function normalizeJsonValue(value, fallback) {
   return deepClone(value);
 }
 
+function normalizeStringList(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(
+    value
+      .map((entry) => `${entry || ''}`.trim())
+      .filter(Boolean)
+  )];
+}
+
+function normalizeMessengerChatResponseSchema(responseSchema, fallbackSchema) {
+  const schema = normalizeJsonValue(responseSchema, fallbackSchema || {});
+  const fallback = normalizeJsonValue(fallbackSchema, {});
+  const schemaProperties = asObject(schema?.properties);
+  const fallbackProperties = asObject(fallback?.properties);
+  const required = normalizeStringList(schema?.required).filter((key) => key !== 'scene_brief');
+
+  return {
+    ...schema,
+    type: 'object',
+    required: normalizeStringList(['has_chat_ended', 'message_assistant', ...required]),
+    properties: {
+      ...fallbackProperties,
+      ...schemaProperties,
+      has_chat_ended: normalizeJsonValue(
+        schemaProperties.has_chat_ended,
+        fallbackProperties.has_chat_ended || { type: 'boolean' }
+      ),
+      message_assistant: normalizeJsonValue(
+        schemaProperties.message_assistant,
+        fallbackProperties.message_assistant || { type: 'string', minLength: 1 }
+      ),
+      scene_brief: normalizeJsonValue(
+        schemaProperties.scene_brief,
+        fallbackProperties.scene_brief
+      )
+    },
+    additionalProperties: schema?.additionalProperties !== undefined ? schema.additionalProperties : true
+  };
+}
+
+function normalizeMessengerChatFieldDocs(fieldDocs, fallbackFieldDocs = {}) {
+  const normalized = normalizeFieldDocs(fieldDocs);
+  return {
+    ...normalized,
+    message_assistant: fallbackFieldDocs.message_assistant || normalized.message_assistant || '',
+    scene_brief: fallbackFieldDocs.scene_brief || normalized.scene_brief || '',
+    'scene_brief.subject': fallbackFieldDocs['scene_brief.subject'] || normalized['scene_brief.subject'] || '',
+    'scene_brief.place_summary': fallbackFieldDocs['scene_brief.place_summary'] || normalized['scene_brief.place_summary'] || '',
+    'scene_brief.typewriter_hiding_spot':
+      fallbackFieldDocs['scene_brief.typewriter_hiding_spot']
+      || normalized['scene_brief.typewriter_hiding_spot']
+      || ''
+  };
+}
+
+function normalizeMessengerChatOutputRules(outputRules, fallbackOutputRules = []) {
+  const rules = normalizeOutputRules(outputRules)
+    .filter((rule) => !/scene_brief|has_chat_ended/i.test(rule));
+  return normalizeStringList([...rules, ...normalizeOutputRules(fallbackOutputRules)]);
+}
+
+function applyRouteConfigCompatibility(routeKey, config = {}, defaultConfig = {}) {
+  if (routeKey !== 'messenger_chat') {
+    return config;
+  }
+
+  return {
+    ...config,
+    responseSchema: normalizeMessengerChatResponseSchema(
+      config.responseSchema,
+      defaultConfig.responseSchema || {}
+    ),
+    fieldDocs: normalizeMessengerChatFieldDocs(
+      config.fieldDocs,
+      defaultConfig.fieldDocs || {}
+    ),
+    outputRules: normalizeMessengerChatOutputRules(
+      config.outputRules,
+      defaultConfig.outputRules || []
+    )
+  };
+}
+
+function getRouteKeyCandidates(routeKey) {
+  return [routeKey, ...(ROUTE_KEY_ALIASES[routeKey] || [])];
+}
+
 function normalizeStoredRouteConfigDoc(routeKey, doc) {
   return {
     id: typeof doc?.id === 'string' && doc.id ? doc.id : randomUUID(),
@@ -772,9 +1192,14 @@ function toRouteConfigPayload(source, defaultConfig) {
     || (doc ? 'mongo' : 'code-default');
   const promptMode = normalizePromptMode(doc?.promptMode || defaults.promptMode);
   const promptCore = normalizeString(doc?.promptCore ?? defaults.promptCore);
-  const fieldDocs = normalizeFieldDocs(doc?.fieldDocs ?? defaults.fieldDocs);
-  const outputRules = normalizeOutputRules(doc?.outputRules ?? defaults.outputRules);
-  const responseSchema = normalizeJsonValue(doc?.responseSchema, defaults.responseSchema || {});
+  const compatibleConfig = applyRouteConfigCompatibility(defaults.routeKey, {
+    responseSchema: normalizeJsonValue(doc?.responseSchema, defaults.responseSchema || {}),
+    fieldDocs: normalizeFieldDocs(doc?.fieldDocs ?? defaults.fieldDocs),
+    outputRules: normalizeOutputRules(doc?.outputRules ?? defaults.outputRules)
+  }, defaults);
+  const fieldDocs = compatibleConfig.fieldDocs;
+  const outputRules = compatibleConfig.outputRules;
+  const responseSchema = compatibleConfig.responseSchema;
   const examplePayload = normalizeJsonValue(doc?.examplePayload, defaults.examplePayload);
   const storedPromptTemplate = normalizeString(doc?.promptTemplate ?? defaults.promptTemplate);
   const compiledPromptTemplate = promptMode === 'contract'
@@ -854,14 +1279,30 @@ function validateExamplePayloadAgainstSchema(examplePayload, schema) {
 }
 
 async function findLatestRouteDoc(routeKey) {
+  const routeKeys = getRouteKeyCandidates(routeKey);
   if (await shouldUseMongoRouteConfigStore()) {
-    return LlmRouteConfigVersion.findOne({ routeKey, isLatest: true })
-      .sort({ version: -1, createdAt: -1 })
-      .lean();
+    const docs = await LlmRouteConfigVersion.find({
+      routeKey: { $in: routeKeys },
+      isLatest: true
+    }).lean();
+
+    return sortRouteConfigDocs(docs).sort((left, right) => {
+      const leftPriority = routeKeys.indexOf(left.routeKey);
+      const rightPriority = routeKeys.indexOf(right.routeKey);
+      return leftPriority - rightPriority;
+    })[0] || null;
   }
 
-  const docs = await getStoredRouteConfigVersions(routeKey);
-  return docs.find((doc) => doc.isLatest) || docs[0] || null;
+  const docs = [];
+  for (const candidate of routeKeys) {
+    docs.push(...(await getStoredRouteConfigVersions(candidate)));
+  }
+
+  return sortRouteConfigDocs(docs).sort((left, right) => {
+    const leftPriority = routeKeys.indexOf(left.routeKey);
+    const rightPriority = routeKeys.indexOf(right.routeKey);
+    return leftPriority - rightPriority;
+  }).find((doc) => doc.isLatest) || sortRouteConfigDocs(docs)[0] || null;
 }
 
 export function getSupportedRouteKeys() {
@@ -869,19 +1310,9 @@ export function getSupportedRouteKeys() {
 }
 
 export async function listRouteConfigs() {
-  const hasMongo = await shouldUseMongoRouteConfigStore();
-  const docs = hasMongo ? await LlmRouteConfigVersion.find({ isLatest: true }).lean() : [];
   const byRouteKey = {};
   for (const routeKey of getSupportedRouteKeys()) {
-    let latestDoc;
-    if (hasMongo) {
-      latestDoc = docs
-        .filter((doc) => doc.routeKey === routeKey)
-        .sort((left, right) => (right.version || 0) - (left.version || 0))[0];
-    } else {
-      const storedDocs = await getStoredRouteConfigVersions(routeKey);
-      latestDoc = storedDocs.find((doc) => doc.isLatest) || storedDocs[0] || null;
-    }
+    const latestDoc = await findLatestRouteDoc(routeKey);
     byRouteKey[routeKey] = toRouteConfigPayload(latestDoc, DEFAULT_ROUTE_CONFIGS[routeKey]);
   }
   return byRouteKey;

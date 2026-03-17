@@ -142,6 +142,13 @@ afterEach(async () => {
   if (TypewriterPromptTemplate) {
     await TypewriterPromptTemplate.deleteMany({});
   }
+  if (app) {
+    await invokeRoute('post', '/api/admin/typewriter/ai-settings/reset', {
+      body: {
+        updatedBy: 'immersive-rpg-test-reset'
+      }
+    });
+  }
 });
 
 afterAll(async () => {
@@ -152,6 +159,23 @@ afterAll(async () => {
 });
 
 describe('immersive RPG scene skeleton APIs', () => {
+  test('returns a blocked scene envelope when required persisted context is missing', async () => {
+    const response = await invokeRoute('get', '/api/immersive-rpg/scene', {
+      query: {
+        sessionId: 'immersive-rpg-missing-context'
+      }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.ready).toBe(false);
+    expect(response.body.currentSceneNumber).toBe(3);
+    expect(response.body.currentSceneKey).toBe('scene_3_mysterious_encounter');
+    expect(response.body.missingContext).toEqual(['messenger_scene_brief']);
+    expect(response.body.mockedContext).toEqual([]);
+    expect(response.body.scene).toBeNull();
+    expect(response.body.characterSheet).toBeNull();
+  });
+
   test('bootstraps the first immersive scene from the messenger scene brief', async () => {
     const sessionId = 'immersive-rpg-boot';
 
@@ -170,8 +194,8 @@ describe('immersive RPG scene skeleton APIs', () => {
       source: 'test'
     });
 
-    const response = await invokeRoute('post', '/api/immersive-rpg/scene/bootstrap', {
-      body: {
+    const response = await invokeRoute('get', '/api/immersive-rpg/scene', {
+      query: {
         sessionId,
         playerName: 'Iris Vale'
       }
@@ -182,6 +206,7 @@ describe('immersive RPG scene skeleton APIs', () => {
     expect(response.body.scene).toEqual(
       expect.objectContaining({
         sessionId,
+        currentSceneNumber: 3,
         currentSceneKey: 'scene_3_mysterious_encounter',
         currentBeat: 'encounter_setup'
       })
@@ -190,10 +215,28 @@ describe('immersive RPG scene skeleton APIs', () => {
     expect(response.body.scene.transcript[0].text).toContain('What do you do?');
     expect(response.body.scene.sourceSceneBrief.placeName).toBe('The Rainpath Guesthouse');
     expect(response.body.characterSheet.playerName).toBe('Iris Vale');
+    expect(response.body.scene.notebook).toEqual(
+      expect.objectContaining({
+        mode: 'story_prompt',
+        title: 'Scene Notes'
+      })
+    );
+    expect(response.body.scene.stageLayout).toBe('focus-left');
+    expect(response.body.scene.stageModules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'illustration'
+        })
+      ])
+    );
 
     const storedScene = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
     expect(storedScene).toBeTruthy();
     expect(storedScene.transcript).toHaveLength(1);
+    expect(storedScene.notebook).toBeTruthy();
+    expect(storedScene.stageLayout).toBe('focus-left');
+    expect(Array.isArray(storedScene.stageModules)).toBe(true);
+    expect(storedScene.stageModules.length).toBeGreaterThan(0);
 
     const storedSheet = await ImmersiveRpgCharacterSheet.findOne({ sessionId, playerId: 'pc' }).lean();
     expect(storedSheet).toBeTruthy();
@@ -229,12 +272,56 @@ describe('immersive RPG scene skeleton APIs', () => {
 
     expect(savedPrompt.status).toBe(201);
 
-    const response = await invokeRoute('post', '/api/immersive-rpg/scene/bootstrap', {
-      body: { sessionId }
+    const response = await invokeRoute('get', '/api/immersive-rpg/scene', {
+      query: { sessionId }
     });
 
     expect(response.status).toBe(200);
     expect(response.body.scene.compiledPrompt).toContain('ADMIN IMMERSE PROMPT HEADER');
+    expect(response.body.scene.compiledPrompt).toContain('Runtime JSON Schema');
+    expect(response.body.scene.compiledPrompt).toContain('"notebook"');
+    expect(response.body.scene.compiledPrompt).toContain('"stage_layout"');
+    expect(response.body.scene.compiledPrompt).toContain('"stage_modules"');
+  });
+
+  test('uses mocked scene dependencies when immersive RPG mock mode is enabled', async () => {
+    const sessionId = 'immersive-rpg-mocked-context';
+
+    const updateSettings = await invokeRoute('put', '/api/admin/typewriter/ai-settings', {
+      body: {
+        updatedBy: 'immersive-rpg-test',
+        pipelines: {
+          immersive_rpg_gm: {
+            useMock: true
+          }
+        }
+      }
+    });
+
+    expect(updateSettings.status).toBe(200);
+
+    const response = await invokeRoute('get', '/api/immersive-rpg/scene', {
+      query: {
+        sessionId,
+        playerName: 'Iris Vale'
+      }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.ready).toBe(true);
+    expect(response.body.mockedContext).toEqual(['messenger_scene_brief']);
+    expect(response.body.scene).toEqual(
+      expect.objectContaining({
+        currentSceneNumber: 3,
+        currentSceneKey: 'scene_3_mysterious_encounter'
+      })
+    );
+    expect(response.body.scene.sourceSceneBrief).toEqual(
+      expect.objectContaining({
+        placeName: 'Basalt Guesthouse, Mourning Cove',
+        source: 'immersive_rpg_mock'
+      })
+    );
   });
 
   test('persists chat turns, creates pending rolls, resolves roll outcomes, and saves the character sheet skeleton', async () => {
@@ -256,10 +343,11 @@ describe('immersive RPG scene skeleton APIs', () => {
     });
 
     const bootstrap = await invokeRoute('get', '/api/immersive-rpg/scene', {
-      query: { sessionId, bootstrap: 'true' }
+      query: { sessionId }
     });
 
     expect(bootstrap.status).toBe(200);
+    expect(bootstrap.body.ready).toBe(true);
     expect(bootstrap.body.scene.transcript).toHaveLength(1);
 
     const chat = await invokeRoute('post', '/api/immersive-rpg/chat', {
@@ -279,8 +367,28 @@ describe('immersive RPG scene skeleton APIs', () => {
         diceNotation: '5d6'
       })
     );
+    expect(chat.body.scene.notebook).toEqual(
+      expect.objectContaining({
+        mode: 'roll_request',
+        title: 'Journal Margin Test'
+      })
+    );
+    expect(chat.body.scene.notebook.pendingRoll).toEqual(
+      expect.objectContaining({
+        contextKey: 'journal_retrieval',
+        diceNotation: '5d6'
+      })
+    );
     expect(chat.body.scene.currentBeat).toBe('journal_attempt');
     expect(chat.body.scene.transcript).toHaveLength(3);
+    expect(chat.body.scene.stageLayout).toBe('focus-left');
+    expect(chat.body.scene.stageModules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: 'A Reach Too Visible'
+        })
+      ])
+    );
 
     const roll = await invokeRoute('post', '/api/immersive-rpg/rolls', {
       body: { sessionId }
@@ -293,6 +401,20 @@ describe('immersive RPG scene skeleton APIs', () => {
     expect(['journal_glimpse', 'caught_at_journal']).toContain(roll.body.scene.currentBeat);
     expect(roll.body.scene.rollLog).toHaveLength(1);
     expect(roll.body.scene.pendingRoll).toBeNull();
+    expect(roll.body.scene.notebook).toEqual(
+      expect.objectContaining({
+        mode: 'roll_result'
+      })
+    );
+    expect(roll.body.scene.notebook.diceFaces).toHaveLength(5);
+    expect(roll.body.scene.notebook.successTrack).toEqual(
+      expect.objectContaining({
+        successesRequired: 2
+      })
+    );
+    expect(roll.body.scene.stageLayout).toMatch(/^(focus-left|focus-right|triptych|stacked)$/);
+    expect(Array.isArray(roll.body.scene.stageModules)).toBe(true);
+    expect(roll.body.scene.stageModules.length).toBeGreaterThan(0);
 
     const updatedSheet = await invokeRoute('put', '/api/immersive-rpg/character-sheet', {
       body: {
@@ -322,5 +444,6 @@ describe('immersive RPG scene skeleton APIs', () => {
     expect(openApi.body.paths['/api/immersive-rpg/scene']).toBeDefined();
     expect(openApi.body.paths['/api/immersive-rpg/rolls']).toBeDefined();
     expect(openApi.body.paths['/api/immersive-rpg/character-sheet']).toBeDefined();
+    expect(openApi.body.components.schemas.ImmersiveRpgStageModule).toBeDefined();
   });
 });

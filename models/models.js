@@ -201,6 +201,10 @@ const QuestScreenGraphSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, index: true },
   questId: { type: String, required: true, default: 'ruined_rose_court', index: true },
   startScreenId: { type: String, required: true },
+  authoringBrief: { type: String, default: '' },
+  phaseGuidance: { type: String, default: '' },
+  visualStyleGuide: { type: String, default: '' },
+  promptRoutes: { type: [mongoose.Schema.Types.Mixed], default: [] },
   screens: { type: [mongoose.Schema.Types.Mixed], default: [] },
   traversalLog: { type: [QuestTraversalEventSchema], default: [] }
 }, { timestamps: true });
@@ -241,6 +245,7 @@ const ImmersiveRpgSceneSessionSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, index: true, unique: true },
   playerId: { type: String, required: true, default: 'pc', index: true },
   messengerSceneId: { type: String, default: 'messanger' },
+  currentSceneNumber: { type: Number, required: true, default: 3 },
   currentSceneKey: { type: String, required: true, default: 'scene_3_mysterious_encounter' },
   sceneTitle: { type: String, required: true, default: 'Scene 3: The Mysterious Encounter' },
   currentBeat: { type: String, default: 'encounter_setup' },
@@ -251,6 +256,9 @@ const ImmersiveRpgSceneSessionSchema = new mongoose.Schema({
   transcript: { type: [ImmersiveRpgTranscriptEntrySchema], default: [] },
   rollLog: { type: [ImmersiveRpgRollSchema], default: [] },
   pendingRoll: { type: mongoose.Schema.Types.Mixed, default: null },
+  notebook: { type: mongoose.Schema.Types.Mixed, default: {} },
+  stageLayout: { type: String, default: 'focus-left' },
+  stageModules: { type: [mongoose.Schema.Types.Mixed], default: [] },
   sceneFlags: { type: mongoose.Schema.Types.Mixed, default: {} },
   notes: { type: [String], default: [] }
 }, { timestamps: true });

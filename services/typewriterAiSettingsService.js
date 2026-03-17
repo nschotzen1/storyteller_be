@@ -21,6 +21,20 @@ const PIPELINE_DEFINITIONS = {
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.TYPEWRITER_CONTINUATION_PROVIDER || DEFAULT_PROVIDER
   },
+  xerofag_inspection: {
+    key: 'xerofag_inspection',
+    label: 'Xerofag Inspection',
+    description: '/api/shouldAllowXerofag',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.TYPEWRITER_XEROFAG_MODEL
+      || process.env.TYPEWRITER_CONTINUATION_MODEL
+      || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.TYPEWRITER_XEROFAG_PROVIDER
+      || process.env.TYPEWRITER_CONTINUATION_PROVIDER
+      || DEFAULT_PROVIDER
+  },
   memory_creation: {
     key: 'memory_creation',
     label: 'Memory Creation',
@@ -103,6 +117,26 @@ const PIPELINE_DEFINITIONS = {
     defaultModel: process.env.OPENAI_IMMERSIVE_RPG_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_IMMERSIVE_RPG_PROVIDER || DEFAULT_PROVIDER
+  },
+  quest_generation: {
+    key: 'quest_generation',
+    label: 'Quest Generation',
+    description: '/api/quest/advance',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_QUEST_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_QUEST_PROVIDER || DEFAULT_PROVIDER
+  },
+  quest_scene_authoring: {
+    key: 'quest_scene_authoring',
+    label: 'Quest Scene Authoring',
+    description: '/api/admin/quest/authoring-draft',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_QUEST_AUTHORING_MODEL || process.env.OPENAI_QUEST_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_QUEST_AUTHORING_PROVIDER || process.env.OPENAI_QUEST_PROVIDER || DEFAULT_PROVIDER
   },
   storyteller_mission: {
     key: 'storyteller_mission',

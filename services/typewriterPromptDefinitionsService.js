@@ -5,6 +5,12 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/send_typewriter_text',
     settingsKey: 'story_continuation'
   },
+  xerofag_inspection: {
+    key: 'xerofag_inspection',
+    label: 'Xerofag inspection',
+    description: '/api/shouldAllowXerofag',
+    settingsKey: 'xerofag_inspection'
+  },
   memory_creation: {
     key: 'memory_creation',
     label: 'Memory creation',
@@ -64,6 +70,18 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     label: 'Immersive RPG GM',
     description: '/api/immersive-rpg/chat GM orchestration prompt',
     settingsKey: 'immersive_rpg_gm'
+  },
+  quest_generation: {
+    key: 'quest_generation',
+    label: 'Quest generation',
+    description: '/api/quest/advance structured branch generation prompt',
+    settingsKey: 'quest_generation'
+  },
+  quest_scene_authoring: {
+    key: 'quest_scene_authoring',
+    label: 'Quest scene authoring',
+    description: '/api/admin/quest/authoring-draft structured scene editor prompt',
+    settingsKey: 'quest_scene_authoring'
   },
   storyteller_mission: {
     key: 'storyteller_mission',
