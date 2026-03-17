@@ -180,6 +180,18 @@ export function buildOpenApiSpec() {
             targetScreenId: { type: 'string', example: 'broken_arch' }
           }
         },
+        QuestPromptRoute: {
+          type: 'object',
+          required: ['targetScreenId', 'patterns'],
+          properties: {
+            id: { type: 'string', example: 'listen_for_signal' },
+            description: { type: 'string', example: 'Typed actions about the signal should resolve to the rock screen.' },
+            fromScreenIds: { type: 'array', items: { type: 'string' } },
+            matchMode: { type: 'string', enum: ['any', 'all'] },
+            patterns: { type: 'array', items: { type: 'string' } },
+            targetScreenId: { type: 'string', example: 'rock_scatter' }
+          }
+        },
         QuestScreen: {
           type: 'object',
           required: ['id', 'title', 'prompt', 'imageUrl', 'image_prompt', 'textPromptPlaceholder', 'directions'],
@@ -192,6 +204,11 @@ export function buildOpenApiSpec() {
               type: 'string',
               example: 'Cinematic fantasy cliff path along ruined rose-court wall at sunset, weathered stones and moody atmosphere.'
             },
+            referenceImagePrompt: { type: 'string' },
+            promptGuidance: { type: 'string' },
+            sceneEndCondition: { type: 'string' },
+            visualContinuityGuidance: { type: 'string' },
+            visualTransitionIntent: { type: 'string', enum: ['inherit', 'drift', 'break'] },
             textPromptPlaceholder: { type: 'string', example: 'What do you say into the dusk?' },
             directions: { type: 'array', items: { $ref: '#/components/schemas/QuestDirection' } },
             screenType: { type: 'string', enum: ['authored', 'generated'] },
@@ -219,6 +236,10 @@ export function buildOpenApiSpec() {
             sessionId: { type: 'string', example: 'rose-court-demo' },
             questId: { type: 'string', example: 'ruined_rose_court' },
             startScreenId: { type: 'string', example: 'cliff_path' },
+            authoringBrief: { type: 'string' },
+            phaseGuidance: { type: 'string' },
+            visualStyleGuide: { type: 'string' },
+            promptRoutes: { type: 'array', items: { $ref: '#/components/schemas/QuestPromptRoute' } },
             screens: { type: 'array', items: { $ref: '#/components/schemas/QuestScreen' } },
             updatedAt: { type: 'string', format: 'date-time' }
           }
@@ -1318,6 +1339,57 @@ export function buildOpenApiSpec() {
           }
         })
       },
+      '/api/shouldAllowXerofag': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Check whether the Xerofag term can be appended to the current narrative',
+          importance: 'High',
+          flow: 'The Xerofag key calls this before inserting the term into the typewriter narrative.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId', 'currentNarrative'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    currentNarrative: { type: 'string' },
+                    candidateNarrative: { type: 'string' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Verdict returned for the Xerofag insertion attempt.',
+              ...jsonResponse({
+                type: 'object',
+                properties: {
+                  allowed: { type: 'boolean' },
+                  mocked: { type: 'boolean' },
+                  runtime: {
+                    type: 'object',
+                    properties: {
+                      pipeline: { type: 'string' },
+                      provider: { type: 'string' },
+                      model: { type: 'string' },
+                      mocked: { type: 'boolean' }
+                    }
+                  }
+                }
+              })
+            },
+            '400': { description: 'Missing sessionId or currentNarrative.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '502': { description: 'LLM Xerofag inspection failed.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
       '/api/typewriter/session/start': {
         post: op({
           tags: ['Sessions'],
@@ -1894,6 +1966,10 @@ export function buildOpenApiSpec() {
                     sessionId: { type: 'string', example: 'rose-court-demo' },
                     questId: { type: 'string', example: 'ruined_rose_court' },
                     startScreenId: { type: 'string' },
+                    authoringBrief: { type: 'string' },
+                    phaseGuidance: { type: 'string' },
+                    visualStyleGuide: { type: 'string' },
+                    promptRoutes: { type: 'array', items: { $ref: '#/components/schemas/QuestPromptRoute' } },
                     screens: { type: 'array', items: { $ref: '#/components/schemas/QuestScreen' } }
                   }
                 }
@@ -1906,6 +1982,59 @@ export function buildOpenApiSpec() {
               ...jsonResponse({ $ref: '#/components/schemas/QuestScreensConfig' })
             },
             '400': { description: 'Invalid quest graph payload.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/admin/quest/authoring-draft': {
+        post: op({
+          tags: ['Quest', 'Admin'],
+          summary: 'Generate reviewable quest-scene authoring patches',
+          importance: 'High',
+          flow: 'Optional AI-assisted authoring route that proposes structured changes to the in-editor quest scene without saving them.',
+          security: [{ AdminApiKey: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    sessionId: { type: 'string', example: 'rose-court-demo' },
+                    questId: { type: 'string', example: 'ruined_rose_court' },
+                    selectedScreenId: { type: 'string', example: 'outer_wall_plateau' },
+                    mode: { type: 'string', enum: ['scene', 'selected_screen', 'fill_missing'] },
+                    config: { $ref: '#/components/schemas/QuestScreensConfig' },
+                    mock: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Draft authoring patch generated.',
+              ...jsonResponse({
+                type: 'object',
+                properties: {
+                  sessionId: { type: 'string' },
+                  questId: { type: 'string' },
+                  mode: { type: 'string' },
+                  selectedScreenId: { type: 'string' },
+                  mocked: { type: 'boolean' },
+                  runtime: { $ref: '#/components/schemas/QuestRuntime' },
+                  summary: { type: 'string' },
+                  changes: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      additionalProperties: true
+                    }
+                  }
+                }
+              })
+            },
             '401': { description: 'Unauthorized.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
             '500': { description: 'Server error.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }

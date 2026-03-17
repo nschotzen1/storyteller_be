@@ -10,12 +10,40 @@ import {
 } from '../ai/openai/promptsUtils.js';
 import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
 import { getDefaultImmersiveRpgGmPromptTemplate } from './immersiveRpgService.js';
+import { getDefaultQuestSceneAuthoringPromptTemplate } from './questSceneAuthoringService.js';
 
 const DEFAULT_ENTITY_COUNT = 4;
 const DEFAULT_MAX_ENTITIES = 8;
 
 function buildStoryContinuationPromptTemplate() {
   return generateTypewriterPrompt('{{current_narrative}}')?.[0]?.content || '';
+}
+
+export function getDefaultXerofagInspectionPromptTemplate() {
+  return `You are judging whether a live narrative should gain one exact in-world term.
+
+Candidate term: "{{candidate_term}}"
+Lore for the term: "{{xerofag_lore}}"
+
+Current narrative:
+"""
+{{current_narrative}}
+"""
+
+Candidate narrative after appending the term:
+"""
+{{candidate_narrative}}
+"""
+
+Return JSON only in exactly this shape:
+{"allowed": true}
+or
+{"allowed": false}
+
+Approve only when adding the candidate term at the end feels natural, supported, and tonally coherent.
+Reject when the addition feels abrupt, redundant, contradictory, unsupported by the current imagery, or like lore being forced into the prose.
+If the current narrative already ends with the same term, return false.
+Do not explain your answer.`;
 }
 
 async function buildMemoryCreationPromptTemplate() {
@@ -258,6 +286,10 @@ async function buildQuestGenerationPromptTemplate() {
   return routeConfig?.promptTemplate || '';
 }
 
+function buildQuestSceneAuthoringPromptTemplate() {
+  return getDefaultQuestSceneAuthoringPromptTemplate();
+}
+
 function buildRelationshipEvaluationPromptTemplate() {
   return `You are a worldbuilding judge for a collaborative storytelling game.
 
@@ -384,6 +416,17 @@ export async function getCurrentTypewriterPromptTemplates() {
         'preferred_font_size_px'
       ]
     },
+    xerofag_inspection: {
+      pipelineKey: 'xerofag_inspection',
+      promptTemplate: getDefaultXerofagInspectionPromptTemplate(),
+      source: 'services/typewriterDefaultPromptSeedService.js:getDefaultXerofagInspectionPromptTemplate',
+      variables: [
+        'current_narrative',
+        'candidate_narrative',
+        'candidate_term',
+        'xerofag_lore'
+      ]
+    },
     memory_creation: {
       pipelineKey: 'memory_creation',
       promptTemplate: await buildMemoryCreationPromptTemplate(),
@@ -475,6 +518,23 @@ export async function getCurrentTypewriterPromptTemplates() {
         'anchorScreenImagePrompt',
         'recentTraversal',
         'playerPrompt'
+      ]
+    },
+    quest_scene_authoring: {
+      pipelineKey: 'quest_scene_authoring',
+      promptTemplate: buildQuestSceneAuthoringPromptTemplate(),
+      source: 'services/questSceneAuthoringService.js:getDefaultQuestSceneAuthoringPromptTemplate',
+      variables: [
+        'sessionId',
+        'questId',
+        'authoringMode',
+        'authoringBrief',
+        'phaseGuidance',
+        'visualStyleGuide',
+        'selectedScreenSnapshot',
+        'adjacentVisualContext',
+        'sceneOutline',
+        'promptRouteSummary'
       ]
     },
     storyteller_mission: {

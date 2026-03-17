@@ -8,9 +8,9 @@ const KEYS_TYPE = {
 
 const OPENAI_DEFAULT_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL || 'gpt-5';
 const OPENAI_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
-const FALLBACK_TEXT_MODELS = ['gpt-5.2-pro', 'gpt-5.2-chat-latest', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'];
+const FALLBACK_TEXT_MODELS = ['gpt-5.3-chat-latest', 'gpt-5.2-pro', 'gpt-5.2-chat-latest', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'];
 const FALLBACK_IMAGE_MODELS = ['gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3'];
-const MAIN_TEXT_MODELS = ['gpt-5.2-pro', 'gpt-5.2-chat-latest', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'];
+const MAIN_TEXT_MODELS = ['gpt-5.3-chat-latest', 'gpt-5.2-pro', 'gpt-5.2-chat-latest', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'];
 const MAIN_IMAGE_MODELS = ['gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3'];
 const ANTHROPIC_DEFAULT_TEXT_MODEL = process.env.ANTHROPIC_TEXT_MODEL || 'claude-3-7-sonnet-latest';
 const FALLBACK_ANTHROPIC_TEXT_MODELS = [

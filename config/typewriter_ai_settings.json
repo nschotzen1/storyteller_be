@@ -1,10 +1,18 @@
 {
-  "updatedAt": "2026-03-11T12:56:27.557Z",
+  "updatedAt": "2026-03-15T16:27:33.998Z",
   "updatedBy": "story-admin-ui",
   "pipelines": {
     "story_continuation": {
       "key": "story_continuation",
       "label": "Story Continuation",
+      "modelKind": "text",
+      "useMock": false,
+      "model": "gpt-5-mini",
+      "provider": "openai"
+    },
+    "xerofag_inspection": {
+      "key": "xerofag_inspection",
+      "label": "Xerofag Inspection",
       "modelKind": "text",
       "useMock": false,
       "model": "gpt-5-mini",
@@ -50,7 +58,7 @@
       "label": "Messenger Chat",
       "modelKind": "text",
       "useMock": false,
-      "model": "gpt-5-mini",
+      "model": "gpt-5.3-chat-latest",
       "provider": "openai"
     },
     "immersive_rpg_gm": {
@@ -60,6 +68,14 @@
       "useMock": false,
       "model": "claude-opus-4-6",
       "provider": "anthropic"
+    },
+    "quest_generation": {
+      "key": "quest_generation",
+      "label": "Quest Generation",
+      "modelKind": "text",
+      "useMock": false,
+      "model": "gpt-5-mini",
+      "provider": "openai"
     },
     "storyteller_mission": {
       "key": "storyteller_mission",

@@ -201,6 +201,10 @@ const QuestScreenGraphSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, index: true },
   questId: { type: String, required: true, default: 'ruined_rose_court', index: true },
   startScreenId: { type: String, required: true },
+  authoringBrief: { type: String, default: '' },
+  phaseGuidance: { type: String, default: '' },
+  visualStyleGuide: { type: String, default: '' },
+  promptRoutes: { type: [mongoose.Schema.Types.Mixed], default: [] },
   screens: { type: [mongoose.Schema.Types.Mixed], default: [] },
   traversalLog: { type: [QuestTraversalEventSchema], default: [] }
 }, { timestamps: true });

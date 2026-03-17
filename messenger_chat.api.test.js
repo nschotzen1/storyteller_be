@@ -196,6 +196,34 @@ describe('messenger chat routes and admin exposure', () => {
     ]);
   });
 
+  test('adds scene-authored guidance for rose-court messenger scenes', () => {
+    const prompts = buildMessengerPromptMessages(
+      [
+        {
+          type: 'initial',
+          sender: 'system',
+          content: '—zzkt— Vale again. The address stands. What transport could you actually manage?'
+        },
+        {
+          type: 'user',
+          sender: 'user',
+          content: 'A motorcycle if the road is decent.'
+        }
+      ],
+      'Return JSON only.',
+      4,
+      'rose_court_clerk_transport'
+    );
+
+    expect(
+      prompts.some((entry) =>
+        entry.role === 'system'
+        && /Clerk Vale/.test(entry.content)
+        && /mode of transportation|mode of transport|transport/i.test(entry.content)
+      )
+    ).toBe(true);
+  });
+
   test('coerces legacy final messenger payloads without scene_brief', () => {
     const coerced = coerceLegacyMessengerAiResponse(
       {
@@ -303,6 +331,106 @@ describe('messenger chat routes and admin exposure', () => {
     expect(reloadedHistory.body.messages).toHaveLength(1);
     expect(reloadedHistory.body.hasChatEnded).toBe(false);
     expect(reloadedHistory.body.sceneBrief).toBeNull();
+  });
+
+  test('supports authored rose-court location and transport messenger beats', async () => {
+    const sessionId = 'rose-court-messenger-flow';
+    const structuredLocationSessionId = 'rose-court-messenger-structured-address-flow';
+
+    const locationHistory = await invokeRoute('get', '/api/messenger/chat', {
+      query: { sessionId, sceneId: 'rose_court_clerk_location' }
+    });
+
+    expect(locationHistory.status).toBe(200);
+    expect(locationHistory.body.messages[0].text).toContain('Clerk Vale');
+    expect(locationHistory.body.messages[0].text).toContain('Earth');
+
+    const invalidLocation = await invokeRoute('post', '/api/messenger/chat', {
+      body: {
+        sessionId,
+        sceneId: 'rose_court_clerk_location',
+        message: 'Send it to heaven above the crystal sea.'
+      }
+    });
+
+    expect(invalidLocation.status).toBe(200);
+    expect(invalidLocation.body.has_chat_ended).toBe(false);
+    expect(invalidLocation.body.reply).toMatch(/On Earth|physical instrument|real earthly destination/i);
+
+    const acceptedLocation = await invokeRoute('post', '/api/messenger/chat', {
+      body: {
+        sessionId,
+        sceneId: 'rose_court_clerk_location',
+        message: 'At 14 Rua da Praia, Paraty, Rio de Janeiro, Brazil.'
+      }
+    });
+
+    expect(acceptedLocation.status).toBe(200);
+    expect(acceptedLocation.body.has_chat_ended).toBe(true);
+    expect(acceptedLocation.body.reply).toMatch(/ledger accepts|next mural|Keep the handset near/i);
+    expect(acceptedLocation.body.sceneBrief).toEqual(
+      expect.objectContaining({
+        sceneEstablished: true,
+        placeName: expect.stringContaining('Rua da Praia')
+      })
+    );
+
+    const structuredLocation = await invokeRoute('post', '/api/messenger/chat', {
+      body: {
+        sessionId: structuredLocationSessionId,
+        sceneId: 'rose_court_clerk_location',
+        message: 'Bar Facal, Avenida 18 de Julio 1249, Montevideo, Uruguay.'
+      }
+    });
+
+    expect(structuredLocation.status).toBe(200);
+    expect(structuredLocation.body.has_chat_ended).toBe(true);
+    expect(structuredLocation.body.reply).toMatch(/ledger accepts|next mural|Keep the handset near/i);
+    expect(structuredLocation.body.sceneBrief).toEqual(
+      expect.objectContaining({
+        sceneEstablished: true,
+        placeName: expect.stringContaining('Bar Facal')
+      })
+    );
+
+    const transportHistory = await invokeRoute('get', '/api/messenger/chat', {
+      query: { sessionId, sceneId: 'rose_court_clerk_transport' }
+    });
+
+    expect(transportHistory.status).toBe(200);
+    expect(transportHistory.body.messages[0].text).toMatch(/Vale again|mode of transportation|mode of transport/i);
+
+    const invalidTransport = await invokeRoute('post', '/api/messenger/chat', {
+      body: {
+        sessionId,
+        sceneId: 'rose_court_clerk_transport',
+        message: 'A dragon, obviously.'
+      }
+    });
+
+    expect(invalidTransport.status).toBe(200);
+    expect(invalidTransport.body.has_chat_ended).toBe(false);
+    expect(invalidTransport.body.reply).toMatch(/No legends|real conveyance|on Earth/i);
+
+    const acceptedTransport = await invokeRoute('post', '/api/messenger/chat', {
+      body: {
+        sessionId,
+        sceneId: 'rose_court_clerk_transport',
+        message: 'A motorcycle, if I had to move quickly.'
+      }
+    });
+
+    expect(acceptedTransport.status).toBe(200);
+    expect(acceptedTransport.body.has_chat_ended).toBe(true);
+    expect(acceptedTransport.body.reply).toMatch(/motorcycle|entered in the margin|Keep moving/i);
+    expect(acceptedTransport.body.sceneBrief).toEqual(
+      expect.objectContaining({
+        sceneEstablished: true,
+        notableFeatures: expect.arrayContaining([
+          expect.stringMatching(/transport the player can manage: motorcycle/i)
+        ])
+      })
+    );
   });
 
   test('sanitizes stale mongo messenger route configs that still require scene_brief', async () => {

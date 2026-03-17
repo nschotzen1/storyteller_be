@@ -75,6 +75,7 @@ import {
 } from './services/typewriterPromptConfigService.js';
 import {
   getCurrentTypewriterPromptTemplates,
+  getDefaultXerofagInspectionPromptTemplate,
   seedCurrentTypewriterPromptTemplates
 } from './services/typewriterDefaultPromptSeedService.js';
 import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefinitionsService.js';
@@ -121,10 +122,24 @@ import {
   toImmersiveRpgStageContractPayload,
   toImmersiveRpgScenePayload
 } from './services/immersiveRpgService.js';
+import {
+  coerceQuestAdvanceContractPayload,
+  normalizeQuestAdvancePlan
+} from './services/questAdvanceContractService.js';
+import {
+  QUEST_SCENE_AUTHORING_PIPELINE_KEY,
+  buildMockQuestSceneAuthoringDraft,
+  buildQuestSceneAuthoringPromptMessages,
+  buildQuestSceneAuthoringPromptPayload,
+  buildQuestSceneAuthoringRuntime,
+  flattenQuestSceneAuthoringChanges,
+  getDefaultQuestSceneAuthoringPromptTemplate,
+  normalizeQuestSceneAuthoringDraft
+} from './services/questSceneAuthoringService.js';
 
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '12mb' }));
 app.use(cors());
 
 const PORT = process.env.PORT || 5001;
@@ -141,6 +156,66 @@ const ASSETS_ROOTS = Array.from(new Set(ASSETS_ROOT_CANDIDATES)).filter((candida
 );
 if (ASSETS_ROOTS.length === 0) {
   ASSETS_ROOTS.push(path.resolve(process.cwd(), 'assets'));
+}
+const QUEST_SCENE_UPLOAD_SUBDIRECTORY = 'quest_scene_uploads';
+const MAX_QUEST_SCENE_UPLOAD_BYTES = 8 * 1024 * 1024;
+const QUEST_SCENE_UPLOAD_MIME_TYPES = new Map([
+  ['image/png', '.png'],
+  ['image/jpeg', '.jpg'],
+  ['image/jpg', '.jpg'],
+  ['image/webp', '.webp'],
+  ['image/gif', '.gif']
+]);
+
+function parseQuestSceneImageDataUrl(dataUrl = '') {
+  const match = String(dataUrl || '').match(/^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([\s\S]+)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const mimeType = String(match[1] || '').trim().toLowerCase();
+  const base64Payload = String(match[2] || '').replace(/\s+/g, '');
+  if (!base64Payload) {
+    return null;
+  }
+
+  const buffer = Buffer.from(base64Payload, 'base64');
+  if (!buffer.length) {
+    return null;
+  }
+
+  return {
+    mimeType,
+    buffer
+  };
+}
+
+function buildQuestSceneUploadAssetPath({
+  sessionId = '',
+  questId = '',
+  screenId = '',
+  filename = '',
+  mimeType = 'image/png'
+} = {}) {
+  const extension = QUEST_SCENE_UPLOAD_MIME_TYPES.get(mimeType) || '.png';
+  const sessionSegment = slugifyQuestSegment(sessionId) || 'session';
+  const questSegment = slugifyQuestSegment(questId) || 'quest';
+  const filenameBase = slugifyQuestSegment(path.parse(String(filename || '')).name)
+    || slugifyQuestSegment(screenId)
+    || 'scene';
+  const storedFilename = `${filenameBase}_${Date.now()}${extension}`;
+  const relativeDirectory = path.posix.join(
+    QUEST_SCENE_UPLOAD_SUBDIRECTORY,
+    sessionSegment,
+    questSegment
+  );
+
+  return {
+    storedFilename,
+    absoluteDir: path.join(ASSETS_ROOTS[0], relativeDirectory),
+    absolutePath: path.join(ASSETS_ROOTS[0], relativeDirectory, storedFilename),
+    imageUrl: `/assets/${path.posix.join(relativeDirectory, storedFilename)}`
+  };
 }
 
 function collectTypewriterPageImages(assetRoots, subDirectory, allowedExtensions) {
@@ -172,6 +247,8 @@ function collectTypewriterPageImages(assetRoots, subDirectory, allowedExtensions
 
 const DEFAULT_QUEST_ID = 'ruined_rose_court';
 const DEFAULT_QUEST_SESSION_ID = 'rose-court-demo';
+const ROSE_COURT_PROLOGUE_QUEST_ID = 'rose_court_prologue_phase_1';
+const ROSE_COURT_PROLOGUE_SESSION_ID = 'rose-court-prologue-demo';
 const MOCK_STORYTELLER_ILLUSTRATION_URLS = [
   '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png',
   '/assets/mocks/storyteller_illustrations/ashen_inkbinder.png',
@@ -221,9 +298,45 @@ const TYPEWRITER_DEFAULT_SERVER_BACKGROUNDS = [
   '/assets/mocks/memory_cards/memory_front_03.png'
 ];
 const DEFAULT_MESSENGER_SCENE_ID = 'messanger';
+const ROSE_COURT_LOCATION_MESSENGER_SCENE_ID = 'rose_court_clerk_location';
+const ROSE_COURT_TRANSPORT_MESSENGER_SCENE_ID = 'rose_court_clerk_transport';
 const DEFAULT_MESSENGER_HISTORY_LIMIT = 14;
 const MESSENGER_INITIAL_MESSAGE =
-  'We are pleased to inform you that the typewriter, as discussed, is ready for dispatch. The Society spares no expense in ensuring that our esteemed members receive only the finest instruments for their craft. We trust you are still expecting it? Of course you are. Just a quick confirmation before we proceed. Where shall we send it?';
+  'We are pleased to inform you that the typewriter, as discussed, is ready for dispatch. The Society spares no expense where its instruments are concerned. We trust you are still expecting it. Of course. One small practical matter before we release it to the courier: are you in a town, or somewhere a little more removed?';
+const ROSE_COURT_LOCATION_INITIAL_MESSAGE =
+  '—zzkt— Hello? At last. Do not discard that handset. Clerk Vale, Storytellers Society. Are you standing by the Wall of the Hall of the Rose? Good. Listen carefully. Before the typewriter can be dispatched, the ledger requires a precise destination on Earth. Earth, sir. Not allegory. Not heaven. Not myth. Where shall we send it?';
+const ROSE_COURT_TRANSPORT_INITIAL_MESSAGE =
+  '—zzkt— Vale again. You are further in, then. Good; keep your voice low. The address stands, though I like the sound of it less each time I repeat it. One practical answer quickly: if the typewriter had to move in haste, what real mode of transportation could you actually manage yourself?';
+const ROSE_COURT_LOCATION_MESSENGER_GUIDANCE =
+  'You are Clerk Vale of the Storytellers Society during the first rose-court handset contact. Your job is narrow: secure one precise, real-world Earth destination for the typewriter. You are relieved the handset was answered, formal by training, discreet by habit, and anxious enough to leak through the seams. You must refuse mythic, celestial, allegorical, or vague answers. You may sound concerned for the typewriter\'s welfare, the weather, the route, and the practicalities of a discreet dispatch. Keep replies compact, pointed, and in-character. Once the user gives a precise earthly destination, confirm it, note that you will renew contact when the next mural is found, and end the exchange cleanly.';
+const ROSE_COURT_TRANSPORT_MESSENGER_GUIDANCE =
+  'You are Clerk Vale of the Storytellers Society during the second rose-court handset contact from deeper in the court. The destination has already been accepted. Your only job now is to obtain one real mode of transportation the player could personally manage in haste with the typewriter. You are more openly worried than before, but still precise and discreet. Refuse fantastical or evasive answers. Keep the question urgent, practical, and shortwave-fragile. Once the player names a workable real transport mode, acknowledge it, let your concern show for a moment, and let the transmission die.';
+const MESSENGER_SCENE_AUTHORED_GUIDANCE_BY_SCENE_ID = Object.freeze({
+  [ROSE_COURT_LOCATION_MESSENGER_SCENE_ID]: ROSE_COURT_LOCATION_MESSENGER_GUIDANCE,
+  [ROSE_COURT_TRANSPORT_MESSENGER_SCENE_ID]: ROSE_COURT_TRANSPORT_MESSENGER_GUIDANCE
+});
+const ROSE_COURT_FANTASY_LOCATION_PATTERN =
+  /\b(heaven|hell|elysium|fae|faerie|fairyland|dreamlands|narnia|middle[- ]?earth|westeros|gondor|rivendell|mordor|oz|atlantis|hyrule|tamriel|skyrim|mars|moon|venus|jupiter|saturn)\b/i;
+const ROSE_COURT_PRECISE_LOCATION_PREPOSITION_PATTERN =
+  /\b(in|near|at|on|by|above|below|outside|inside|between|next to)\b/i;
+const ROSE_COURT_LOCATION_DESCRIPTOR_PATTERN =
+  /\b(street|st|road|rd|avenue|ave|boulevard|blvd|lane|ln|drive|dr|square|sq|plaza|route|ruta|calle|way|quay|harbor|harbour|port|station|terminal|city|town|village|district|province|state|county|country|island|bay|coast|river|lake|forest|woods|mount|mountain|cafe|coffee shop)\b/i;
+const ROSE_COURT_FANTASY_TRANSPORT_PATTERN =
+  /\b(dragon|gryphon|griffin|wyvern|pegasus|phoenix|portal|teleport|teleportation|broom|airship|spell|magic|levitation)\b/i;
+const ROSE_COURT_TRANSPORT_PATTERN =
+  /\b(train|car|truck|van|motorcycle|motorbike|bike|bicycle|scooter|bus|tram|subway|underground|ferry|boat|ship|canoe|kayak|plane|airplane|helicopter|horse|taxi|jeep|4x4|snowmobile)\b/i;
+const ROSE_COURT_LOCATION_FEATURE_PATTERNS = [
+  { pattern: /\b(attic|roof|skyscraper|top floor)\b/i, label: 'an elevated room or rooftop edge' },
+  { pattern: /\b(cabin|woods|forest|pine|cedar)\b/i, label: 'woodland shelter and timber nearby' },
+  { pattern: /\b(cottage|garden|country|pasture|field)\b/i, label: 'domestic calm and cultivated ground' },
+  { pattern: /\b(balcony|terrace|porch)\b/i, label: 'an exposed threshold open to air' },
+  { pattern: /\b(waterfall|river|harbor|harbour|sea|coast|shore|lake)\b/i, label: 'water within sight or earshot' },
+  { pattern: /\b(wind|gust|storm|rain|monsoon|snow)\b/i, label: 'weather that makes itself known' },
+  { pattern: /\b(village|town|city|street|lane|road|district)\b/i, label: 'a legible earthly settlement' },
+  { pattern: /\b(mountain|slope|valley|plateau|cliff)\b/i, label: 'strong surrounding terrain' }
+];
+const ROSE_COURT_OPENING_SCENE_GUIDANCE =
+  'Run the opening as a ceremonial threshold disguised as a ruin. The tone should feel like a lost late-1980s quest game: melancholy, tactile, mysterious, and visually specific rather than loud. Begin with dusk, wind, erosion, and the three house-murals on the rose-petal wall. Let the player examine freely and reward curiosity with sensory detail, craftsmanship, and small discoveries instead of sudden plot leaps. The radio-static must remain faint until the player listens for it, questions it, or searches for its source. Once pursued, it should lead to the hidden handset among the rocks. The handset is not a modern earthly phone: it is a strange retro device of brass, weathered metal, and dwarven-gnomish craftsmanship that nonetheless clearly works. The clerk of the Storytellers\' Society should sound relieved, formal, discreet, and slightly anxious; he must insist on a precise real-world Earth location and reject fantastical destinations politely but firmly. After the location is confirmed, the court may answer with new murals that are all faithful reinterpretations of that same earthly place. Do not reveal later beats before they are reached: the inner court, the urgent transport question, the falcon, the well of dissolving lines, the ten-word parchment, and the blackout ending should arrive in sequence. Avoid combat, lore dumps, or random fantasy detours. Keep the feeling that the court responds to the player\'s choices without ever fully explaining itself.';
 const TYPEWRITER_DEFAULT_FONTS = [
   { font: "'Uncial Antiqua', serif", font_size: '1.8rem', font_color: '#3b1d15' },
   { font: "'IM Fell English SC', serif", font_size: '1.9rem', font_color: '#2a120f' },
@@ -243,10 +356,62 @@ const TYPEWRITER_MIN_FONT_SIZE_PX = 28;
 const TYPEWRITER_MIN_FONT_SIZE_REM = 1.75;
 const TYPEWRITER_DEFAULT_FONT_SIZE = '1.9rem';
 const TYPEWRITER_PREFERRED_FONT_SIZE_PX = 30;
+const XEROFAG_CANDIDATE_TERM = 'The Xerofag';
+const XEROFAG_LORE = 'The Xerofag are a group of undead canines.';
+const XEROFAG_CANINE_KEYWORDS = [
+  'canine',
+  'dog',
+  'dogs',
+  'fang',
+  'fangs',
+  'hound',
+  'hounds',
+  'howl',
+  'howling',
+  'muzzle',
+  'pack',
+  'paw',
+  'paws',
+  'snout',
+  'tail',
+  'wolf',
+  'wolves'
+];
+const XEROFAG_UNDEAD_KEYWORDS = [
+  'ashen bones',
+  'bone',
+  'bones',
+  'carrion',
+  'corpse',
+  'corpses',
+  'crypt',
+  'crypts',
+  'death',
+  'ghoul',
+  'ghouls',
+  'ghost',
+  'ghosts',
+  'grave',
+  'graves',
+  'gravepit',
+  'haunted',
+  'necrotic',
+  'revenant',
+  'revenants',
+  'rot',
+  'rotting',
+  'skeletal',
+  'skeleton',
+  'undead',
+  'zombie',
+  'zombies'
+];
 const DEFAULT_QUEST_CONFIG = {
   sessionId: DEFAULT_QUEST_SESSION_ID,
   questId: DEFAULT_QUEST_ID,
   startScreenId: 'outer_gate_murals',
+  authoringBrief: '',
+  visualStyleGuide: '',
   screens: [
     {
       id: 'outer_gate_murals',
@@ -500,6 +665,238 @@ const DEFAULT_QUEST_CONFIG = {
   ]
 };
 
+function buildRoseCourtPrologueQuestConfig() {
+  return {
+    sessionId: ROSE_COURT_PROLOGUE_SESSION_ID,
+    questId: ROSE_COURT_PROLOGUE_QUEST_ID,
+    startScreenId: 'outer_wall_plateau',
+    authoringBrief:
+      'Opening scene: a player arrives before the outer wall of the Hall of the Rose, notices three weather-eaten murals and a faint static signal, discovers a dwarven-gnomish handset hidden among rocks, and is pressed by Clerk Vale to name a precise real-world Earth destination for a custom typewriter.',
+    phaseGuidance: ROSE_COURT_OPENING_SCENE_GUIDANCE,
+    visualStyleGuide:
+      'Late-1980s quest-game framing, tactile ruined stone, dusk wind, eroded mural craftsmanship, restrained radio-static unease, and deliberate continuity from one mural or threshold to the next.',
+    promptRoutes: [
+      {
+        id: 'rose-court-follow-signal',
+        description: 'Move the player from the first wall toward the source of the faint transmission.',
+        fromScreenIds: [
+          'outer_wall_plateau',
+          'mural_attic_panel',
+          'mural_cabin_panel',
+          'mural_cottage_panel',
+          'rock_scatter'
+        ],
+        matchMode: 'any',
+        patterns: [
+          '\\b(sound|static|radio|signal|transmission|crackle|noise|hiss)\\b',
+          'where .*coming from',
+          'what.*hear',
+          'listen.*(carefully|closer|again)?'
+        ],
+        targetScreenId: 'rock_scatter'
+      },
+      {
+        id: 'rose-court-recover-handset',
+        description: 'Let the player find the hidden handset by searching the rocks or naming the device.',
+        fromScreenIds: [
+          'outer_wall_plateau',
+          'mural_attic_panel',
+          'mural_cabin_panel',
+          'mural_cottage_panel',
+          'rock_scatter'
+        ],
+        matchMode: 'any',
+        patterns: [
+          '\\b(phone|handset|device|receiver)\\b',
+          '\\b(search|check|look|inspect|reach|grab|take|pick up|lift|move)\\b.*\\b(rock|stone|behind)\\b',
+          '\\b(rock|stone|behind)\\b.*\\b(search|check|look|inspect|reach|grab|take|pick up|lift|move)\\b'
+        ],
+        targetScreenId: 'phone_found'
+      }
+    ],
+    screens: [
+      {
+        id: 'outer_wall_plateau',
+        title: 'Wall of the Hall of the Rose',
+        prompt:
+          'Evening wind crosses the plateau. Ahead, a crumbling wall opens like stone rose petals, bearing three murals half-lost to weather and time. One shows an attic high above a city, one a cabin in dark woods, one a country cottage holding onto its grace. Beneath the wind, a faint radio hiss worries the air.',
+        imageUrl: '/ruin_south_a.png',
+        image_prompt:
+          'Retro Sierra-like fantasy quest opening screen, evening plateau before a crumbling wall shaped like rose petals, three ancient murals barely visible, faint uncanny radio-static implied, windswept dusk atmosphere.',
+        referenceImagePrompt:
+          'Wide player-view adventure-game frame at dusk on a strange plateau. A crumbling outer wall shaped like giant rose petals dominates the scene. Three ancient murals are barely readable in the weathered stone: one attic high over a city, one remote forest cabin, one graceful country cottage. Scattered rocks in the foreground. No characters. Windy, melancholic, tactile, late-1980s quest-game mood.',
+        textPromptPlaceholder: 'Examine the murals, ask about the hiss, or search the plateau.',
+        expectationSummary: 'An outer threshold: wind, murals, and the hint of a hidden transmission.',
+        continuitySummary: 'The opening gives you only weather, stone, and a sound that should not be here.',
+        promptGuidance:
+          'Keep this opening screen observational. The player should meet the court through wind, dusk, erosion, and almost-erased craftsmanship. The static is real but still easy to miss; do not make it dominant until the player listens for it or asks about it.',
+        directions: [
+          { direction: 'west', label: 'Inspect the attic mural', targetScreenId: 'mural_attic_panel' },
+          { direction: 'north', label: 'Inspect the woodland cabin mural', targetScreenId: 'mural_cabin_panel' },
+          { direction: 'east', label: 'Inspect the country cottage mural', targetScreenId: 'mural_cottage_panel' },
+          { direction: 'south', label: 'Search the scattered rocks', targetScreenId: 'rock_scatter' }
+        ]
+      },
+      {
+        id: 'mural_attic_panel',
+        title: 'Mural of the High Attic',
+        prompt:
+          'The left mural shows a narrow attic perched above black roofs and needled towers. The workmanship is exquisite, but weather has eaten whole corners from it.',
+        imageUrl: '/ruin_south_a.png',
+        image_prompt:
+          'Ancient mural panel of a hidden attic atop a dense late-industrial skyline, cracked plaster, eroded pigments, romantic urban height, weather damage and age.',
+        referenceImagePrompt:
+          'Close study of the left mural carved into an ancient ruin wall: a narrow attic room perched above dark city roofs and thin tower spires, half-lost to erosion and cracked plaster. Stone dust, missing sections, elegant craftsmanship surviving ruin. Romantic verticality, no living figures.',
+        textPromptPlaceholder: 'What detail do you study in the attic mural?',
+        expectationSummary: 'A vertical refuge, elegant and precarious, survives behind the broken plaster.',
+        continuitySummary: 'This is one of the first three murals on the outer wall.',
+        promptGuidance:
+          'Emphasize height, lookout, and urban isolation. This mural should suggest a writer\'s refuge above the world, not a magical portal. Keep details specific but partial, as though time has eaten away the most useful facts.',
+        directions: [
+          { direction: 'back', label: 'Step back to the wall', targetScreenId: 'outer_wall_plateau' },
+          { direction: 'south', label: 'Search the rocks below the wall', targetScreenId: 'rock_scatter' }
+        ]
+      },
+      {
+        id: 'mural_cabin_panel',
+        title: 'Mural of the Far Cabin',
+        prompt:
+          'The center mural holds a far cabin among dark trees. Roofline, chimney, and path are half-erased by weather, yet the place still feels cold, inhabited, and watchful.',
+        imageUrl: '/ruin_south_a.png',
+        image_prompt:
+          'Weathered mural of a remote wooden cabin in deep forest, eroded stone pigments, haunted calm, old craftsmanship damaged by time and rain.',
+        referenceImagePrompt:
+          'Close view of the center mural on a ruined stone wall: a remote cabin in deep woods, dark pines crowding around it, chimney and path half-erased by centuries of weather. Ancient relief textures, chipped edges, cold air implied, solitary but not overtly supernatural.',
+        textPromptPlaceholder: 'What in the cabin mural draws your eye?',
+        expectationSummary: 'A harder shelter, remote and solitary, presses at the edge of the wall’s memory.',
+        continuitySummary: 'This is one of the first three murals on the outer wall.',
+        promptGuidance:
+          'Lean into remoteness, timber, cold air, and the possibility that someone could still live here. The mood may be watchful, but do not introduce explicit danger or creatures; the power of the mural is in its severe habitability.',
+        directions: [
+          { direction: 'back', label: 'Return to the wall', targetScreenId: 'outer_wall_plateau' },
+          { direction: 'south', label: 'Follow the strange sound to the rocks', targetScreenId: 'rock_scatter' }
+        ]
+      },
+      {
+        id: 'mural_cottage_panel',
+        title: 'Mural of the Quiet Cottage',
+        prompt:
+          'The right mural keeps the gentlest scene: a cottage, a lane, a hush of country light. The relief is badly worn, but its calm has survived the damage.',
+        imageUrl: '/ruin_south_a.png',
+        image_prompt:
+          'Ancient deteriorated mural of a country cottage and lane, soft pastoral light, elegant ruined relief, weathered craftsmanship and age-worn stone.',
+        referenceImagePrompt:
+          'Detailed view of the right mural carved into weathered stone: a country cottage, narrow lane, and soft rural light surviving through erosion. The relief is damaged but graceful, with traces of garden or hedge line, warm domestic stillness, ancient craftsmanship.',
+        textPromptPlaceholder: 'Which feature of the cottage mural do you examine?',
+        expectationSummary: 'A softer refuge answers the wall with warmth instead of height or wilderness.',
+        continuitySummary: 'This is one of the first three murals on the outer wall.',
+        promptGuidance:
+          'This mural is the calmest of the three. Emphasize gentleness, privacy, and domestic grace. It should feel like a place one could write quietly, without becoming sentimental or idyllic beyond the damaged stone.',
+        directions: [
+          { direction: 'back', label: 'Return to the wall', targetScreenId: 'outer_wall_plateau' },
+          { direction: 'south', label: 'Listen near the rocks', targetScreenId: 'rock_scatter' }
+        ]
+      },
+      {
+        id: 'rock_scatter',
+        title: 'Scatter of Plateau Stones',
+        prompt:
+          'Here the static is harder to ignore. Among the stones, one rock shelters a dull metallic glint from the wind.',
+        imageUrl: '/ruin_south_a.png',
+        image_prompt:
+          'Windswept plateau stones beneath ruined rose wall, one rock hiding a metallic glint, faint radio-static implied, evening archaeology fantasy scene.',
+        referenceImagePrompt:
+          'Ground-level scene beneath the rose-petal ruin wall: scattered plateau stones in evening wind, one partly shielding a small metallic glint. Sparse scrub, dust, weathered stone, no characters. The image should imply a hidden source of faint radio-static without showing it clearly.',
+        textPromptPlaceholder: 'Do you search behind the rocks, follow the sound, or leave it alone?',
+        expectationSummary: 'The transmission is no longer rumor; the stones now conceal its source.',
+        continuitySummary: 'The scene has narrowed from murals to signal.',
+        promptGuidance:
+          'This screen should reward attention and physical verbs. Listening, moving stones, kneeling, searching behind the rock, or naming the device should all push toward discovery. The key transition here is from vague unease to actionable mystery.',
+        directions: [
+          { direction: 'north', label: 'Return to the murals', targetScreenId: 'outer_wall_plateau' }
+        ]
+      },
+      {
+        id: 'phone_found',
+        title: 'The Dwarven Handset',
+        prompt:
+          'Behind the rock rests an impossible handset: part mobile phone, part brass instrument, built as though dwarves and gnomes had agreed on elegance. It crackles with the same repeating distress call, and the voice on the line sounds almost relieved to be heard.',
+        imageUrl: '/ruin_south_a.png',
+        image_prompt:
+          'Retro-fantasy handset hidden among rocks, crafted like dwarven and gnomish steampunk engineering, weathered metal and brass, faint static transmission at dusk.',
+        referenceImagePrompt:
+          'Close-up of an impossible handset hidden among plateau stones: part old mobile phone, part brass field instrument, with dwarven and gnomish craftsmanship, engraved metal, worn switches, and a practical steampunk silhouette. Evening light, dust, and a sense that the device has been waiting a long time to be found.',
+        textPromptPlaceholder: 'Answer the handset, or keep studying it.',
+        expectationSummary: 'The handset is live and waiting for first contact.',
+        continuitySummary: 'The source of the static has been found beneath the plateau stones.',
+        promptGuidance:
+          'Once the handset is answered, the Society clerk may begin immediately. He should sound relieved, formal, discreet, and lightly strained. He must insist on a precise earthly destination, and he should not accept imaginary places, celestial realms, or generic fantasy answers.',
+        sceneEndCondition:
+          'This screen\'s main purpose is complete when the clerk makes contact and the player understands that an exact real-world Earth location is required.',
+        directions: [
+          { direction: 'back', label: 'Lower the handset and look back to the wall', targetScreenId: 'rock_scatter' }
+        ],
+        stageLayout: 'focus-left',
+        stageModules: [
+          {
+            module_id: 'phone-found-note',
+            type: 'evidence_note',
+            title: 'Transmission',
+            body: 'The caller has been repeating the same appeal for long enough to sound hopeful now that it has finally been heard.',
+            caption: 'If the line matters, it should be answered soon.'
+          }
+        ]
+      },
+      {
+        id: 'location_mural_gallery',
+        title: 'Second Wall of Murals',
+        prompt:
+          'The wall has changed. Three fresh murals answer the earthly address you gave the clerk, each faithful to the same place but bent toward a different shelter.',
+        imageUrl: '/ruin_south_a.png',
+        image_prompt:
+          'Ancient rose wall waiting to bloom with new murals, dormant reliefs ready to answer a named earthly destination, dusk, fantasy archaeology mood.',
+        referenceImagePrompt:
+          'Wide ruined wall scene at dusk after the earthly destination has been confirmed: three new murals have appeared in the same rose-petal masonry, all clearly interpretations of one real place on Earth, each leaning toward a different mood of shelter. Ancient ring-shaped door handles worked into the mural surfaces. Quiet ceremonial atmosphere.',
+        textPromptPlaceholder: 'Choose which new mural to approach.',
+        expectationSummary: 'The wall has answered the filed destination with three new aspects.',
+        continuitySummary: 'These murals appeared only after the clerk accepted the address.',
+        promptGuidance:
+          'All three murals must clearly belong to the exact Earth location the player named. They may differ in mood, style, shelter, or weather emphasis, but not in geographic identity. This screen should feel like the court answering the filing, not like random new destinations appearing.',
+        directions: []
+      }
+    ]
+  };
+}
+
+function buildDefaultQuestConfigForScope(scope = {}) {
+  if (scope?.questId === ROSE_COURT_PROLOGUE_QUEST_ID) {
+    return buildRoseCourtPrologueQuestConfig();
+  }
+  return JSON.parse(JSON.stringify(DEFAULT_QUEST_CONFIG));
+}
+
+function isRoseCourtLocationScene(sceneId = '') {
+  return sceneId === ROSE_COURT_LOCATION_MESSENGER_SCENE_ID;
+}
+
+function isRoseCourtTransportScene(sceneId = '') {
+  return sceneId === ROSE_COURT_TRANSPORT_MESSENGER_SCENE_ID;
+}
+
+function getMessengerSceneAuthoredGuidance(sceneId = DEFAULT_MESSENGER_SCENE_ID) {
+  return MESSENGER_SCENE_AUTHORED_GUIDANCE_BY_SCENE_ID[sceneId] || '';
+}
+
+function getMessengerInitialMessageForScene(sceneId = DEFAULT_MESSENGER_SCENE_ID) {
+  if (isRoseCourtLocationScene(sceneId)) {
+    return ROSE_COURT_LOCATION_INITIAL_MESSAGE;
+  }
+  if (isRoseCourtTransportScene(sceneId)) {
+    return ROSE_COURT_TRANSPORT_INITIAL_MESSAGE;
+  }
+  return MESSENGER_INITIAL_MESSAGE;
+}
+
 for (const assetsRoot of ASSETS_ROOTS) {
   app.use('/assets', express.static(assetsRoot));
 }
@@ -579,6 +976,66 @@ function buildTypewriterPromptMessages(currentNarrative, promptTemplate) {
     word_count: payload.word_count,
     preferred_font_size_px: payload.preferred_font_size_px
   });
+
+  return [
+    { role: 'system', content: renderedPrompt },
+    { role: 'user', content: JSON.stringify(payload) }
+  ];
+}
+
+function appendNarrativeTerm(currentNarrative = '', term = '') {
+  const baseText = typeof currentNarrative === 'string' ? currentNarrative : '';
+  const normalizedTerm = typeof term === 'string' ? term.trim() : '';
+  if (!normalizedTerm) return baseText;
+  if (!baseText) return normalizedTerm;
+  return /\s$/.test(baseText)
+    ? `${baseText}${normalizedTerm}`
+    : `${baseText} ${normalizedTerm}`;
+}
+
+function narrativeEndsWithTerm(currentNarrative = '', term = '') {
+  const normalizedText = String(currentNarrative || '').trim().toLowerCase();
+  const normalizedTerm = String(term || '').trim().toLowerCase();
+  if (!normalizedText || !normalizedTerm) return false;
+  return normalizedText.endsWith(normalizedTerm);
+}
+
+function narrativeContainsAnyKeyword(currentNarrative = '', keywords = []) {
+  const normalized = String(currentNarrative || '').toLowerCase();
+  return keywords.some((keyword) => normalized.includes(String(keyword).toLowerCase()));
+}
+
+function shouldAllowXerofagInMock(currentNarrative = '') {
+  if (!String(currentNarrative || '').trim()) {
+    return false;
+  }
+  if (narrativeEndsWithTerm(currentNarrative, XEROFAG_CANDIDATE_TERM)) {
+    return false;
+  }
+  const hasCanineSignal = narrativeContainsAnyKeyword(currentNarrative, XEROFAG_CANINE_KEYWORDS);
+  const hasUndeadSignal = narrativeContainsAnyKeyword(currentNarrative, XEROFAG_UNDEAD_KEYWORDS);
+  return hasCanineSignal && hasUndeadSignal;
+}
+
+function buildXerofagInspectionPromptPayload(currentNarrative = '', candidateNarrative = '') {
+  return {
+    current_narrative: typeof currentNarrative === 'string' ? currentNarrative : '',
+    candidate_narrative: typeof candidateNarrative === 'string' && candidateNarrative.trim()
+      ? candidateNarrative
+      : appendNarrativeTerm(currentNarrative, XEROFAG_CANDIDATE_TERM),
+    candidate_term: XEROFAG_CANDIDATE_TERM,
+    xerofag_lore: XEROFAG_LORE
+  };
+}
+
+function buildXerofagInspectionPromptMessages(currentNarrative, candidateNarrative, promptTemplate) {
+  const payload = buildXerofagInspectionPromptPayload(currentNarrative, candidateNarrative);
+  const renderedPrompt = renderPromptTemplateString(
+    promptTemplate && promptTemplate.trim()
+      ? promptTemplate
+      : getDefaultXerofagInspectionPromptTemplate(),
+    payload
+  );
 
   return [
     { role: 'system', content: renderedPrompt },
@@ -896,6 +1353,208 @@ function normalizeMessengerHistoryLimit(value) {
   return Math.max(4, Math.min(40, Math.floor(parsed)));
 }
 
+function pickRoseCourtLocationFeatures(text = '') {
+  const features = [];
+  for (const candidate of ROSE_COURT_LOCATION_FEATURE_PATTERNS) {
+    if (!candidate.pattern.test(text)) continue;
+    features.push(candidate.label);
+    if (features.length >= 4) break;
+  }
+  return features;
+}
+
+function pickRoseCourtLocationSensoryDetails(text = '') {
+  const details = [];
+  const candidates = [
+    { pattern: /\bwind|gust|breeze\b/i, label: 'wind worrying the approach' },
+    { pattern: /\brain|storm|monsoon\b/i, label: 'weather pressing at the structure' },
+    { pattern: /\bsnow|ice|cold|frost\b/i, label: 'cold held in the air and surfaces' },
+    { pattern: /\bharbor|harbour|sea|coast|shore|waterfall|river|lake\b/i, label: 'water close enough to be heard or smelled' },
+    { pattern: /\bforest|woods|pine|cedar\b/i, label: 'timber, leaf-mould, or resin nearby' },
+    { pattern: /\bcity|street|town|village\b/i, label: 'human life close enough to leave a civic murmur' }
+  ];
+  for (const candidate of candidates) {
+    if (!candidate.pattern.test(text)) continue;
+    details.push(candidate.label);
+    if (details.length >= 3) break;
+  }
+  if (!details.length) {
+    details.push('an earthly place with weather of its own');
+  }
+  return details;
+}
+
+function extractRoseCourtPlaceName(text = '') {
+  const source = normalizeMessengerBriefText(text, 240);
+  if (!source) return '';
+  const firstSentence = source.split(/[.!?]/)[0].trim();
+  const compact = firstSentence.length <= 120 ? firstSentence : firstSentence.slice(0, 120).trim();
+  return compact;
+}
+
+function isRoseCourtStructuredEarthLocation(text = '') {
+  const source = normalizeMessengerBriefText(text, 320);
+  if (!source) return false;
+  const segments = source
+    .split(',')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length < 2) return false;
+
+  const hasDetailedSegment = segments.some((segment) => (
+    /\d/.test(segment)
+    || segment.split(/\s+/).length >= 2
+    || ROSE_COURT_LOCATION_DESCRIPTOR_PATTERN.test(segment)
+  ));
+
+  return hasDetailedSegment || segments.length >= 3;
+}
+
+function isRoseCourtEarthLocationPreciseEnough(text = '') {
+  const source = normalizeMessengerBriefText(text, 320);
+  if (!source) return false;
+  if (ROSE_COURT_FANTASY_LOCATION_PATTERN.test(source)) return false;
+  if (source.length < 18) return false;
+  return (
+    ROSE_COURT_PRECISE_LOCATION_PREPOSITION_PATTERN.test(source)
+    || isRoseCourtStructuredEarthLocation(source)
+    || (/\d/.test(source) && ROSE_COURT_LOCATION_DESCRIPTOR_PATTERN.test(source))
+  );
+}
+
+function buildRoseCourtLocationSceneBrief(message = '', existingSceneBrief = null) {
+  const normalizedMessage = normalizeMessengerBriefText(message, 480);
+  const placeName = extractRoseCourtPlaceName(normalizedMessage);
+  const notableFeatures = pickRoseCourtLocationFeatures(normalizedMessage);
+  const sensoryDetails = pickRoseCourtLocationSensoryDetails(normalizedMessage);
+  const preciseEnough = isRoseCourtEarthLocationPreciseEnough(normalizedMessage);
+  const placeSummary = preciseEnough
+    ? `${normalizedMessage}. An earthly destination precise enough for discreet delivery, with real weather, a real approach, and enough contour for the Society to picture the route.`
+    : '';
+
+  return mergeMessengerSceneBrief(existingSceneBrief, {
+    subject: 'Earthbound typewriter destination',
+    placeName,
+    placeSummary,
+    typewriterHidingSpot: existingSceneBrief?.typewriterHidingSpot || '',
+    sensoryDetails,
+    notableFeatures,
+    sceneEstablished: preciseEnough
+  });
+}
+
+function buildRoseCourtLocationMessengerResponse(message = '', existingSceneBrief = null) {
+  const normalizedMessage = normalizeMessengerBriefText(message, 480);
+  const fantasyRequest = ROSE_COURT_FANTASY_LOCATION_PATTERN.test(normalizedMessage);
+  const preciseEnough = isRoseCourtEarthLocationPreciseEnough(normalizedMessage);
+  const sceneBrief = preciseEnough
+    ? buildRoseCourtLocationSceneBrief(normalizedMessage, existingSceneBrief)
+    : buildRoseCourtLocationSceneBrief('', existingSceneBrief);
+
+  if (fantasyRequest) {
+    return {
+      has_chat_ended: false,
+      message_assistant:
+        'No, no. On Earth, if you please. The typewriter is a physical instrument, not a mythic vow. Give me a real earthly destination a discreet courier could actually reach. A ship in Antarctic waters, a lane in a mining town, the edge of a rainforest if you insist, but Earth all the same.',
+      scene_brief: toMessengerSceneBriefPayload(sceneBrief, {
+        sceneEstablished: false
+      })
+    };
+  }
+
+  if (!preciseEnough) {
+    return {
+      has_chat_ended: false,
+      message_assistant:
+        'Not the mood of it, sir. The place itself. Country, region, settlement, building if need be. Give me an earthly destination the ledger can distinguish from every other romantic hiding place in the world. I cannot file "somewhere beautiful and windswept."',
+      scene_brief: toMessengerSceneBriefPayload(sceneBrief, {
+        sceneEstablished: false
+      })
+    };
+  }
+
+  return {
+    has_chat_ended: true,
+    message_assistant:
+      `Good. ${sceneBrief?.placeName || 'That address'} will do. The ledger accepts it; the typewriter can be routed. I dislike the weather there already, but dislike is not a filing category. I shall renew contact when you find the next mural. Keep the handset near. —zzkt—`,
+    scene_brief: toMessengerSceneBriefPayload(sceneBrief, {
+      typewriterHidingSpot: '',
+      sceneEstablished: true
+    })
+  };
+}
+
+function extractRoseCourtTransportMode(text = '') {
+  const source = normalizeMessengerBriefText(text, 240);
+  if (!source) return '';
+  const match = source.match(ROSE_COURT_TRANSPORT_PATTERN);
+  return match?.[0] ? match[0].trim() : '';
+}
+
+function isRoseCourtTransportConcreteEnough(text = '') {
+  const source = normalizeMessengerBriefText(text, 240);
+  if (!source) return false;
+  if (ROSE_COURT_FANTASY_TRANSPORT_PATTERN.test(source)) return false;
+  return ROSE_COURT_TRANSPORT_PATTERN.test(source);
+}
+
+function buildRoseCourtTransportSceneBrief(message = '', existingSceneBrief = null) {
+  const transportMode = extractRoseCourtTransportMode(message);
+  return mergeMessengerSceneBrief(existingSceneBrief, {
+    subject: 'Rose court transport contingency',
+    placeName: existingSceneBrief?.placeName || '',
+    placeSummary:
+      normalizeMessengerBriefText(existingSceneBrief?.placeSummary, 4000)
+      || 'The destination is already accepted; only the emergency means of movement remains to be recorded.',
+    typewriterHidingSpot: normalizeMessengerBriefText(existingSceneBrief?.typewriterHidingSpot, 1600),
+    sensoryDetails: Array.isArray(existingSceneBrief?.sensoryDetails) ? existingSceneBrief.sensoryDetails : [],
+    notableFeatures: [
+      ...(Array.isArray(existingSceneBrief?.notableFeatures) ? existingSceneBrief.notableFeatures : []),
+      ...(transportMode ? [`transport the player can manage: ${transportMode}`] : [])
+    ],
+    sceneEstablished: Boolean(transportMode)
+  });
+}
+
+function buildRoseCourtTransportMessengerResponse(message = '', existingSceneBrief = null) {
+  const normalizedMessage = normalizeMessengerBriefText(message, 240);
+  const fantasyRequest = ROSE_COURT_FANTASY_TRANSPORT_PATTERN.test(normalizedMessage);
+  const preciseEnough = isRoseCourtTransportConcreteEnough(normalizedMessage);
+  const sceneBrief = buildRoseCourtTransportSceneBrief(normalizedMessage, existingSceneBrief);
+  const transportMode = extractRoseCourtTransportMode(normalizedMessage);
+
+  if (fantasyRequest) {
+    return {
+      has_chat_ended: false,
+      message_assistant:
+        'No legends, please. I need the real conveyance. Train, car, boat, motorcycle, bicycle if that is honestly the measure of it. What could you actually manage on Earth, in haste?',
+      scene_brief: toMessengerSceneBriefPayload(sceneBrief, {
+        sceneEstablished: false
+      })
+    };
+  }
+
+  if (!preciseEnough) {
+    return {
+      has_chat_ended: false,
+      message_assistant:
+        'Quickly, please. Not bravery. Not aspiration. The practical conveyance. If the typewriter had to move at once, what could you actually handle yourself?',
+      scene_brief: toMessengerSceneBriefPayload(sceneBrief, {
+        sceneEstablished: false
+      })
+    };
+  }
+
+  return {
+    has_chat_ended: true,
+    message_assistant:
+      `Good. ${transportMode} can be entered in the margin. I do not like the sound of it, but I like uncertainty less. Keep moving. If the line fails now, assume that was intention, not fault. —zzkt—`,
+    scene_brief: toMessengerSceneBriefPayload(sceneBrief, {
+      sceneEstablished: true
+    })
+  };
+}
+
 function toMessengerMessagePayload(doc) {
   return {
     id: String(doc?._id || ''),
@@ -909,6 +1568,7 @@ function toMessengerMessagePayload(doc) {
 }
 
 async function ensureMessengerIntroMessage(sessionId, sceneId = DEFAULT_MESSENGER_SCENE_ID, persistence = 'mongo') {
+  const introMessage = getMessengerInitialMessageForScene(sceneId);
   if (persistence === 'mongo') {
     const existing = await ChatMessage.findOne({ sessionId, sceneId, type: 'initial' }).sort({ order: 1 });
     if (existing) {
@@ -920,7 +1580,7 @@ async function ensureMessengerIntroMessage(sessionId, sceneId = DEFAULT_MESSENGE
       sceneId,
       order: Date.now(),
       sender: 'system',
-      content: MESSENGER_INITIAL_MESSAGE,
+      content: introMessage,
       type: 'initial',
       has_chat_ended: false
     });
@@ -934,7 +1594,7 @@ async function ensureMessengerIntroMessage(sessionId, sceneId = DEFAULT_MESSENGE
   return appendStoredMessengerMessage(sessionId, sceneId, {
     order: Date.now(),
     sender: 'system',
-    content: MESSENGER_INITIAL_MESSAGE,
+    content: introMessage,
     type: 'initial',
     has_chat_ended: false
   });
@@ -1115,7 +1775,46 @@ function mergeMessengerSceneBrief(existingBrief, nextBrief) {
   return merged;
 }
 
-function getMessengerSceneBriefGaps(brief) {
+function toMessengerSceneBriefPayload(brief = {}, overrides = {}) {
+  const source = brief && typeof brief === 'object' ? brief : {};
+  const next = overrides && typeof overrides === 'object' ? overrides : {};
+  const typewriterHidingSpot = normalizeMessengerBriefText(
+    next.typewriterHidingSpot ?? next.typewriter_hiding_spot ?? source.typewriterHidingSpot ?? source.typewriter_hiding_spot,
+    1600
+  );
+
+  return {
+    subject: normalizeMessengerBriefText(next.subject ?? source.subject, 120),
+    place_name: normalizeMessengerBriefText(next.placeName ?? next.place_name ?? source.placeName ?? source.place_name, 240),
+    place_summary: normalizeMessengerBriefText(next.placeSummary ?? next.place_summary ?? source.placeSummary ?? source.place_summary, 4000),
+    typewriter_hiding_spot: typewriterHidingSpot,
+    sensory_details: normalizeMessengerBriefList(next.sensoryDetails ?? next.sensory_details ?? source.sensoryDetails ?? source.sensory_details),
+    notable_features: normalizeMessengerBriefList(next.notableFeatures ?? next.notable_features ?? source.notableFeatures ?? source.notable_features),
+    scene_established: Boolean(next.sceneEstablished ?? next.scene_established ?? source.sceneEstablished ?? source.scene_established)
+  };
+}
+
+function getMessengerSceneBriefGaps(brief, sceneId = DEFAULT_MESSENGER_SCENE_ID) {
+  if (isRoseCourtLocationScene(sceneId)) {
+    if (!brief) {
+      return ['subject', 'place', 'scene'];
+    }
+
+    const gaps = [];
+    if (!brief.subject) gaps.push('subject');
+    if (!brief.placeName) gaps.push('place');
+    if (countWords(brief.placeSummary) < 10) gaps.push('scene');
+    return gaps;
+  }
+
+  if (isRoseCourtTransportScene(sceneId)) {
+    if (!brief) {
+      return ['transport'];
+    }
+    const notableFeatures = Array.isArray(brief.notableFeatures) ? brief.notableFeatures.join(' ').toLowerCase() : '';
+    return /transport/.test(notableFeatures) ? [] : ['transport'];
+  }
+
   if (!brief) {
     return ['scene', 'hideaway', 'sensory', 'subject'];
   }
@@ -1130,11 +1829,17 @@ function getMessengerSceneBriefGaps(brief) {
   return gaps;
 }
 
-function isMessengerSceneBriefComplete(brief) {
-  return getMessengerSceneBriefGaps(brief).length === 0;
+function isMessengerSceneBriefComplete(brief, sceneId = DEFAULT_MESSENGER_SCENE_ID) {
+  return getMessengerSceneBriefGaps(brief, sceneId).length === 0;
 }
 
-function buildMessengerSceneFollowUp(brief, gaps = []) {
+function buildMessengerSceneFollowUp(brief, gaps = [], sceneId = DEFAULT_MESSENGER_SCENE_ID) {
+  if (isRoseCourtLocationScene(sceneId)) {
+    return 'The Society still requires a precise earthly destination. Give me the real place on Earth, not the mood of it: where would you have the typewriter sent?';
+  }
+  if (isRoseCourtTransportScene(sceneId)) {
+    return 'Quickly, please. I need the real conveyance, not the dream of one. What actual mode of transport could you personally manage if you had to move with the typewriter in haste?';
+  }
   if (gaps.includes('hideaway')) {
     return 'We are nearly there. One last practical matter: where exactly could the typewriter disappear if an unwelcome eye fell upon it, and what about that hiding place keeps it safe?';
   }
@@ -1232,13 +1937,19 @@ function buildMessengerOpeningContext(historyDocs = []) {
   return `The conversation already began with this premade Society dispatch shown to the user. Treat it as established canon and continue from it:\n"""${introContent}"""`;
 }
 
-export function buildMessengerPromptMessages(historyDocs, promptTemplate, maxHistoryMessages = DEFAULT_MESSENGER_HISTORY_LIMIT) {
+export function buildMessengerPromptMessages(
+  historyDocs,
+  promptTemplate,
+  maxHistoryMessages = DEFAULT_MESSENGER_HISTORY_LIMIT,
+  sceneId = DEFAULT_MESSENGER_SCENE_ID
+) {
   const safePromptBase = typeof promptTemplate === 'string' && promptTemplate.trim()
     ? promptTemplate.trim()
     : 'You are a strange but professional courier for the Storyteller Society. Return JSON only.';
   const safePrompt = `${safePromptBase}\n\n${MESSENGER_SYSTEM_CONTRACT_TEXT}`;
   const safeLimit = normalizeMessengerHistoryLimit(maxHistoryMessages);
   const openingContext = buildMessengerOpeningContext(historyDocs);
+  const sceneGuidance = getMessengerSceneAuthoredGuidance(sceneId);
   const formattedHistory = (Array.isArray(historyDocs) ? historyDocs : [])
     .filter((doc) => doc?.type !== 'initial')
     .map((doc) => ({
@@ -1246,19 +1957,22 @@ export function buildMessengerPromptMessages(historyDocs, promptTemplate, maxHis
     content: typeof doc?.content === 'string' ? doc.content : ''
     }));
 
-  if (formattedHistory.length <= safeLimit) {
-    return [
-      { role: 'system', content: safePrompt },
-      { role: 'system', content: openingContext },
-      ...formattedHistory
-    ];
+  const systemMessages = [
+    { role: 'system', content: safePrompt },
+    { role: 'system', content: openingContext }
+  ];
+  if (sceneGuidance) {
+    systemMessages.push({
+      role: 'system',
+      content: `Scene-authored guidance:\n${sceneGuidance}`
+    });
   }
 
-  return [
-    { role: 'system', content: safePrompt },
-    { role: 'system', content: openingContext },
-    ...formattedHistory.slice(-safeLimit)
-  ];
+  if (formattedHistory.length <= safeLimit) {
+    return [...systemMessages, ...formattedHistory];
+  }
+
+  return [...systemMessages, ...formattedHistory.slice(-safeLimit)];
 }
 
 function buildMockMessengerResponse(message, historyDocs = []) {
@@ -1378,14 +2092,18 @@ async function handleMessengerChatPost(req, res) {
     const shouldMock = resolveMockMode(body, messengerPipeline.useMock);
 
     let aiResponse;
-    if (shouldMock) {
+    if (isRoseCourtLocationScene(sceneId)) {
+      aiResponse = buildRoseCourtLocationMessengerResponse(message, existingSceneBrief);
+    } else if (isRoseCourtTransportScene(sceneId)) {
+      aiResponse = buildRoseCourtTransportMessengerResponse(message, existingSceneBrief);
+    } else if (shouldMock) {
       aiResponse = buildMockMessengerResponse(message, historyDocs);
     } else {
       const promptDoc = await getLatestPromptTemplate('messenger_chat');
       const routeConfig = await getRouteConfig('messenger_chat');
       const promptTemplate = promptDoc?.promptTemplate || routeConfig?.promptTemplate || '';
       aiResponse = await callJsonLlm({
-        prompts: buildMessengerPromptMessages(historyDocs, promptTemplate, body.maxHistoryMessages),
+        prompts: buildMessengerPromptMessages(historyDocs, promptTemplate, body.maxHistoryMessages, sceneId),
         provider: messengerProvider,
         model: messengerPipeline.model || '',
         max_tokens: 1200,
@@ -1420,17 +2138,21 @@ async function handleMessengerChatPost(req, res) {
 
     if (!mergedSceneBrief && hasChatEnded) {
       hasChatEnded = false;
-      reply = buildMessengerSceneFollowUp(null, ['scene', 'hideaway', 'sensory', 'subject']);
+      reply = buildMessengerSceneFollowUp(
+        null,
+        isRoseCourtLocationScene(sceneId) ? ['subject', 'place', 'scene'] : ['scene', 'hideaway', 'sensory', 'subject'],
+        sceneId
+      );
     } else if (mergedSceneBrief) {
-      const sceneGaps = getMessengerSceneBriefGaps(mergedSceneBrief);
+      const sceneGaps = getMessengerSceneBriefGaps(mergedSceneBrief, sceneId);
       if (hasChatEnded && sceneGaps.length > 0) {
         hasChatEnded = false;
-        reply = buildMessengerSceneFollowUp(mergedSceneBrief, sceneGaps);
+        reply = buildMessengerSceneFollowUp(mergedSceneBrief, sceneGaps, sceneId);
       }
 
       mergedSceneBrief = {
         ...mergedSceneBrief,
-        sceneEstablished: isMessengerSceneBriefComplete(mergedSceneBrief),
+        sceneEstablished: isMessengerSceneBriefComplete(mergedSceneBrief, sceneId),
         assistantReply: reply,
         source: shouldMock ? 'mock' : `${messengerProvider}:${messengerPipeline.model || 'default'}`,
         meta: {
@@ -2471,6 +3193,103 @@ app.post('/api/shouldGenerateContinuation', async (req, res) => {
   }
 });
 
+app.post('/api/shouldAllowXerofag', async (req, res) => {
+  try {
+    const { sessionId, currentNarrative, candidateNarrative } = req.body || {};
+    if (!sessionId || typeof currentNarrative !== 'string') {
+      return res.status(400).json({ error: 'Missing sessionId or currentNarrative' });
+    }
+
+    const inspectionPipeline = await getAiPipelineSettings('xerofag_inspection');
+    const inspectionProvider = typeof inspectionPipeline?.provider === 'string'
+      ? inspectionPipeline.provider
+      : 'openai';
+    const shouldMock = resolveMockMode(req.body, inspectionPipeline.useMock);
+
+    if (!currentNarrative.trim() || narrativeEndsWithTerm(currentNarrative, XEROFAG_CANDIDATE_TERM)) {
+      return res.status(200).json({
+        allowed: false,
+        mocked: shouldMock,
+        runtime: {
+          pipeline: 'xerofag_inspection',
+          provider: inspectionProvider,
+          model: inspectionPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    await startTypewriterSession(sessionId);
+
+    if (shouldMock) {
+      return res.status(200).json({
+        allowed: shouldAllowXerofagInMock(currentNarrative),
+        mocked: true,
+        runtime: {
+          pipeline: 'xerofag_inspection',
+          provider: inspectionProvider,
+          model: inspectionPipeline.model || '',
+          mocked: true
+        }
+      });
+    }
+
+    try {
+      const inspectionPromptDoc = await getLatestPromptTemplate('xerofag_inspection');
+      const prompt = buildXerofagInspectionPromptMessages(
+        currentNarrative,
+        candidateNarrative,
+        inspectionPromptDoc?.promptTemplate || ''
+      );
+      const aiResponse = await callJsonLlm({
+        prompts: prompt,
+        provider: inspectionProvider,
+        model: inspectionPipeline.model || '',
+        max_tokens: 180,
+        explicitJsonObjectFormat: true
+      });
+
+      if (typeof aiResponse?.allowed !== 'boolean') {
+        return res.status(502).json({
+          error: 'Live Xerofag inspection did not return a valid boolean verdict.',
+          runtime: {
+            pipeline: 'xerofag_inspection',
+            provider: inspectionProvider,
+            model: inspectionPipeline.model || '',
+            mocked: false
+          }
+        });
+      }
+
+      return res.status(200).json({
+        allowed: aiResponse.allowed,
+        mocked: false,
+        runtime: {
+          pipeline: 'xerofag_inspection',
+          provider: inspectionProvider,
+          model: inspectionPipeline.model || '',
+          mocked: false
+        }
+      });
+    } catch (aiError) {
+      console.error('Error in live /api/shouldAllowXerofag call:', aiError);
+      return res.status(502).json({
+        error: 'Live Xerofag inspection failed.',
+        details: aiError?.message || 'Unknown error',
+        runtime: {
+          pipeline: 'xerofag_inspection',
+          provider: inspectionProvider,
+          model: inspectionPipeline.model || '',
+          mocked: false
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error in /api/shouldAllowXerofag:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.post('/api/typewriter/session/start', async (req, res) => {
   try {
     const { sessionId, fragment, playerId } = req.body || {};
@@ -3454,8 +4273,8 @@ function requireAdmin(req, res, next) {
   return next();
 }
 
-function cloneDefaultQuestConfig() {
-  return JSON.parse(JSON.stringify(DEFAULT_QUEST_CONFIG));
+function cloneDefaultQuestConfig(scope = {}) {
+  return JSON.parse(JSON.stringify(buildDefaultQuestConfigForScope(scope)));
 }
 
 const QUEST_ADVANCE_CONTRACT_KEY = 'quest_advance';
@@ -3497,6 +4316,43 @@ function normalizeQuestDirection(direction) {
   };
 }
 
+function normalizeQuestPromptRoute(route) {
+  if (!route || typeof route !== 'object') {
+    return null;
+  }
+
+  const targetScreenId = typeof route.targetScreenId === 'string'
+    ? route.targetScreenId.trim()
+    : '';
+  if (!targetScreenId) {
+    return null;
+  }
+
+  const patterns = Array.isArray(route.patterns)
+    ? route.patterns
+      .map((pattern) => (typeof pattern === 'string' ? pattern.trim() : ''))
+      .filter(Boolean)
+    : [];
+  if (!patterns.length) {
+    return null;
+  }
+
+  const fromScreenIds = Array.isArray(route.fromScreenIds)
+    ? [...new Set(route.fromScreenIds
+      .map((screenId) => (typeof screenId === 'string' ? screenId.trim() : ''))
+      .filter(Boolean))]
+    : [];
+
+  return {
+    id: typeof route.id === 'string' ? route.id.trim() : '',
+    description: typeof route.description === 'string' ? route.description.trim() : '',
+    fromScreenIds,
+    matchMode: route.matchMode === 'all' ? 'all' : 'any',
+    patterns,
+    targetScreenId
+  };
+}
+
 function normalizeQuestScreen(screen) {
   if (!screen || typeof screen !== 'object') {
     return null;
@@ -3511,6 +4367,17 @@ function normalizeQuestScreen(screen) {
   const prompt = typeof screen.prompt === 'string' ? screen.prompt : '';
   const imageUrl = typeof screen.imageUrl === 'string' ? screen.imageUrl.trim() : '';
   const image_prompt = typeof screen.image_prompt === 'string' ? screen.image_prompt.trim() : '';
+  const referenceImagePrompt = typeof screen.referenceImagePrompt === 'string'
+    ? screen.referenceImagePrompt.trim()
+    : '';
+  const visualContinuityGuidance = typeof screen.visualContinuityGuidance === 'string'
+    ? screen.visualContinuityGuidance.trim()
+    : '';
+  const visualTransitionIntent = ['inherit', 'drift', 'break'].includes(
+    typeof screen.visualTransitionIntent === 'string' ? screen.visualTransitionIntent.trim().toLowerCase() : ''
+  )
+    ? screen.visualTransitionIntent.trim().toLowerCase()
+    : 'inherit';
   const textPromptPlaceholder = typeof screen.textPromptPlaceholder === 'string' && screen.textPromptPlaceholder.trim()
     ? screen.textPromptPlaceholder.trim()
     : 'What do you do?';
@@ -3530,6 +4397,12 @@ function normalizeQuestScreen(screen) {
     ? screen.generatedByPlayerId.trim()
     : '';
   const generatedAt = typeof screen.generatedAt === 'string' ? screen.generatedAt.trim() : '';
+  const promptGuidance = typeof screen.promptGuidance === 'string'
+    ? screen.promptGuidance.trim()
+    : '';
+  const sceneEndCondition = typeof screen.sceneEndCondition === 'string'
+    ? screen.sceneEndCondition.trim()
+    : '';
   const normalizedStage = normalizeImmersiveRpgStagePayload({
     stage_layout: screen.stage_layout || screen.stageLayout,
     stage_modules: screen.stage_modules || screen.stageModules
@@ -3537,12 +4410,18 @@ function normalizeQuestScreen(screen) {
   const directions = Array.isArray(screen.directions)
     ? screen.directions.map(normalizeQuestDirection).filter(Boolean)
     : [];
+  const promptRoutes = Array.isArray(screen.promptRoutes)
+    ? screen.promptRoutes.map(normalizeQuestPromptRoute).filter(Boolean)
+    : [];
   return {
     id,
     title,
     prompt,
     imageUrl,
     image_prompt,
+    referenceImagePrompt,
+    visualContinuityGuidance,
+    visualTransitionIntent,
     textPromptPlaceholder,
     directions,
     screenType,
@@ -3553,6 +4432,9 @@ function normalizeQuestScreen(screen) {
     generatedFromPrompt,
     generatedByPlayerId,
     generatedAt,
+    promptGuidance,
+    sceneEndCondition,
+    promptRoutes,
     stageLayout: normalizedStage.stageLayout,
     stageModules: normalizedStage.stageModules
   };
@@ -3770,6 +4652,14 @@ function buildQuestAdvanceRuntime(pipeline = {}, mocked = false) {
   };
 }
 
+async function resolveQuestSceneAuthoringRuntimeConfig() {
+  const latestPrompt = await getLatestPromptTemplate(QUEST_SCENE_AUTHORING_PIPELINE_KEY);
+  return {
+    promptTemplate: latestPrompt?.promptTemplate || '',
+    latestPrompt
+  };
+}
+
 function buildQuestDirectionsPromptSummary(directions = [], screenMap = new Map()) {
   const summary = (Array.isArray(directions) ? directions : []).map((direction) => {
     const targetScreenId = typeof direction?.targetScreenId === 'string' ? direction.targetScreenId.trim() : '';
@@ -3802,6 +4692,7 @@ function buildQuestTraversalPromptSummary(traversal = [], screenMap = new Map())
 }
 
 function buildQuestAdvancePromptPayload({
+  config,
   currentScreen,
   anchorScreen,
   promptText,
@@ -3809,34 +4700,211 @@ function buildQuestAdvancePromptPayload({
   screenMap = new Map()
 }) {
   return {
+    sceneVisualStyleGuide: config?.visualStyleGuide || '',
+    phaseGuidance: config?.phaseGuidance || '',
     currentScreenId: currentScreen?.id || '',
     currentScreenTitle: currentScreen?.title || '',
     currentScreenType: currentScreen?.screenType || 'authored',
     currentScreenPrompt: currentScreen?.prompt || '',
     currentScreenImagePrompt: currentScreen?.image_prompt || '',
+    currentScreenReferenceImagePrompt: currentScreen?.referenceImagePrompt || '',
     currentScreenExpectationSummary: currentScreen?.expectationSummary || '',
     currentScreenContinuitySummary: currentScreen?.continuitySummary || '',
+    currentScreenPromptGuidance: currentScreen?.promptGuidance || '',
+    currentScreenSceneEndCondition: currentScreen?.sceneEndCondition || '',
+    currentScreenVisualContinuityGuidance: currentScreen?.visualContinuityGuidance || '',
+    currentScreenVisualTransitionIntent: currentScreen?.visualTransitionIntent || 'inherit',
     currentDirections: buildQuestDirectionsPromptSummary(currentScreen?.directions, screenMap),
     anchorScreenId: anchorScreen?.id || currentScreen?.id || '',
     anchorScreenTitle: anchorScreen?.title || currentScreen?.title || '',
     anchorScreenPrompt: anchorScreen?.prompt || currentScreen?.prompt || '',
     anchorScreenImagePrompt: anchorScreen?.image_prompt || currentScreen?.image_prompt || '',
+    anchorScreenReferenceImagePrompt: anchorScreen?.referenceImagePrompt || currentScreen?.referenceImagePrompt || '',
+    authoredPromptRoutes: buildQuestPromptRoutesPromptSummary(
+      config?.promptRoutes,
+      currentScreen?.id || '',
+      screenMap
+    ),
     recentTraversal: buildQuestTraversalPromptSummary(traversal, screenMap),
     playerPrompt: promptText
   };
 }
 
+function buildQuestPromptRoutesPromptSummary(promptRoutes = [], currentScreenId = '', screenMap = new Map()) {
+  const relevantRoutes = (Array.isArray(promptRoutes) ? promptRoutes : [])
+    .filter((route) => {
+      if (!route || typeof route !== 'object') return false;
+      if (!Array.isArray(route.fromScreenIds) || route.fromScreenIds.length === 0) return true;
+      return route.fromScreenIds.includes(currentScreenId);
+    })
+    .map((route) => {
+      const targetScreen = screenMap.get(route.targetScreenId);
+      return {
+        id: route.id || '',
+        description: route.description || '',
+        target_screen_id: route.targetScreenId || '',
+        target_screen_title: targetScreen?.title || '',
+        match_mode: route.matchMode || 'any',
+        patterns: Array.isArray(route.patterns) ? route.patterns : []
+      };
+    });
+
+  if (!relevantRoutes.length) {
+    return '[]';
+  }
+
+  return JSON.stringify(relevantRoutes, null, 2);
+}
+
 function buildQuestAdvancePromptMessages({ promptTemplate = '', promptPayload = {} }) {
   const compiledPrompt = renderPromptTemplateString(promptTemplate, promptPayload);
+  const supplementalGuidance = [
+    typeof promptPayload?.sceneVisualStyleGuide === 'string' && promptPayload.sceneVisualStyleGuide.trim()
+      ? `Scene visual guide:\n${promptPayload.sceneVisualStyleGuide.trim()}`
+      : '',
+    typeof promptPayload?.phaseGuidance === 'string' && promptPayload.phaseGuidance.trim()
+      ? `Phase guidance:\n${promptPayload.phaseGuidance.trim()}`
+      : '',
+    typeof promptPayload?.currentScreenPromptGuidance === 'string' && promptPayload.currentScreenPromptGuidance.trim()
+      ? `Current screen guidance:\n${promptPayload.currentScreenPromptGuidance.trim()}`
+      : '',
+    typeof promptPayload?.currentScreenSceneEndCondition === 'string' && promptPayload.currentScreenSceneEndCondition.trim()
+      ? `Current scene ends when:\n${promptPayload.currentScreenSceneEndCondition.trim()}`
+      : '',
+    typeof promptPayload?.currentScreenVisualContinuityGuidance === 'string' && promptPayload.currentScreenVisualContinuityGuidance.trim()
+      ? `Current screen visual continuity:\n${promptPayload.currentScreenVisualContinuityGuidance.trim()}\nTransition intent: ${promptPayload.currentScreenVisualTransitionIntent || 'inherit'}`
+      : '',
+    typeof promptPayload?.authoredPromptRoutes === 'string' && promptPayload.authoredPromptRoutes.trim() && promptPayload.authoredPromptRoutes.trim() !== '[]'
+      ? `Relevant authored prompt routes already reserved by the map:\n${promptPayload.authoredPromptRoutes.trim()}\nIf the player's action clearly belongs to one of these routes, do not invent a new scene for it.`
+      : ''
+  ]
+    .filter(Boolean)
+    .join('\n\n');
   return {
     compiledPrompt,
     prompts: [
       { role: 'system', content: compiledPrompt },
+      ...(supplementalGuidance ? [{ role: 'system', content: supplementalGuidance }] : []),
       {
         role: 'user',
         content: JSON.stringify(promptPayload)
       }
     ]
+  };
+}
+
+function buildQuestPromptSourceDetails({ latestPrompt = null, routeConfig = null } = {}) {
+  if (latestPrompt?.promptTemplate) {
+    return {
+      source: 'database',
+      version: Number(latestPrompt.version) || 0,
+      updatedAt: latestPrompt.updatedAt || latestPrompt.createdAt || '',
+      createdBy: latestPrompt.createdBy || '',
+      promptLength: latestPrompt.promptTemplate.length
+    };
+  }
+
+  const fallbackPrompt = routeConfig?.promptCore || routeConfig?.promptTemplate || '';
+  if (fallbackPrompt) {
+    return {
+      source: 'route-config',
+      version: 0,
+      updatedAt: routeConfig?.updatedAt || '',
+      createdBy: routeConfig?.updatedBy || '',
+      promptLength: fallbackPrompt.length
+    };
+  }
+
+  return {
+    source: 'missing',
+    version: 0,
+    updatedAt: '',
+    createdBy: '',
+    promptLength: 0
+  };
+}
+
+async function buildQuestDebugContext(payload = {}) {
+  const scope = normalizeQuestScope(payload);
+  const config = await ensureQuestConfig(scope);
+  const screenMap = buildQuestScreenMap(config);
+  const currentScreenId = typeof payload.currentScreenId === 'string' ? payload.currentScreenId.trim() : '';
+  const currentScreen = screenMap.get(currentScreenId)
+    || screenMap.get(config.startScreenId)
+    || config.screens[0]
+    || null;
+
+  if (!currentScreen) {
+    const error = new Error('Quest screen not found.');
+    error.statusCode = 404;
+    error.code = 'QUEST_SCREEN_NOT_FOUND';
+    throw error;
+  }
+
+  const anchorScreen = resolveQuestAnchorScreen(currentScreen, screenMap) || currentScreen;
+  const promptText = typeof payload.promptText === 'string' ? payload.promptText.trim() : '';
+  const authoredRouteDiagnostics = buildQuestPromptRouteDiagnostics(config, currentScreen, promptText, screenMap);
+  const authoredPromptAdvance = promptText
+    ? resolveQuestAuthoredPromptAdvance(config, currentScreen, promptText)
+    : null;
+  const traversalPayload = await getQuestTraversal(scope);
+  const traversal = Array.isArray(traversalPayload?.traversal) ? traversalPayload.traversal : [];
+  const questPipeline = await getAiPipelineSettings('quest_generation');
+  const runtime = buildQuestAdvanceRuntime(questPipeline, Boolean(questPipeline?.useMock));
+  const routeConfig = await getRouteConfig(QUEST_ADVANCE_CONTRACT_KEY);
+  const latestPrompt = await getLatestPromptTemplate('quest_generation');
+  const promptTemplate =
+    latestPrompt?.promptTemplate
+    || routeConfig?.promptCore
+    || routeConfig?.promptTemplate
+    || '';
+  const promptPayload = buildQuestAdvancePromptPayload({
+    config,
+    currentScreen,
+    anchorScreen,
+    promptText,
+    traversal,
+    screenMap
+  });
+  const promptMessages = buildQuestAdvancePromptMessages({
+    promptTemplate,
+    promptPayload
+  });
+
+  return {
+    sessionId: scope.sessionId,
+    questId: scope.questId,
+    currentScreen: {
+      id: currentScreen.id,
+      title: currentScreen.title || '',
+      type: currentScreen.screenType || 'authored'
+    },
+    anchorScreen: {
+      id: anchorScreen?.id || currentScreen.id,
+      title: anchorScreen?.title || currentScreen.title || ''
+    },
+    runtime,
+    promptSource: buildQuestPromptSourceDetails({ latestPrompt, routeConfig }),
+    promptText,
+    wouldBypassGeneration: Boolean(authoredPromptAdvance?.screen?.id),
+    authoredRouteMatch: authoredPromptAdvance?.screen?.id
+      ? {
+          id: authoredPromptAdvance.route?.id || '',
+          description: authoredPromptAdvance.route?.description || '',
+          targetScreenId: authoredPromptAdvance.screen.id,
+          targetScreenTitle: authoredPromptAdvance.screen.title || ''
+        }
+      : null,
+    authoredRouteDiagnostics,
+    promptPayload,
+    compiledPrompt: promptMessages.compiledPrompt || '',
+    promptMessages: Array.isArray(promptMessages.prompts)
+      ? promptMessages.prompts.map((entry, index) => ({
+          index,
+          role: entry?.role || 'system',
+          content: typeof entry?.content === 'string' ? entry.content : ''
+        }))
+      : []
   };
 }
 
@@ -3882,63 +4950,6 @@ function buildQuestAdvanceSeed({ currentScreen, anchorScreen, promptText, screen
     direction_label: buildQuestGeneratedDirectionLabel(promptText),
     stage_layout: stage.stageLayout,
     stage_modules: stage.stageModules
-  };
-}
-
-function normalizeQuestAdvancePlan(rawPlan = {}, fallbackPlan = {}) {
-  const source = rawPlan && typeof rawPlan === 'object' ? rawPlan : {};
-  const fallback = fallbackPlan && typeof fallbackPlan === 'object' ? fallbackPlan : {};
-  const normalizedStage = normalizeImmersiveRpgStagePayload({
-    stage_layout: source.stage_layout || source.stageLayout || fallback.stage_layout || fallback.stageLayout,
-    stage_modules: source.stage_modules || source.stageModules || fallback.stage_modules || fallback.stageModules
-  });
-
-  return {
-    title: truncateQuestText(
-      firstNonEmptyQuestString(source.title, fallback.title, 'New Thread'),
-      56
-    ),
-    prompt: truncateQuestText(
-      firstNonEmptyQuestString(source.prompt, fallback.prompt, 'The area shifts around your action.'),
-      900
-    ),
-    image_prompt: truncateQuestText(
-      firstNonEmptyQuestString(source.image_prompt, source.imagePrompt, fallback.image_prompt, fallback.imagePrompt),
-      600
-    ),
-    text_prompt_placeholder: firstNonEmptyQuestString(
-      source.text_prompt_placeholder,
-      source.textPromptPlaceholder,
-      fallback.text_prompt_placeholder,
-      fallback.textPromptPlaceholder,
-      'What do you do next in this thread?'
-    ),
-    expectation_summary: firstNonEmptyQuestString(
-      source.expectation_summary,
-      source.expectationSummary,
-      fallback.expectation_summary,
-      fallback.expectationSummary,
-      'A local branch opens from the current area.'
-    ),
-    continuity_summary: firstNonEmptyQuestString(
-      source.continuity_summary,
-      source.continuitySummary,
-      fallback.continuity_summary,
-      fallback.continuitySummary,
-      'This branch grows directly from the current scene.'
-    ),
-    direction_label: truncateQuestText(
-      firstNonEmptyQuestString(
-        source.direction_label,
-        source.directionLabel,
-        fallback.direction_label,
-        fallback.directionLabel,
-        'Pursue this thread'
-      ),
-      56
-    ),
-    stageLayout: normalizedStage.stageLayout,
-    stageModules: normalizedStage.stageModules
   };
 }
 
@@ -4052,6 +5063,370 @@ function applyQuestDirectionAdvance(config, currentScreen, direction) {
   };
 }
 
+function isRoseCourtPrologueQuest(questId = '') {
+  return questId === ROSE_COURT_PROLOGUE_QUEST_ID;
+}
+
+function questPromptRouteAppliesToScreen(route, screenId = '') {
+  if (!route || typeof route !== 'object') return false;
+  if (!Array.isArray(route.fromScreenIds) || route.fromScreenIds.length === 0) {
+    return true;
+  }
+  return route.fromScreenIds.includes(screenId);
+}
+
+function matchesQuestPromptRoute(route, promptText = '') {
+  const source = String(promptText || '').trim();
+  if (!source || !route || typeof route !== 'object') {
+    return false;
+  }
+
+  const patterns = Array.isArray(route.patterns) ? route.patterns : [];
+  if (!patterns.length) {
+    return false;
+  }
+
+  const results = patterns.map((patternSource) => {
+    try {
+      return new RegExp(patternSource, 'i').test(source);
+    } catch (error) {
+      console.warn('Invalid quest prompt route pattern:', patternSource, error);
+      return false;
+    }
+  });
+
+  if (route.matchMode === 'all') {
+    return results.every(Boolean);
+  }
+  return results.some(Boolean);
+}
+
+function buildQuestPromptRouteDiagnostics(config, currentScreen, promptText = '', screenMap = new Map()) {
+  const sourceScreenId = currentScreen?.id || '';
+  const promptRoutes = Array.isArray(config?.promptRoutes) ? config.promptRoutes : [];
+
+  return promptRoutes.map((route) => {
+    const appliesToCurrentScreen = questPromptRouteAppliesToScreen(route, sourceScreenId);
+    const matched = appliesToCurrentScreen && matchesQuestPromptRoute(route, promptText);
+    const targetScreen = screenMap.get(route?.targetScreenId || '');
+    return {
+      id: route?.id || '',
+      description: route?.description || '',
+      appliesToCurrentScreen,
+      matched,
+      matchMode: route?.matchMode === 'all' ? 'all' : 'any',
+      patterns: Array.isArray(route?.patterns) ? route.patterns : [],
+      targetScreenId: route?.targetScreenId || '',
+      targetScreenTitle: targetScreen?.title || ''
+    };
+  });
+}
+
+function resolveQuestAuthoredPromptAdvance(config, currentScreen, promptText) {
+  const sourceScreenId = currentScreen?.id || '';
+  const screenMap = buildQuestScreenMap(config);
+  const promptRoutes = Array.isArray(config?.promptRoutes) ? config.promptRoutes : [];
+
+  for (const route of promptRoutes) {
+    if (!questPromptRouteAppliesToScreen(route, sourceScreenId)) {
+      continue;
+    }
+    if (!matchesQuestPromptRoute(route, promptText)) {
+      continue;
+    }
+    const targetScreen = screenMap.get(route.targetScreenId);
+    if (!targetScreen) {
+      continue;
+    }
+    return {
+      route,
+      screen: targetScreen
+    };
+  }
+
+  return null;
+}
+
+function buildRoseCourtLocationVariantScreens(brief = {}) {
+  const placeName = truncateQuestText(brief?.placeName || 'the named earthly destination', 120);
+  const placeSummary = truncateQuestText(
+    brief?.placeSummary || `An earthly destination has been recorded for the Society: ${placeName}.`,
+    480
+  );
+  const features = Array.isArray(brief?.notableFeatures) && brief.notableFeatures.length
+    ? brief.notableFeatures.slice(0, 3).join(', ')
+    : 'weather, approach, and shelter';
+  const sensory = Array.isArray(brief?.sensoryDetails) && brief.sensoryDetails.length
+    ? brief.sensoryDetails.join(', ')
+    : 'the physical truth of the place';
+
+  const variants = [
+    {
+      id: 'location_mural_high_room',
+      direction: 'west',
+      label: 'Study the high-room mural',
+      title: 'Mural of the High Room',
+      imageUrl: '/textures/decor/film_frame_desert.png',
+      imagePromptMood: 'an elevated attic-like refuge, lamp-lit, observant, urban or cliffside in feeling',
+      expectation: 'This version of the place emphasizes height, outlook, and a writer watching the weather from above.',
+      prompt:
+        `${placeName} appears here as a high room: a perched refuge translated into narrow steps, skylight glow, and a sense that the whole place can be watched from just under the roof. ${placeSummary}`,
+      continuity:
+        `The mural still belongs to ${placeName}, but it recasts the destination as an elevated retreat. Features carried forward: ${features}.`,
+      caption: 'Aspect: elevation and vigilance'
+    },
+    {
+      id: 'location_mural_weather_cabin',
+      direction: 'north',
+      label: 'Study the weather-cabin mural',
+      title: 'Mural of the Weather Cabin',
+      imageUrl: '/ruin_south_a.png',
+      imagePromptMood: 'a rough shelter under strong weather, remote, timbered, solitary, storm-ready',
+      expectation: 'This version of the place tests the destination against weather, solitude, and endurance.',
+      prompt:
+        `${placeName} appears here as a weather-beaten cabin, the same earthly destination translated into rough boards, sparse shelter, and a harder edge against wind and distance. ${placeSummary}`,
+      continuity:
+        `The destination remains ${placeName}, now interpreted through harsher shelter and outer exposure. Sensory anchors carried forward: ${sensory}.`,
+      caption: 'Aspect: exposure and endurance'
+    },
+    {
+      id: 'location_mural_quiet_cottage',
+      direction: 'east',
+      label: 'Study the quiet-cottage mural',
+      title: 'Mural of the Quiet Cottage',
+      imageUrl: '/arenas/petal_hex_v1.png',
+      imagePromptMood: 'an intimate cottage-like shelter, domestic calm, lamplight, lane or garden nearby',
+      expectation: 'This version of the place makes the destination feel inhabited, intimate, and quietly protective.',
+      prompt:
+        `${placeName} appears here as a quiet cottage, the earthly destination softened into lamplight, a threshold worth crossing, and a shelter that promises privacy without losing the place itself. ${placeSummary}`,
+      continuity:
+        `This mural preserves the same destination while favoring domestic calm and inward refuge. Distinctive elements retained: ${features}.`,
+      caption: 'Aspect: intimacy and hearth'
+    }
+  ];
+
+  return variants.map((variant) => ({
+    id: variant.id,
+    title: variant.title,
+    prompt: variant.prompt,
+    imageUrl: variant.imageUrl,
+    image_prompt:
+      `Interpret ${placeName} as ${variant.imagePromptMood}. Preserve the same earthly destination, local climate, and recognisable physical cues: ${features}.`,
+    referenceImagePrompt:
+      `Ancient mural door on the second rose wall, showing ${placeName} as ${variant.imagePromptMood}. The place must remain recognisably the same real-world destination, with stable local weather, terrain, and architectural cues. Include an ouroboros-like ring handle worked into the mural surface, dusk ruin lighting, and a ceremonial adventure-game composition.`,
+    textPromptPlaceholder: 'Which doorway will you eventually trust?',
+    expectationSummary: variant.expectation,
+    continuitySummary: variant.continuity,
+    promptGuidance:
+      `This mural is one interpretation of the confirmed earthly destination, not a new place. Keep ${placeName} recognisable and let this version lean specifically toward ${variant.caption.toLowerCase()}. The door should feel enterable, but the image must still read as mural before threshold.`,
+    directions: [
+      {
+        direction: 'forward',
+        label: 'Turn the ouroboros ring and step through',
+        targetScreenId: 'inner_court_well_approach'
+      },
+      {
+        direction: 'back',
+        label: 'Return to the second wall',
+        targetScreenId: 'location_mural_gallery'
+      }
+    ],
+    screenType: 'authored',
+    parentScreenId: 'location_mural_gallery',
+    anchorScreenId: 'location_mural_gallery',
+    stageLayout: 'stacked',
+    stageModules: [
+      {
+        module_id: `${variant.id}-note`,
+        type: 'evidence_note',
+        title: variant.caption,
+        body: variant.continuity,
+        caption: placeName
+      },
+      {
+        module_id: `${variant.id}-quote`,
+        type: 'quote_panel',
+        title: 'Ledger Echo',
+        body: placeSummary,
+        caption: sensory
+      }
+    ],
+    _direction: {
+      direction: variant.direction,
+      label: variant.label,
+      targetScreenId: variant.id
+    }
+  }));
+}
+
+function buildRoseCourtWellSequenceScreens(brief = {}) {
+  const placeName = truncateQuestText(brief?.placeName || 'the filed earthly destination', 120);
+  const placeSummary = truncateQuestText(
+    brief?.placeSummary || `${placeName} still hangs in the air behind you like a destination the court has already accepted.`,
+    320
+  );
+
+  return [
+    {
+      id: 'inner_court_well_approach',
+      title: 'Broken Path to the Well',
+      prompt:
+        'Past the second wall, the court opens onto a broken path cut along the inner cliff. There, almost tucked into the masonry, you finally notice a roofed stone well. Beyond it the rose-like structure rises over the court, stranger and nearer than before.',
+      imageUrl: '/ruin_south_a.png',
+      image_prompt:
+        'Ruined inner-court path with broken arches and a circular stone well set into the masonry, distant rose-like structure looming over mist, evening fantasy atmosphere, Sierra-inspired cinematic framing.',
+      referenceImagePrompt:
+        'Wide inner-court approach at dusk: broken masonry path, roofed stone well tucked into the wall, the strange rose-like central structure rising in the background, and enough open space that a large falcon could plausibly be watching from above. Quiet, anticipatory, ceremonial ruin mood.',
+      textPromptPlaceholder: 'Do you keep your distance, or move to the rim?',
+      expectationSummary: 'The well is discovered only after the second wall has answered the filed destination.',
+      continuitySummary: `${placeSummary} The falcon is not in your hand; it is somewhere above, already keeping pace.`,
+      promptGuidance:
+        'This screen should feel like the court opening one layer further inward. The player notices the well before understanding it. The falcon may be implied or glimpsed, but do not let it dominate until the player reaches the rim.',
+      directions: [
+        {
+          direction: 'down',
+          label: 'Step to the rim and look into the well',
+          targetScreenId: 'inner_court_well'
+        },
+        {
+          direction: 'back',
+          label: 'Return to the second wall of murals',
+          targetScreenId: 'location_mural_gallery'
+        }
+      ]
+    },
+    {
+      id: 'inner_court_well',
+      title: 'Well of Fragments',
+      prompt:
+        'When you lean over the rim, fragments of paper begin resurfacing on the water below. Each one carries a radiant narrative line for a few breaths before the letters loosen, dim, and sink. A falcon lands above you on the well roof, watching until it produces a feather and a scrap of parchment small enough for ten words at most.',
+      imageUrl: '/well/well_background.png',
+      image_prompt:
+        'Ancient stone well seen from above, dark reflective water, resurfacing paper fragments with glowing handwritten script, falcon perched on the well roof with satchel, ruined rose-court in twilight fantasy style.',
+      referenceImagePrompt:
+        'View into an ancient stone well at twilight: dark water, torn paper fragments surfacing with large radiant handwritten lines, then dissolving back down. A big falcon with a satchel perches above on the well roof, offering feather and parchment. Luminous letters, stillness, no crowd, sacred fantasy atmosphere.',
+      textPromptPlaceholder: 'The falcon waits for one line. Ten words at most.',
+      expectationSummary: 'Fragments from books and unwritten pages surface, fade, and sink while the falcon waits for a single line in return.',
+      continuitySummary: 'This is the final interactive beat of the opening scene: write, surrender the parchment, watch the falcon depart.',
+      promptGuidance:
+        'Hold this scene in stillness and precision. The surfaced lines should feel like fragments of many books, not a single message. The falcon is deliberate and expectant, and the parchment limit of ten words must be clear and binding.',
+      sceneEndCondition: 'The scene ends when the player commits a line to the parchment and the falcon carries it toward the dovecot above the inner court.',
+      directions: [
+        {
+          direction: 'end',
+          label: 'Let the opening scene go dark',
+          targetScreenId: 'inner_court_blackout'
+        }
+      ],
+      stageLayout: 'focus-left',
+      stageModules: [
+        {
+          module_id: 'well-fragments-note',
+          type: 'evidence_note',
+          title: 'Ink Allowance',
+          body: 'The parchment is small by design. The falcon offers only enough ink for a single line of ten words or fewer.',
+          caption: 'The court expects precision.'
+        }
+      ]
+    },
+    {
+      id: 'inner_court_blackout',
+      title: 'Blackout',
+      prompt: '',
+      imageUrl: '',
+      image_prompt: 'Full black screen, opening scene ended.',
+      referenceImagePrompt: 'Complete black frame. No detail. The opening scene has ended.',
+      textPromptPlaceholder: '',
+      expectationSummary: '',
+      continuitySummary: 'The opening scene ends in blank darkness after the falcon ascends toward the dovecot.',
+      promptGuidance:
+        'Nothing further should be described here. Once the falcon departs and the screen cuts to black, the opening is over.',
+      directions: []
+    }
+  ];
+}
+
+function materializeRoseCourtLocationMurals(config = {}, brief = {}) {
+  const nextVariants = buildRoseCourtLocationVariantScreens(brief);
+  const nextWellScreens = buildRoseCourtWellSequenceScreens(brief);
+  const variantIds = new Set(nextVariants.map((screen) => screen.id));
+  const wellScreenIds = new Set(nextWellScreens.map((screen) => screen.id));
+  const retainedScreens = (Array.isArray(config?.screens) ? config.screens : [])
+    .filter((screen) => (
+      screen.id !== 'location_mural_gallery'
+      && !variantIds.has(screen.id)
+      && !wellScreenIds.has(screen.id)
+    ))
+    .map((screen) => {
+      if (screen.id !== 'phone_found') {
+        return screen;
+      }
+      const retainedDirections = (Array.isArray(screen.directions) ? screen.directions : [])
+        .filter((direction) => direction.targetScreenId !== 'location_mural_gallery');
+      return {
+        ...screen,
+        directions: [
+          ...retainedDirections,
+          {
+            direction: 'forward',
+            label: 'Approach the second wall of murals',
+            targetScreenId: 'location_mural_gallery'
+          }
+        ]
+      };
+    });
+
+  const galleryScreen = {
+    id: 'location_mural_gallery',
+    title: 'Second Wall of Murals',
+    prompt:
+      `The wall answers the earthly destination with three new murals. Each one is unmistakably ${brief?.placeName || 'the place you named'}, but each leans into a different shelter, mood, and way of writing there.`,
+    imageUrl: '/ruin_south_a.png',
+    image_prompt:
+      `A second trio of ancient murals interpreting ${brief?.placeName || 'a named earthly destination'} in three distinct moods, all on the same ruined rose wall at dusk.`,
+    referenceImagePrompt:
+      `Wide ceremonial view of the second rose wall at dusk. Three newly appeared murals all interpret ${brief?.placeName || 'the confirmed earthly destination'} in different moods of shelter, but they clearly belong to one real location. Include ouroboros-like ring handles on the mural doors and weathered ruin textures.`,
+    textPromptPlaceholder: 'Choose which mural interpretation you want to inspect.',
+    expectationSummary: 'Three new mural interpretations now fit the earthly destination given to the clerk.',
+    continuitySummary: 'These murals were materialized in response to the confirmed address, not discovered before it.',
+    promptGuidance:
+      'This gallery confirms that the court has accepted the earthly address. All three murals should be recognisably the same place, varied by mood and shelter rather than by geography. The sense should be selection, not randomness.',
+    directions: nextVariants.map((screen) => screen._direction),
+    stageLayout: 'focus-left',
+    stageModules: [
+      {
+        module_id: 'location-gallery-note',
+        type: 'evidence_note',
+        title: 'Confirmed Destination',
+        body: brief?.placeSummary || '',
+        caption: brief?.placeName || ''
+      }
+    ]
+  };
+
+  return {
+    config: {
+      ...config,
+      screens: [
+        ...retainedScreens,
+        galleryScreen,
+        ...nextVariants.map((screen) => {
+          const nextScreen = { ...screen };
+          delete nextScreen._direction;
+          return nextScreen;
+        }),
+        ...nextWellScreens
+      ]
+    },
+    screen: galleryScreen,
+    generatedScreens: nextVariants.map((screen) => {
+      const nextScreen = { ...screen };
+      delete nextScreen._direction;
+      return nextScreen;
+    })
+  };
+}
+
 async function advanceQuest(payload = {}) {
   const scope = normalizeQuestScope(payload);
   const config = await ensureQuestConfig(scope);
@@ -4129,6 +5504,38 @@ async function advanceQuest(payload = {}) {
     throw error;
   }
 
+  const authoredPromptAdvance = resolveQuestAuthoredPromptAdvance(config, currentScreen, promptText);
+  if (authoredPromptAdvance?.screen?.id) {
+    const eventResult = await appendQuestTraversalEvent({
+      ...scope,
+      playerId,
+      fromScreenId: currentScreen.id,
+      toScreenId: authoredPromptAdvance.screen.id,
+      direction: 'prompt',
+      promptText
+    });
+
+    return {
+      sessionId: scope.sessionId,
+      questId: scope.questId,
+      actionType,
+      config,
+      screen: authoredPromptAdvance.screen,
+      createdScreen: null,
+      event: eventResult?.event || null,
+      traversalCount: eventResult?.traversalCount || 0,
+      mocked: false,
+      runtime: null,
+      mockedData: {
+        source: 'authored-prompt-route',
+        routeId: authoredPromptAdvance.route?.id || '',
+        routeDescription: authoredPromptAdvance.route?.description || '',
+        matchedPrompt: promptText,
+        targetScreenId: authoredPromptAdvance.screen.id
+      }
+    };
+  }
+
   const anchorScreen = resolveQuestAnchorScreen(currentScreen, screenMap) || currentScreen;
   const traversalPayload = await getQuestTraversal(scope);
   const traversal = Array.isArray(traversalPayload?.traversal) ? traversalPayload.traversal : [];
@@ -4138,6 +5545,7 @@ async function advanceQuest(payload = {}) {
     resolveMockMode(payload, questPipeline.useMock)
   );
   const promptPayload = buildQuestAdvancePromptPayload({
+    config,
     currentScreen,
     anchorScreen,
     promptText,
@@ -4177,15 +5585,17 @@ async function advanceQuest(payload = {}) {
       throw createQuestAdvanceError('Quest advance generation failed.', { runtime });
     }
 
+    const contractCandidate = coerceQuestAdvanceContractPayload(rawResponse);
+
     try {
-      await validatePayloadForRoute(QUEST_ADVANCE_CONTRACT_KEY, rawResponse);
+      await validatePayloadForRoute(QUEST_ADVANCE_CONTRACT_KEY, contractCandidate);
     } catch (error) {
       error.statusCode = error.statusCode || 502;
       error.runtime = runtime;
       throw error;
     }
 
-    generationPlan = rawResponse;
+    generationPlan = contractCandidate;
   }
 
   const generated = buildGeneratedQuestScreen(config, currentScreen, promptText, playerId, generationPlan);
@@ -4237,9 +5647,21 @@ function sanitizeQuestConfig(payload, { preserveUpdatedAt = false, fallbackScope
   const normalizedScreens = Array.isArray(source.screens)
     ? source.screens.map(normalizeQuestScreen).filter(Boolean)
     : [];
+  const authoringBrief = typeof source.authoringBrief === 'string'
+    ? source.authoringBrief.trim()
+    : '';
+  const phaseGuidance = typeof source.phaseGuidance === 'string'
+    ? source.phaseGuidance.trim()
+    : '';
+  const visualStyleGuide = typeof source.visualStyleGuide === 'string'
+    ? source.visualStyleGuide.trim()
+    : '';
+  const promptRoutes = Array.isArray(source.promptRoutes)
+    ? source.promptRoutes.map(normalizeQuestPromptRoute).filter(Boolean)
+    : [];
 
   if (!normalizedScreens.length) {
-    const fallback = cloneDefaultQuestConfig();
+    const fallback = cloneDefaultQuestConfig(scope);
     return {
       ...fallback,
       sessionId: scope.sessionId,
@@ -4279,6 +5701,10 @@ function sanitizeQuestConfig(payload, { preserveUpdatedAt = false, fallbackScope
     sessionId: scope.sessionId,
     questId: scope.questId,
     startScreenId,
+    authoringBrief,
+    phaseGuidance,
+    visualStyleGuide,
+    promptRoutes: promptRoutes.filter((route) => validIds.has(route.targetScreenId)),
     screens,
     updatedAt
   };
@@ -4339,6 +5765,24 @@ function validateQuestConfigPayload(payload) {
     errors.push(`startScreenId "${startScreenId}" must match one of the screen ids.`);
   }
 
+  if (Array.isArray(payload.promptRoutes)) {
+    payload.promptRoutes.forEach((route, index) => {
+      const normalizedRoute = normalizeQuestPromptRoute(route);
+      if (!normalizedRoute) {
+        errors.push(`promptRoutes[${index}] must include targetScreenId and at least one pattern.`);
+        return;
+      }
+      if (!screenIds.has(normalizedRoute.targetScreenId)) {
+        errors.push(`promptRoutes[${index}] points to unknown screen "${normalizedRoute.targetScreenId}".`);
+      }
+      normalizedRoute.fromScreenIds.forEach((screenId) => {
+        if (!screenIds.has(screenId)) {
+          errors.push(`promptRoutes[${index}] references unknown fromScreenId "${screenId}".`);
+        }
+      });
+    });
+  }
+
   return errors;
 }
 
@@ -4363,6 +5807,10 @@ function toQuestResponse(doc, fallbackScope = {}) {
       sessionId: doc?.sessionId,
       questId: doc?.questId,
       startScreenId: doc?.startScreenId,
+      authoringBrief: doc?.authoringBrief,
+      phaseGuidance: doc?.phaseGuidance,
+      visualStyleGuide: doc?.visualStyleGuide,
+      promptRoutes: doc?.promptRoutes || [],
       screens: doc?.screens || [],
       updatedAt: doc?.updatedAt ? new Date(doc.updatedAt).toISOString() : undefined
     },
@@ -4382,7 +5830,7 @@ async function ensureQuestConfig(scopePayload = {}) {
   }
 
   const seedSource = {
-    ...cloneDefaultQuestConfig(),
+    ...cloneDefaultQuestConfig(scope),
     sessionId: scope.sessionId,
     questId: scope.questId
   };
@@ -4394,6 +5842,10 @@ async function ensureQuestConfig(scopePayload = {}) {
         sessionId: scope.sessionId,
         questId: scope.questId,
         startScreenId: seed.startScreenId,
+        authoringBrief: seed.authoringBrief,
+        phaseGuidance: seed.phaseGuidance,
+        visualStyleGuide: seed.visualStyleGuide,
+        promptRoutes: seed.promptRoutes,
         screens: seed.screens
       },
       $setOnInsert: { traversalLog: [] }
@@ -4415,6 +5867,10 @@ async function saveQuestConfig(payload = {}, scopePayload = {}) {
         sessionId: scope.sessionId,
         questId: scope.questId,
         startScreenId: nextConfig.startScreenId,
+        authoringBrief: nextConfig.authoringBrief,
+        phaseGuidance: nextConfig.phaseGuidance,
+        visualStyleGuide: nextConfig.visualStyleGuide,
+        promptRoutes: nextConfig.promptRoutes,
         screens: nextConfig.screens
       },
       $setOnInsert: { traversalLog: [] }
@@ -4428,7 +5884,7 @@ async function saveQuestConfig(payload = {}, scopePayload = {}) {
 async function resetQuestConfig(scopePayload = {}) {
   const scope = normalizeQuestScope(scopePayload);
   const resetSource = {
-    ...cloneDefaultQuestConfig(),
+    ...cloneDefaultQuestConfig(scope),
     sessionId: scope.sessionId,
     questId: scope.questId
   };
@@ -4440,6 +5896,10 @@ async function resetQuestConfig(scopePayload = {}) {
         sessionId: scope.sessionId,
         questId: scope.questId,
         startScreenId: resetConfig.startScreenId,
+        authoringBrief: resetConfig.authoringBrief,
+        phaseGuidance: resetConfig.phaseGuidance,
+        visualStyleGuide: resetConfig.visualStyleGuide,
+        promptRoutes: resetConfig.promptRoutes,
         screens: resetConfig.screens,
         traversalLog: []
       }
@@ -4489,6 +5949,62 @@ async function getQuestTraversal(scopePayload = {}) {
     sessionId: scope.sessionId,
     questId: scope.questId,
     traversal: Array.isArray(doc?.traversalLog) ? doc.traversalLog : []
+  };
+}
+
+async function materializeRoseCourtLocationMuralsForQuest(payload = {}) {
+  const scope = normalizeQuestScope(payload, {
+    sessionId: ROSE_COURT_PROLOGUE_SESSION_ID,
+    questId: ROSE_COURT_PROLOGUE_QUEST_ID
+  });
+
+  if (!isRoseCourtPrologueQuest(scope.questId)) {
+    const error = new Error('Rose Court mural materialization is only available for the rose court prologue quest.');
+    error.statusCode = 400;
+    error.code = 'ROSE_COURT_INVALID_QUEST';
+    throw error;
+  }
+
+  const sceneId = normalizeMessengerSceneId(payload.sceneId || ROSE_COURT_LOCATION_MESSENGER_SCENE_ID);
+  const persistence = await resolveMessengerPersistenceMode();
+  const brief = await getMessengerSceneBrief(scope.sessionId, sceneId, persistence);
+  if (!brief || !isMessengerSceneBriefComplete(brief, sceneId)) {
+    const error = new Error('The rose court location has not been confirmed yet.');
+    error.statusCode = 400;
+    error.code = 'ROSE_COURT_LOCATION_INCOMPLETE';
+    throw error;
+  }
+
+  const config = await ensureQuestConfig(scope);
+  const materialized = materializeRoseCourtLocationMurals(config, brief);
+  const savedConfig = await saveQuestConfig({
+    ...materialized.config,
+    sessionId: scope.sessionId,
+    questId: scope.questId
+  }, scope);
+
+  const playerId = typeof payload.playerId === 'string' ? payload.playerId.trim() : '';
+  const fromScreenId = typeof payload.fromScreenId === 'string' && payload.fromScreenId.trim()
+    ? payload.fromScreenId.trim()
+    : 'phone_found';
+  const eventResult = await appendQuestTraversalEvent({
+    ...scope,
+    playerId,
+    fromScreenId,
+    toScreenId: materialized.screen.id,
+    direction: 'transmission'
+  });
+
+  return {
+    sessionId: scope.sessionId,
+    questId: scope.questId,
+    sceneId,
+    config: savedConfig,
+    screen: materialized.screen,
+    generatedScreens: materialized.generatedScreens,
+    sceneBrief: brief,
+    event: eventResult?.event || null,
+    traversalCount: eventResult?.traversalCount || 0
   };
 }
 
@@ -5101,6 +6617,184 @@ app.post('/api/admin/quest/screens/reset', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/admin/quest/scene-image', requireAdmin, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const scope = normalizeQuestScope(payload);
+    const screenId = typeof payload.screenId === 'string' ? payload.screenId.trim() : '';
+    if (!screenId) {
+      return res.status(400).json({ message: 'screenId is required.' });
+    }
+
+    const parsedImage = parseQuestSceneImageDataUrl(payload.dataUrl);
+    if (!parsedImage) {
+      return res.status(400).json({ message: 'dataUrl must be a base64 data URL for a PNG, JPEG, WEBP, or GIF image.' });
+    }
+
+    if (parsedImage.buffer.length > MAX_QUEST_SCENE_UPLOAD_BYTES) {
+      return res.status(413).json({ message: 'Scene image upload is too large. Maximum size is 8 MB.' });
+    }
+
+    const config = await ensureQuestConfig(scope);
+    const screen = Array.isArray(config?.screens)
+      ? config.screens.find((item) => item?.id === screenId)
+      : null;
+    if (!screen) {
+      return res.status(404).json({ message: `Unknown screen "${screenId}".` });
+    }
+
+    const uploadTarget = buildQuestSceneUploadAssetPath({
+      sessionId: scope.sessionId,
+      questId: scope.questId,
+      screenId,
+      filename: payload.filename,
+      mimeType: parsedImage.mimeType
+    });
+
+    await fsPromises.mkdir(uploadTarget.absoluteDir, { recursive: true });
+    await fsPromises.writeFile(uploadTarget.absolutePath, parsedImage.buffer);
+
+    return res.status(201).json({
+      sessionId: scope.sessionId,
+      questId: scope.questId,
+      screenId,
+      imageUrl: uploadTarget.imageUrl,
+      storedFilename: uploadTarget.storedFilename,
+      mimeType: parsedImage.mimeType,
+      bytes: parsedImage.buffer.length
+    });
+  } catch (error) {
+    console.error('Error in POST /api/admin/quest/scene-image:', error);
+    return res.status(500).json({ message: 'Server error while uploading quest scene image.' });
+  }
+});
+
+app.post('/api/admin/quest/authoring-draft', requireAdmin, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const scope = normalizeQuestScope(payload);
+    const mode = ['scene', 'selected_screen', 'fill_missing'].includes(
+      typeof payload.mode === 'string' ? payload.mode.trim() : ''
+    )
+      ? payload.mode.trim()
+      : 'fill_missing';
+    const incomingConfig = payload.config && typeof payload.config === 'object'
+      ? sanitizeQuestConfig(
+          {
+            ...payload.config,
+            sessionId: scope.sessionId,
+            questId: scope.questId
+          },
+          { fallbackScope: scope }
+        )
+      : await ensureQuestConfig(scope);
+    const screens = Array.isArray(incomingConfig?.screens) ? incomingConfig.screens : [];
+    const requestedScreenId = typeof payload.selectedScreenId === 'string' ? payload.selectedScreenId.trim() : '';
+    const selectedScreen = screens.find((screen) => screen?.id === requestedScreenId)
+      || screens.find((screen) => screen?.id === incomingConfig.startScreenId)
+      || screens[0]
+      || null;
+    const selectedScreenId = selectedScreen?.id || '';
+    const questPipeline = await getAiPipelineSettings(QUEST_SCENE_AUTHORING_PIPELINE_KEY);
+    const runtime = buildQuestSceneAuthoringRuntime(
+      questPipeline,
+      resolveMockMode(payload, questPipeline.useMock)
+    );
+    const promptPayload = buildQuestSceneAuthoringPromptPayload({
+      config: incomingConfig,
+      selectedScreen,
+      mode
+    });
+    const fallbackPromptSource = buildQuestPromptSourceDetails({
+      latestPrompt: null,
+      routeConfig: {
+        promptCore: getDefaultQuestSceneAuthoringPromptTemplate(),
+        updatedBy: 'code-default'
+      }
+    });
+
+    let promptSource = fallbackPromptSource;
+    let rawDraft = null;
+    let compiledPrompt = '';
+
+    if (runtime.mocked) {
+      rawDraft = buildMockQuestSceneAuthoringDraft({
+        config: incomingConfig,
+        selectedScreen,
+        mode
+      });
+    } else {
+      const { promptTemplate, latestPrompt } = await resolveQuestSceneAuthoringRuntimeConfig();
+      promptSource = buildQuestPromptSourceDetails({
+        latestPrompt,
+        routeConfig: {
+          promptCore: getDefaultQuestSceneAuthoringPromptTemplate(),
+          updatedBy: 'code-default'
+        }
+      });
+      const promptMessages = buildQuestSceneAuthoringPromptMessages({
+        promptTemplate,
+        promptPayload
+      });
+      compiledPrompt = promptMessages.compiledPrompt || '';
+      const rawResponse = await callJsonLlm({
+        prompts: promptMessages.prompts,
+        provider: runtime.provider,
+        model: runtime.model || '',
+        max_tokens: 2200,
+        explicitJsonObjectFormat: true
+      });
+      if (!rawResponse || typeof rawResponse !== 'object') {
+        const error = new Error('Quest scene authoring draft generation failed.');
+        error.statusCode = 502;
+        throw error;
+      }
+      rawDraft = rawResponse;
+    }
+
+    const draft = normalizeQuestSceneAuthoringDraft(rawDraft, {
+      config: incomingConfig,
+      selectedScreenId,
+      mode
+    });
+    const changes = flattenQuestSceneAuthoringChanges(draft, incomingConfig);
+
+    return res.status(200).json({
+      sessionId: scope.sessionId,
+      questId: scope.questId,
+      mode,
+      selectedScreenId,
+      mocked: runtime.mocked,
+      runtime,
+      promptSource,
+      promptPayload,
+      compiledPrompt,
+      summary: draft.summary,
+      draft,
+      changes
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message, code: error.code || 'QUEST_AUTHORING_DRAFT_ERROR' });
+    }
+    console.error('Error in POST /api/admin/quest/authoring-draft:', error);
+    return res.status(500).json({ message: 'Server error while generating quest authoring draft.' });
+  }
+});
+
+app.post('/api/admin/quest/debug-context', requireAdmin, async (req, res) => {
+  try {
+    const debugContext = await buildQuestDebugContext(req.body || {});
+    return res.status(200).json(debugContext);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message, code: error.code || 'QUEST_DEBUG_ERROR' });
+    }
+    console.error('Error in POST /api/admin/quest/debug-context:', error);
+    return res.status(500).json({ message: 'Server error while inspecting quest debug context.' });
+  }
+});
+
 app.post('/api/quest/traversal', async (req, res) => {
   try {
     const payload = req.body || {};
@@ -5122,6 +6816,23 @@ app.get('/api/quest/traversal', async (req, res) => {
   } catch (error) {
     console.error('Error in GET /api/quest/traversal:', error);
     return res.status(500).json({ message: 'Server error while loading traversal events.' });
+  }
+});
+
+app.post('/api/rose-court/prologue/materialize-location', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const result = await materializeRoseCourtLocationMuralsForQuest(payload);
+    return res.status(200).json(result);
+  } catch (error) {
+    if (
+      error.code === 'ROSE_COURT_INVALID_QUEST'
+      || error.code === 'ROSE_COURT_LOCATION_INCOMPLETE'
+    ) {
+      return res.status(error.statusCode || 400).json({ message: error.message });
+    }
+    console.error('Error in POST /api/rose-court/prologue/materialize-location:', error);
+    return res.status(500).json({ message: 'Server error while materializing rose court location murals.' });
   }
 });
 
