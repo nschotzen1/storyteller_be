@@ -20,13 +20,13 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
   memory_card_front: {
     key: 'memory_card_front',
     label: 'Memory card front',
-    description: '/api/fragmentToMemories front image prompt',
+    description: '/api/memories/:memoryId/textToImage/front image prompt',
     settingsKey: 'texture_creation'
   },
   memory_card_back: {
     key: 'memory_card_back',
     label: 'Memory card back',
-    description: '/api/fragmentToMemories back image prompt',
+    description: '/api/memories/:memoryId/textToImage/back image prompt',
     settingsKey: 'texture_creation'
   },
   entity_creation: {

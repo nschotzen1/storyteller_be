@@ -5,6 +5,16 @@ export const QUEST_SCENE_AUTHORING_MODES = ['scene', 'selected_screen', 'fill_mi
 export const QUEST_VISUAL_TRANSITION_INTENTS = ['inherit', 'drift', 'break'];
 
 const SCENE_FIELD_ALIASES = {
+  scenename: 'sceneName',
+  scene_name: 'sceneName',
+  scenetemplate: 'sceneTemplate',
+  scene_template: 'sceneTemplate',
+  scenemode: 'sceneTemplate',
+  scene_mode: 'sceneTemplate',
+  scenecomponents: 'sceneComponents',
+  scene_components: 'sceneComponents',
+  attachedcomponents: 'sceneComponents',
+  attached_components: 'sceneComponents',
   authoringbrief: 'authoringBrief',
   authoring_brief: 'authoringBrief',
   masterbrief: 'authoringBrief',
@@ -39,6 +49,9 @@ const SCREEN_FIELD_ALIASES = {
 };
 
 const CHANGE_LABELS = {
+  sceneName: 'Scene Name',
+  sceneTemplate: 'Base Scene Template',
+  sceneComponents: 'Attached Components',
   authoringBrief: 'Master Scene Brief',
   phaseGuidance: 'GM Scene Guide',
   visualStyleGuide: 'Scene Visual Guide',
@@ -88,6 +101,24 @@ function normalizeScreenField(fieldName = '') {
 function normalizeVisualTransitionIntent(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   return QUEST_VISUAL_TRANSITION_INTENTS.includes(normalized) ? normalized : 'inherit';
+}
+
+function normalizeSceneComponentId(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_-]+/g, '')
+    .slice(0, 64);
+}
+
+function normalizeSceneComponentList(value = []) {
+  const entries = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [];
+  return [...new Set(entries.map((entry) => normalizeSceneComponentId(entry)).filter(Boolean))];
 }
 
 function ensureUniqueId(baseId = '', existingIds = new Set()) {
@@ -163,8 +194,13 @@ function normalizeSceneUpdates(candidate = {}) {
       .map((entry) => {
         const source = asObject(entry);
         const field = normalizeSceneField(source.field || source.name || source.key);
+        if (!field) return null;
+        if (field === 'sceneComponents') {
+          const value = normalizeSceneComponentList(source.value);
+          return { field, value };
+        }
         const value = asTrimmedString(source.value);
-        if (!field || !value) return null;
+        if (!value) return null;
         return { field, value };
       })
       .filter(Boolean);
@@ -174,8 +210,13 @@ function normalizeSceneUpdates(candidate = {}) {
   return Object.entries(source)
     .map(([fieldName, value]) => {
       const field = normalizeSceneField(fieldName);
+      if (!field) return null;
+      if (field === 'sceneComponents') {
+        const nextValue = normalizeSceneComponentList(value);
+        return { field, value: nextValue };
+      }
       const nextValue = asTrimmedString(value);
-      if (!field || !nextValue) return null;
+      if (!nextValue) return null;
       return { field, value: nextValue };
     })
     .filter(Boolean);
@@ -264,7 +305,22 @@ function buildCompactScreenSummary(screen = {}) {
     scene_end_condition: truncateText(screen.sceneEndCondition, 180),
     visual_continuity_guidance: truncateText(screen.visualContinuityGuidance, 180),
     visual_transition_intent: normalizeVisualTransitionIntent(screen.visualTransitionIntent),
+    component_bindings: Array.isArray(screen.componentBindings)
+      ? screen.componentBindings.map((binding) => ({
+          component_id: asTrimmedString(binding?.componentId),
+          slot: asTrimmedString(binding?.slot),
+          props: asObject(binding?.props)
+        }))
+      : [],
     directions: buildDirectionListSummary(screen.directions)
+  };
+}
+
+function buildSceneIdentitySummary(config = {}) {
+  return {
+    scene_name: asTrimmedString(config?.sceneName),
+    scene_template: asTrimmedString(config?.sceneTemplate),
+    scene_components: Array.isArray(config?.sceneComponents) ? config.sceneComponents : []
   };
 }
 
@@ -360,6 +416,7 @@ function normalizeNewScreen(screen = {}, validIds = new Set()) {
     promptGuidance: asTrimmedString(source.prompt_guidance || source.promptGuidance),
     sceneEndCondition: asTrimmedString(source.scene_end_condition || source.sceneEndCondition),
     textPromptPlaceholder: asTrimmedString(source.text_prompt_placeholder || source.textPromptPlaceholder) || 'What do you do?',
+    componentBindings: [],
     screenType: 'authored',
     directions
   };
@@ -437,6 +494,9 @@ Your priorities:
 Mode: {{authoringMode}}
 Quest scope: {{questId}} in session {{sessionId}}
 
+Scene identity:
+{{sceneIdentity}}
+
 Master scene brief:
 {{authoringBrief}}
 
@@ -462,7 +522,7 @@ Return JSON only with this exact shape:
 {
   "summary": "short plain-language summary of the proposed draft",
   "scene_updates": [
-    { "field": "authoringBrief|phaseGuidance|visualStyleGuide", "value": "..." }
+    { "field": "sceneName|sceneTemplate|sceneComponents|authoringBrief|phaseGuidance|visualStyleGuide", "value": "..." }
   ],
   "screen_updates": [
     { "screen_id": "existing_screen_id", "field": "title|prompt|promptGuidance|sceneEndCondition|image_prompt|referenceImagePrompt|visualContinuityGuidance|visualTransitionIntent|textPromptPlaceholder", "value": "..." }
@@ -525,6 +585,7 @@ export function buildQuestSceneAuthoringPromptPayload({
     sessionId: asTrimmedString(config?.sessionId),
     questId: asTrimmedString(config?.questId),
     authoringMode: safeMode,
+    sceneIdentity: JSON.stringify(buildSceneIdentitySummary(config), null, 2),
     authoringBrief: asTrimmedString(config?.authoringBrief),
     phaseGuidance: asTrimmedString(config?.phaseGuidance),
     visualStyleGuide: asTrimmedString(config?.visualStyleGuide),
@@ -559,6 +620,18 @@ export function buildMockQuestSceneAuthoringDraft({
   const directionAdditions = [];
 
   if (safeMode !== 'selected_screen') {
+    if (safeMode === 'scene' || !asTrimmedString(config?.sceneName)) {
+      sceneUpdates.push({
+        field: 'sceneName',
+        value: asTrimmedString(config?.sceneName) || 'New Authored Scene'
+      });
+    }
+    if (safeMode === 'scene' || !asTrimmedString(config?.sceneTemplate)) {
+      sceneUpdates.push({
+        field: 'sceneTemplate',
+        value: 'basic_scene'
+      });
+    }
     if (safeMode === 'scene' || !asTrimmedString(config?.authoringBrief)) {
       sceneUpdates.push({
         field: 'authoringBrief',
@@ -742,4 +815,3 @@ export function flattenQuestSceneAuthoringChanges(draft = {}, config = {}) {
 
   return changes;
 }
-

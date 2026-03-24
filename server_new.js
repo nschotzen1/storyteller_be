@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
@@ -98,6 +99,13 @@ import {
   startTypewriterSession
 } from './services/typewriterSessionService.js';
 import {
+  drawNextWellTextualFragment,
+  getWellMemorySession,
+  handoffWellMemorySession,
+  startWellMemorySession,
+  submitWellTextualJot
+} from './services/wellMemorySessionService.js';
+import {
   buildMockMessengerSceneBrief,
   DEFAULT_IMMERSIVE_RPG_MESSENGER_SCENE_ID,
   DEFAULT_IMMERSIVE_RPG_PLAYER_ID,
@@ -136,6 +144,21 @@ import {
   getDefaultQuestSceneAuthoringPromptTemplate,
   normalizeQuestSceneAuthoringDraft
 } from './services/questSceneAuthoringService.js';
+import {
+  composeQuestSceneImagePrompt,
+  generateQuestSceneImageAsset
+} from './services/questSceneImageService.js';
+import {
+  getCanonicalProjectAssetRoot,
+  getProjectAssetRoots,
+  resolveProjectAssetUrl
+} from './services/projectAssetRootsService.js';
+import {
+  getWellSceneConfigMeta,
+  loadWellSceneConfig,
+  resetWellSceneConfig,
+  saveWellSceneConfig
+} from './services/wellSceneConfigService.js';
 
 
 const app = express();
@@ -145,18 +168,8 @@ app.use(cors());
 const PORT = process.env.PORT || 5001;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ASSETS_ROOT_CANDIDATES = [
-  path.resolve(process.cwd(), 'assets'),
-  path.resolve(process.cwd(), '../assets'),
-  path.resolve(__dirname, 'assets'),
-  path.resolve(__dirname, '../assets')
-];
-const ASSETS_ROOTS = Array.from(new Set(ASSETS_ROOT_CANDIDATES)).filter((candidatePath) =>
-  fs.existsSync(candidatePath)
-);
-if (ASSETS_ROOTS.length === 0) {
-  ASSETS_ROOTS.push(path.resolve(process.cwd(), 'assets'));
-}
+const CANONICAL_PROJECT_ASSETS_ROOT = getCanonicalProjectAssetRoot();
+const ASSETS_ROOTS = getProjectAssetRoots();
 const QUEST_SCENE_UPLOAD_SUBDIRECTORY = 'quest_scene_uploads';
 const MAX_QUEST_SCENE_UPLOAD_BYTES = 8 * 1024 * 1024;
 const QUEST_SCENE_UPLOAD_MIME_TYPES = new Map([
@@ -212,8 +225,8 @@ function buildQuestSceneUploadAssetPath({
 
   return {
     storedFilename,
-    absoluteDir: path.join(ASSETS_ROOTS[0], relativeDirectory),
-    absolutePath: path.join(ASSETS_ROOTS[0], relativeDirectory, storedFilename),
+    absoluteDir: path.join(CANONICAL_PROJECT_ASSETS_ROOT, relativeDirectory),
+    absolutePath: path.join(CANONICAL_PROJECT_ASSETS_ROOT, relativeDirectory, storedFilename),
     imageUrl: `/assets/${path.posix.join(relativeDirectory, storedFilename)}`
   };
 }
@@ -245,10 +258,11 @@ function collectTypewriterPageImages(assetRoots, subDirectory, allowedExtensions
   return Array.from(new Set(imageUrls));
 }
 
-const DEFAULT_QUEST_ID = 'ruined_rose_court';
-const DEFAULT_QUEST_SESSION_ID = 'rose-court-demo';
+const DEFAULT_QUEST_ID = 'scene_authoring_starter';
+const DEFAULT_QUEST_SESSION_ID = 'scene-authoring-demo';
 const ROSE_COURT_PROLOGUE_QUEST_ID = 'rose_court_prologue_phase_1';
 const ROSE_COURT_PROLOGUE_SESSION_ID = 'rose-court-prologue-demo';
+const DEFAULT_SCENE_TEMPLATE = 'basic_scene';
 const MOCK_STORYTELLER_ILLUSTRATION_URLS = [
   '/assets/mocks/storyteller_illustrations/stormwright_weather_speaker.png',
   '/assets/mocks/storyteller_illustrations/ashen_inkbinder.png',
@@ -335,6 +349,16 @@ const ROSE_COURT_LOCATION_FEATURE_PATTERNS = [
   { pattern: /\b(village|town|city|street|lane|road|district)\b/i, label: 'a legible earthly settlement' },
   { pattern: /\b(mountain|slope|valley|plateau|cliff)\b/i, label: 'strong surrounding terrain' }
 ];
+const ROSE_COURT_VISUAL_STYLE_GUIDE =
+  'Use an aged illuminated-manuscript fantasy language rather than glossy modern fantasy. The Hall of the Rose is an elven architectural miracle in collapse: concentric petal-walls built from wafer-thin mineral-ceramic masonry that resembles layered rose petals more than ordinary stone. The outer wall is the lowest and most weathered petal; farther inward, taller petals rise with slightly better preservation. Keep the palette dusk-gold, parchment-umber, smoke-brown, faded verdigris, and old ember light. Surfaces should feel tactile: cracked plaster, eroded mosaic, flaking tempera, carved relief, dust, ivy, and ceremonial wear. The page should feel like an old crumbling illustrated book or map plate where image and text have equal gravity. Avoid glossy blur, sterile straight-edged modern framing, neon fantasy effects, empty generic ruin photography, or overclean steampunk polish. Whenever mural doors appear, their knockers should be glowing ouroboros rings integrated into the masonry.';
+const ROSE_COURT_VISUAL_CONTINUITY_BASE =
+  'Keep the Hall of the Rose materially consistent: crumbling elven rose-petal masonry, aged manuscript warmth, dusk parchment light, tactile ruin detail, and a faint ceremonial glow in metalwork rather than overt magic effects.';
+
+function buildRoseCourtVisualContinuityGuidance(note = '') {
+  const trimmedNote = typeof note === 'string' ? note.trim() : '';
+  return trimmedNote ? `${ROSE_COURT_VISUAL_CONTINUITY_BASE} ${trimmedNote}` : ROSE_COURT_VISUAL_CONTINUITY_BASE;
+}
+
 const ROSE_COURT_OPENING_SCENE_GUIDANCE =
   'Run the opening as a ceremonial threshold disguised as a ruin. The tone should feel like a lost late-1980s quest game: melancholy, tactile, mysterious, and visually specific rather than loud. Begin with dusk, wind, erosion, and the three house-murals on the rose-petal wall. Let the player examine freely and reward curiosity with sensory detail, craftsmanship, and small discoveries instead of sudden plot leaps. The radio-static must remain faint until the player listens for it, questions it, or searches for its source. Once pursued, it should lead to the hidden handset among the rocks. The handset is not a modern earthly phone: it is a strange retro device of brass, weathered metal, and dwarven-gnomish craftsmanship that nonetheless clearly works. The clerk of the Storytellers\' Society should sound relieved, formal, discreet, and slightly anxious; he must insist on a precise real-world Earth location and reject fantastical destinations politely but firmly. After the location is confirmed, the court may answer with new murals that are all faithful reinterpretations of that same earthly place. Do not reveal later beats before they are reached: the inner court, the urgent transport question, the falcon, the well of dissolving lines, the ten-word parchment, and the blackout ending should arrive in sequence. Avoid combat, lore dumps, or random fantasy detours. Keep the feeling that the court responds to the player\'s choices without ever fully explaining itself.';
 const TYPEWRITER_DEFAULT_FONTS = [
@@ -406,275 +430,75 @@ const XEROFAG_UNDEAD_KEYWORDS = [
   'zombie',
   'zombies'
 ];
-const DEFAULT_QUEST_CONFIG = {
+const SCENE_AUTHORING_STARTER_CONFIG = Object.freeze({
   sessionId: DEFAULT_QUEST_SESSION_ID,
   questId: DEFAULT_QUEST_ID,
-  startScreenId: 'outer_gate_murals',
-  authoringBrief: '',
-  visualStyleGuide: '',
+  sceneName: 'Scene Authoring Starter',
+  sceneTemplate: DEFAULT_SCENE_TEMPLATE,
+  sceneComponents: [],
+  startScreenId: 'opening_tableau',
+  authoringBrief:
+    'A neutral starter scene for authoring new narrative screens. Replace the placeholder text, image prompts, guidance, and routes with the real scene you want to build.',
+  phaseGuidance:
+    'Treat this as an authored scene starter, not a generic sandbox. Keep play constrained to what the scene explicitly establishes, deepen the current moment before expanding, and only branch when authored routes or clear scene logic call for it.',
+  visualStyleGuide:
+    'Define one clear visual language for the scene and keep nearby screens materially consistent unless a deliberate break is specified. Favor tactile illustration over generic placeholder imagery.',
+  promptRoutes: [],
   screens: [
     {
-      id: 'outer_gate_murals',
-      title: 'Outer Wall Murals',
-      prompt: 'You stand outside the ruined rose court as sunset stains the dust. Three shattered murals stare back from the wall, and beyond them the distant rosebud of pale obsidian catches the last light.',
+      id: 'opening_tableau',
+      title: 'Opening Tableau',
+      prompt:
+        'A new scene begins here. This starter screen is waiting for its real place, its first image, and its first decisive invitation.',
       imageUrl: '/ruin_south_a.png',
-      image_prompt: 'Wide cinematic view of the ruined rose court outer wall at sunset, three eroded murals, crumbling petal-like stonework, distant pale-obsidian rosebud tower, moody fantasy archaeology style.',
-      textPromptPlaceholder: 'Which mural do you inspect first?',
-      directions: [
-        { direction: 'west', label: 'Approach left mural panel', targetScreenId: 'mural_left_panel' },
-        { direction: 'north', label: 'Approach center mural panel', targetScreenId: 'mural_center_panel' },
-        { direction: 'east', label: 'Approach right mural panel', targetScreenId: 'mural_right_panel' },
-        { direction: 'south', label: 'Circle the western periphery', targetScreenId: 'west_periphery_path' }
-      ]
-    },
-    {
-      id: 'mural_left_panel',
-      title: 'Mural of the Drowned Citadel',
-      prompt: 'The left mural shows a drowned city under constellations that do not match the current sky.',
-      imageUrl: '/arenas/petal_hex_v1.png',
-      image_prompt: 'Ruined stone mural depicting a drowned citadel under alien stars, mosaic fragments missing, warm sunset light and dust in the air.',
-      textPromptPlaceholder: 'What detail from the drowned city stands out?',
-      directions: [
-        { direction: 'east', label: 'Return to mural forecourt', targetScreenId: 'outer_gate_murals' },
-        { direction: 'inside', label: 'Slip through cracked arch nearby', targetScreenId: 'west_breach_b2' }
-      ]
-    },
-    {
-      id: 'mural_center_panel',
-      title: 'Mural of the Solitary Walker',
-      prompt: 'The center mural shows a lone figure with a staff, walking toward a rosebud-shaped shrine.',
-      imageUrl: '/ruin_south_a.png',
-      image_prompt: 'Ancient mural of a solitary traveler with staff heading toward rosebud shrine, heavy weathering, cracked plaster, melancholic sunset tones.',
-      textPromptPlaceholder: 'What do you whisper to the solitary walker?',
-      directions: [
-        { direction: 'west', label: 'Return to mural forecourt', targetScreenId: 'outer_gate_murals' },
-        { direction: 'north', label: 'Follow the path hinted in mural', targetScreenId: 'north_periphery_walk' }
-      ]
-    },
-    {
-      id: 'mural_right_panel',
-      title: 'Mural of the Procession',
-      prompt: 'The right mural depicts a masked procession carrying lanterns toward an underground door.',
-      imageUrl: '/textures/decor/film_frame_desert.png',
-      image_prompt: 'Fragmented mural of masked lantern procession moving toward subterranean doorway, ceremonial atmosphere, worn fresco textures.',
-      textPromptPlaceholder: 'What omen do you draw from the procession?',
-      directions: [
-        { direction: 'west', label: 'Return to mural forecourt', targetScreenId: 'outer_gate_murals' },
-        { direction: 'east', label: 'Walk the eastern wall trail', targetScreenId: 'east_periphery_walk' }
-      ]
-    },
-    {
-      id: 'west_periphery_path',
-      title: 'Western Periphery',
-      prompt: 'You follow the wall where stones peel like dead petals. The wind carries a damp echo, as if water hides nearby.',
-      imageUrl: '/ruin_south_a.png',
-      image_prompt: 'Periphery path along crumbling rose-petal wall stones, twilight wind, hints of hidden water source, sparse ruined columns.',
-      textPromptPlaceholder: 'How cautiously do you move along the wall?',
-      directions: [
-        { direction: 'north', label: 'Inspect low breach marked B2', targetScreenId: 'west_breach_b2' },
-        { direction: 'east', label: 'Continue toward south wall', targetScreenId: 'south_periphery_walk' },
-        { direction: 'back', label: 'Return to outer mural gate', targetScreenId: 'outer_gate_murals' }
-      ]
-    },
-    {
-      id: 'west_breach_b2',
-      title: 'Breach B2',
-      prompt: 'A narrow fracture in the wall opens into a ring of fallen pillars just inside the court.',
-      imageUrl: '/arenas/petal_hex_v1.png',
-      image_prompt: 'Close ruined breach in circular wall opening to interior fallen pillar ring, dusty ancient stone textures, late sunset glow.',
-      textPromptPlaceholder: 'Do you squeeze through or hold position?',
-      directions: [
-        { direction: 'inside', label: 'Enter through the breach', targetScreenId: 'inner_west_ambulatory' },
-        { direction: 'outside', label: 'Return to western periphery', targetScreenId: 'west_periphery_path' }
-      ]
-    },
-    {
-      id: 'north_periphery_walk',
-      title: 'Northern Periphery',
-      prompt: 'At the northern arc, the wall curves around collapsed niches. The rosebud is clearer from here, cracked but upright.',
-      imageUrl: '/ruin_south_a.png',
-      image_prompt: 'Northern arc of ruined rose court wall with collapsed niches, distant cracked rosebud structure, cinematic dusk lighting.',
-      textPromptPlaceholder: 'What catches your attention along the northern wall?',
-      directions: [
-        { direction: 'east', label: 'Continue toward eastern slope', targetScreenId: 'east_periphery_walk' },
-        { direction: 'inside', label: 'Use narrow gap into inner ring', targetScreenId: 'inner_north_ambulatory' },
-        { direction: 'back', label: 'Return to center mural panel', targetScreenId: 'mural_center_panel' }
-      ]
-    },
-    {
-      id: 'east_periphery_walk',
-      title: 'Eastern Periphery',
-      prompt: 'The eastern wall is jagged and half-collapsed. Traces of footprints lead toward a cracked stair descending beneath rubble.',
-      imageUrl: '/ruin_south_a.png',
-      image_prompt: 'Eastern ruined wall with broken stair descending under rubble, faint footprints in dust, dramatic fantasy ruins at dusk.',
-      textPromptPlaceholder: 'Do you follow the footprints?',
-      directions: [
-        { direction: 'down', label: 'Descend cracked stair', targetScreenId: 'well_approach_gallery' },
-        { direction: 'south', label: 'Continue to southern wall', targetScreenId: 'south_periphery_walk' },
-        { direction: 'back', label: 'Return to right mural panel', targetScreenId: 'mural_right_panel' }
-      ]
-    },
-    {
-      id: 'well_approach_gallery',
-      title: 'Well Approach Gallery',
-      prompt: 'A gallery of broken arches opens to a circular shaft: the rumored well along the periphery.',
-      imageUrl: '/well/well_background.png',
-      image_prompt: 'Subterranean gallery near ruined wall with broken arches opening to ancient deep well shaft, dim amber sunset spill, ominous atmosphere.',
-      textPromptPlaceholder: 'What do you test near the well rim?',
-      directions: [
-        { direction: 'down', label: 'Peer into the well', targetScreenId: 'periphery_well_rim' },
-        { direction: 'up', label: 'Climb back to eastern periphery', targetScreenId: 'east_periphery_walk' }
-      ]
-    },
-    {
-      id: 'periphery_well_rim',
-      title: 'Well of Rings',
-      prompt: 'Iron rings hang beside the shaft. Far below, water reflects a faint script: almost words.',
-      imageUrl: '/well/well_background.png',
-      image_prompt: 'Ancient stone well with hanging iron rings, dark water reflecting ghostly script, high detail fantasy ruin close-up.',
-      textPromptPlaceholder: 'What message do you think the water is trying to speak?',
-      directions: [
-        { direction: 'inside', label: 'Follow hidden side tunnel', targetScreenId: 'well_side_tunnel' },
-        { direction: 'up', label: 'Back to well approach gallery', targetScreenId: 'well_approach_gallery' }
-      ]
-    },
-    {
-      id: 'well_side_tunnel',
-      title: 'Well Side Tunnel',
-      prompt: 'A cramped tunnel curves beneath the wall and rises toward the inner court, bypassing the open breaches.',
-      imageUrl: '/well/well_background.png',
-      image_prompt: 'Narrow tunnel branching from ancient well beneath ruined wall, damp stones, faint bioluminescent marks guiding inward.',
-      textPromptPlaceholder: 'How do you keep your bearings in the tunnel?',
-      directions: [
-        { direction: 'forward', label: 'Climb toward inner ring', targetScreenId: 'inner_south_ambulatory' },
-        { direction: 'back', label: 'Return to well rim', targetScreenId: 'periphery_well_rim' }
-      ]
-    },
-    {
-      id: 'south_periphery_walk',
-      title: 'Southern Periphery',
-      prompt: 'The southern wall holds deep scars and collapsed reliefs. A larger breach marked B3 opens inward.',
-      imageUrl: '/ruin_south_a.png',
-      image_prompt: 'Southern wall of ruined rose court with heavy scarring and large breach marker, rubble and long shadows in sunset.',
-      textPromptPlaceholder: 'Do you risk the larger breach?',
-      directions: [
-        { direction: 'inside', label: 'Enter through breach B3', targetScreenId: 'south_breach_b3' },
-        { direction: 'west', label: 'Return to western periphery', targetScreenId: 'west_periphery_path' },
-        { direction: 'north', label: 'Return to eastern periphery', targetScreenId: 'east_periphery_walk' }
-      ]
-    },
-    {
-      id: 'south_breach_b3',
-      title: 'Breach B3',
-      prompt: 'Past B3 the ground dips into an inner ambulatory lined with toppled columns and pale stone petals.',
-      imageUrl: '/arenas/petal_hex_v1.png',
-      image_prompt: 'Large breach opening to inner ambulatory with toppled columns and petal-like pale stone fragments, dramatic fantasy ruins.',
-      textPromptPlaceholder: 'What do you examine first inside B3?',
-      directions: [
-        { direction: 'north', label: 'Move along inner southern ring', targetScreenId: 'inner_south_ambulatory' },
-        { direction: 'outside', label: 'Exit to southern periphery', targetScreenId: 'south_periphery_walk' }
-      ]
-    },
-    {
-      id: 'inner_west_ambulatory',
-      title: 'Inner West Ambulatory',
-      prompt: 'Inside the court, the wall murals are only ghosts of pigment. The rosebud looms larger, petals split by time.',
-      imageUrl: '/arenas/petal_hex_v1.png',
-      image_prompt: 'Interior west ambulatory of ruined circular court, faded mural traces, looming cracked rosebud center, atmospheric dust.',
-      textPromptPlaceholder: 'How do you mark your route inside the court?',
-      directions: [
-        { direction: 'east', label: 'Circle toward inner north', targetScreenId: 'inner_north_ambulatory' },
-        { direction: 'south', label: 'Circle toward inner south', targetScreenId: 'inner_south_ambulatory' },
-        { direction: 'outside', label: 'Retreat through B2', targetScreenId: 'west_breach_b2' }
-      ]
-    },
-    {
-      id: 'inner_north_ambulatory',
-      title: 'Inner North Ambulatory',
-      prompt: 'A ring of cracked paving stones encircles the rosebud. Here, tiny obsidian flakes sparkle like frost.',
-      imageUrl: '/arenas/petal_hex_v1.png',
-      image_prompt: 'Inner north ring with cracked paving and sparkling obsidian flakes around central rosebud ruin, twilight fantasy realism.',
-      textPromptPlaceholder: 'What do the obsidian flakes suggest to you?',
-      directions: [
-        { direction: 'south', label: 'Continue to inner south ring', targetScreenId: 'inner_south_ambulatory' },
-        { direction: 'center', label: 'Approach rosebud base', targetScreenId: 'rosebud_outer_threshold' },
-        { direction: 'outside', label: 'Slip back to north periphery', targetScreenId: 'north_periphery_walk' }
-      ]
-    },
-    {
-      id: 'inner_south_ambulatory',
-      title: 'Inner South Ambulatory',
-      prompt: 'The ambulatory floor is fractured by radial seams leading directly into the rosebud foundation.',
-      imageUrl: '/arenas/petal_hex_v1.png',
-      image_prompt: 'Inner south ring of ruined court with radial seams converging toward central rosebud foundation, eerie golden dusk.',
-      textPromptPlaceholder: 'Which seam do you choose to follow?',
-      directions: [
-        { direction: 'center', label: 'Follow seam to rosebud threshold', targetScreenId: 'rosebud_outer_threshold' },
-        { direction: 'west', label: 'Cross to inner west ring', targetScreenId: 'inner_west_ambulatory' },
-        { direction: 'outside', label: 'Exit through B3', targetScreenId: 'south_breach_b3' }
-      ]
-    },
-    {
-      id: 'rosebud_outer_threshold',
-      title: 'Rosebud Threshold',
-      prompt: 'At the base of the rosebud, petals of pale obsidian form a jagged crown around a sealed iris seam.',
-      imageUrl: '/textures/decor/film_frame_desert.png',
-      image_prompt: 'Close view of central rosebud ruin built from pale obsidian-like petals, jagged crown, sealed iris seam entrance, mystical ruin lighting.',
-      textPromptPlaceholder: 'How do you test the seam between stone petals?',
-      directions: [
-        { direction: 'down', label: 'Search lower fissure for entry', targetScreenId: 'rosebud_lower_fissure' },
-        { direction: 'back', label: 'Return to inner north ring', targetScreenId: 'inner_north_ambulatory' },
-        { direction: 'south', label: 'Return to inner south ring', targetScreenId: 'inner_south_ambulatory' }
-      ]
-    },
-    {
-      id: 'rosebud_lower_fissure',
-      title: 'Lower Fissure',
-      prompt: 'A narrow fissure opens between petals. The air inside smells of wet stone and old incense.',
-      imageUrl: '/textures/decor/film_frame_desert.png',
-      image_prompt: 'Narrow fissure between giant rosebud stone petals, faint interior glow, damp ancient air, cinematic fantasy close-up.',
-      textPromptPlaceholder: 'Do you force the fissure or listen first?',
-      directions: [
-        { direction: 'inside', label: 'Enter the fissure passage', targetScreenId: 'rosebud_entry_passage' },
-        { direction: 'back', label: 'Back to rosebud threshold', targetScreenId: 'rosebud_outer_threshold' }
-      ]
-    },
-    {
-      id: 'rosebud_entry_passage',
-      title: 'Rosebud Entry Passage',
-      prompt: 'You crawl into a petal-shaped corridor of fragile obsidian stone. This is the first true entrance.',
-      imageUrl: '/textures/decor/film_frame_desert.png',
-      image_prompt: 'Interior passage inside rosebud-shaped ruin, petal-like obsidian walls, dim amber guidance light, sacred ruin atmosphere.',
-      textPromptPlaceholder: 'What do you leave as a marker at the entrance?',
-      directions: [
-        { direction: 'forward', label: 'Descend to inner antechamber', targetScreenId: 'rosebud_inner_antechamber' },
-        { direction: 'back', label: 'Retreat to lower fissure', targetScreenId: 'rosebud_lower_fissure' }
-      ]
-    },
-    {
-      id: 'rosebud_inner_antechamber',
-      title: 'Inner Antechamber',
-      prompt: 'An antechamber opens beneath the rosebud. Four carved rings encircle a final sealed iris gate.',
-      imageUrl: '/textures/decor/film_frame_desert.png',
-      image_prompt: 'Hidden antechamber beneath ruined rosebud, four carved rings around a sealed iris gate, sacred subterranean fantasy architecture.',
-      textPromptPlaceholder: 'What do you do before touching the iris gate?',
-      directions: [
-        { direction: 'back', label: 'Return to entry passage', targetScreenId: 'rosebud_entry_passage' }
-      ]
+      image_prompt:
+        'Opening tableau illustration for a newly authored narrative scene, atmospheric and tactile, with one clear focal environment and no mandatory characters.',
+      referenceImagePrompt:
+        'Standalone illustrated opening tableau for a newly authored narrative scene. Establish one clear place, one strong mood, and one readable focal structure or landmark so later screens can inherit the same visual language. The image should feel intentional, tactile, and story-rich rather than like a placeholder concept sheet.',
+      promptGuidance:
+        'Use this starter screen as the first authored threshold. Clarify what the player sees, hears, and can inspect before adding deeper scene logic.',
+      sceneEndCondition:
+        'This starter beat should end when the player commits to the first meaningful movement, inspection, or contact that defines the real scene graph.',
+      visualContinuityGuidance:
+        'This is the establishing plate for the authored scene. Set the material language clearly so adjacent screens can inherit it, drift from it, or break from it deliberately.',
+      visualTransitionIntent: 'inherit',
+      textPromptPlaceholder: 'What do you do?',
+      directions: []
     }
   ]
-};
+});
+
+const SCENE_AUTHORING_STARTER_AUTHORING_DEFAULTS = Object.freeze({
+  sceneName: SCENE_AUTHORING_STARTER_CONFIG.sceneName,
+  sceneTemplate: SCENE_AUTHORING_STARTER_CONFIG.sceneTemplate,
+  sceneComponents: SCENE_AUTHORING_STARTER_CONFIG.sceneComponents,
+  authoringBrief: SCENE_AUTHORING_STARTER_CONFIG.authoringBrief,
+  phaseGuidance: SCENE_AUTHORING_STARTER_CONFIG.phaseGuidance,
+  visualStyleGuide: SCENE_AUTHORING_STARTER_CONFIG.visualStyleGuide,
+  promptRoutes: [],
+  screensById: {
+    opening_tableau: {
+      referenceImagePrompt: SCENE_AUTHORING_STARTER_CONFIG.screens[0].referenceImagePrompt,
+      promptGuidance: SCENE_AUTHORING_STARTER_CONFIG.screens[0].promptGuidance,
+      sceneEndCondition: SCENE_AUTHORING_STARTER_CONFIG.screens[0].sceneEndCondition,
+      visualContinuityGuidance: SCENE_AUTHORING_STARTER_CONFIG.screens[0].visualContinuityGuidance,
+      visualTransitionIntent: SCENE_AUTHORING_STARTER_CONFIG.screens[0].visualTransitionIntent
+    }
+  }
+});
 
 function buildRoseCourtPrologueQuestConfig() {
   return {
     sessionId: ROSE_COURT_PROLOGUE_SESSION_ID,
     questId: ROSE_COURT_PROLOGUE_QUEST_ID,
+    sceneName: 'Rose Court Opening',
+    sceneTemplate: DEFAULT_SCENE_TEMPLATE,
+    sceneComponents: ['messenger', 'location_mural_materializer', 'well_sequence', 'rose_court_opening_sequence'],
     startScreenId: 'outer_wall_plateau',
     authoringBrief:
       'Opening scene: a player arrives before the outer wall of the Hall of the Rose, notices three weather-eaten murals and a faint static signal, discovers a dwarven-gnomish handset hidden among rocks, and is pressed by Clerk Vale to name a precise real-world Earth destination for a custom typewriter.',
     phaseGuidance: ROSE_COURT_OPENING_SCENE_GUIDANCE,
-    visualStyleGuide:
-      'Late-1980s quest-game framing, tactile ruined stone, dusk wind, eroded mural craftsmanship, restrained radio-static unease, and deliberate continuity from one mural or threshold to the next.',
+    visualStyleGuide: ROSE_COURT_VISUAL_STYLE_GUIDE,
     promptRoutes: [
       {
         id: 'rose-court-follow-signal',
@@ -722,14 +546,24 @@ function buildRoseCourtPrologueQuestConfig() {
           'Evening wind crosses the plateau. Ahead, a crumbling wall opens like stone rose petals, bearing three murals half-lost to weather and time. One shows an attic high above a city, one a cabin in dark woods, one a country cottage holding onto its grace. Beneath the wind, a faint radio hiss worries the air.',
         imageUrl: '/ruin_south_a.png',
         image_prompt:
-          'Retro Sierra-like fantasy quest opening screen, evening plateau before a crumbling wall shaped like rose petals, three ancient murals barely visible, faint uncanny radio-static implied, windswept dusk atmosphere.',
+          'Aged illuminated-manuscript quest opening, dusk plateau before the lowest rose-petal wall of a ruined elven court, three fading murals in different artistic media, distant higher petals visible inward, glowing ouroboros ring handles, faint radio-static unease.',
         referenceImagePrompt:
-          'Wide player-view adventure-game frame at dusk on a strange plateau. A crumbling outer wall shaped like giant rose petals dominates the scene. Three ancient murals are barely readable in the weathered stone: one attic high over a city, one remote forest cabin, one graceful country cottage. Scattered rocks in the foreground. No characters. Windy, melancholic, tactile, late-1980s quest-game mood.',
+          'Wide illustrated storybook plate at dusk on a lonely plateau. The player faces the lowest outer petal of the Hall of the Rose, an elven architectural miracle now collapsing into wafer-thin mineral-ceramic petals rather than ordinary stone. The wall should resemble a rose opening in ruin. In the distance, taller inner petals rise more intact. Three faded murals are set into the wall, each with a glowing ouroboros ring knocker: the left mural is a fractured mosaic of an attic above a city, the center mural is a weather-worn traditional painting of a forest cabin, and the right mural is an incised relief with traces of gilt showing a country cottage. Scattered rocks in the foreground, evening wind, parchment-gold and smoke-brown palette, tactile age, no characters.',
         textPromptPlaceholder: 'Examine the murals, ask about the hiss, or search the plateau.',
         expectationSummary: 'An outer threshold: wind, murals, and the hint of a hidden transmission.',
         continuitySummary: 'The opening gives you only weather, stone, and a sound that should not be here.',
+        visualContinuityGuidance:
+          buildRoseCourtVisualContinuityGuidance('This establishing plate must set the full material logic of the court: the outermost petal is the most ruined, the inward petals are visible but more intact, and the three mural media are already distinct before the player approaches them.'),
+        visualTransitionIntent: 'inherit',
         promptGuidance:
           'Keep this opening screen observational. The player should meet the court through wind, dusk, erosion, and almost-erased craftsmanship. The static is real but still easy to miss; do not make it dominant until the player listens for it or asks about it.',
+        componentBindings: [
+          {
+            componentId: 'rose_court_opening_sequence',
+            slot: 'scene_intro',
+            props: {}
+          }
+        ],
         directions: [
           { direction: 'west', label: 'Inspect the attic mural', targetScreenId: 'mural_attic_panel' },
           { direction: 'north', label: 'Inspect the woodland cabin mural', targetScreenId: 'mural_cabin_panel' },
@@ -744,12 +578,15 @@ function buildRoseCourtPrologueQuestConfig() {
           'The left mural shows a narrow attic perched above black roofs and needled towers. The workmanship is exquisite, but weather has eaten whole corners from it.',
         imageUrl: '/ruin_south_a.png',
         image_prompt:
-          'Ancient mural panel of a hidden attic atop a dense late-industrial skyline, cracked plaster, eroded pigments, romantic urban height, weather damage and age.',
+          'Close mural study in cracked rose-petal masonry, attic above a city rendered as broken stone-and-glass mosaic, urban height and weathered elegance, ancient ouroboros door ring nearby.',
         referenceImagePrompt:
-          'Close study of the left mural carved into an ancient ruin wall: a narrow attic room perched above dark city roofs and thin tower spires, half-lost to erosion and cracked plaster. Stone dust, missing sections, elegant craftsmanship surviving ruin. Romantic verticality, no living figures.',
+          'Close view of the left mural embedded in the rose-petal wall. This mural should be distinctly mosaic: tiny fractured stone-and-glass tesserae showing a narrow attic room perched above dark roofs and needle-thin towers. The image is incomplete where erosion has eaten whole corners away. The surrounding wall still reads as petal-like elven ruin masonry, and the dormant but faintly luminous ouroboros ring handle should be integrated into the mural surface. Romantic verticality, antique craftsmanship, no living figures.',
         textPromptPlaceholder: 'What detail do you study in the attic mural?',
         expectationSummary: 'A vertical refuge, elegant and precarious, survives behind the broken plaster.',
         continuitySummary: 'This is one of the first three murals on the outer wall.',
+        visualContinuityGuidance:
+          buildRoseCourtVisualContinuityGuidance('Move from the establishing view into a tighter study without losing the wall material. This mural should feel like the left-hand city aspect of the same outer petal, rendered in mosaic rather than paint.'),
+        visualTransitionIntent: 'drift',
         promptGuidance:
           'Emphasize height, lookout, and urban isolation. This mural should suggest a writer\'s refuge above the world, not a magical portal. Keep details specific but partial, as though time has eaten away the most useful facts.',
         directions: [
@@ -764,12 +601,15 @@ function buildRoseCourtPrologueQuestConfig() {
           'The center mural holds a far cabin among dark trees. Roofline, chimney, and path are half-erased by weather, yet the place still feels cold, inhabited, and watchful.',
         imageUrl: '/ruin_south_a.png',
         image_prompt:
-          'Weathered mural of a remote wooden cabin in deep forest, eroded stone pigments, haunted calm, old craftsmanship damaged by time and rain.',
+          'Close mural study in weathered rose-petal wall, remote cabin in dark woods painted as ancient fresco or tempera, flaking plaster, cold forest quiet, ouroboros ring handle integrated into the mural.',
         referenceImagePrompt:
-          'Close view of the center mural on a ruined stone wall: a remote cabin in deep woods, dark pines crowding around it, chimney and path half-erased by centuries of weather. Ancient relief textures, chipped edges, cold air implied, solitary but not overtly supernatural.',
+          'Close view of the center mural on the outer rose wall. This mural should read as the most traditional painting of the three: a faded fresco or tempera image on old plaster showing a remote cabin in deep woods. Dark pines crowd around it, the chimney and path are half-erased by centuries of weather, and pigment has flaked away in sheets. The mural still belongs to the same elven rose-petal masonry, with an ouroboros ring handle set into the image surface. Cold air, remoteness, and severe habitability matter more than overt fantasy spectacle.',
         textPromptPlaceholder: 'What in the cabin mural draws your eye?',
         expectationSummary: 'A harder shelter, remote and solitary, presses at the edge of the wall’s memory.',
         continuitySummary: 'This is one of the first three murals on the outer wall.',
+        visualContinuityGuidance:
+          buildRoseCourtVisualContinuityGuidance('Keep this as the central mural and the sternest of the three. The medium changes from mosaic to faded painting, but the same dusk wall, same petal architecture, and same ceremonial ring-handle logic remain.'),
+        visualTransitionIntent: 'drift',
         promptGuidance:
           'Lean into remoteness, timber, cold air, and the possibility that someone could still live here. The mood may be watchful, but do not introduce explicit danger or creatures; the power of the mural is in its severe habitability.',
         directions: [
@@ -784,12 +624,15 @@ function buildRoseCourtPrologueQuestConfig() {
           'The right mural keeps the gentlest scene: a cottage, a lane, a hush of country light. The relief is badly worn, but its calm has survived the damage.',
         imageUrl: '/ruin_south_a.png',
         image_prompt:
-          'Ancient deteriorated mural of a country cottage and lane, soft pastoral light, elegant ruined relief, weathered craftsmanship and age-worn stone.',
+          'Close mural study in rose-petal ruin wall, country cottage rendered as incised relief with remnants of gilt and limewash, soft rural light, worn elegance, faintly glowing ouroboros ring.',
         referenceImagePrompt:
-          'Detailed view of the right mural carved into weathered stone: a country cottage, narrow lane, and soft rural light surviving through erosion. The relief is damaged but graceful, with traces of garden or hedge line, warm domestic stillness, ancient craftsmanship.',
+          'Detailed view of the right mural carved into the weathered rose wall. This mural should use a third distinct medium: incised bas-relief with traces of gilt, limewash, or other aged decorative finish. It shows a country cottage, narrow lane, hedge or garden hints, and a softer rural light surviving through erosion. The surrounding masonry must still feel like layered elven rose petals, and the integrated ouroboros ring handle should glow a little warmer here than on the other two murals.',
         textPromptPlaceholder: 'Which feature of the cottage mural do you examine?',
         expectationSummary: 'A softer refuge answers the wall with warmth instead of height or wilderness.',
         continuitySummary: 'This is one of the first three murals on the outer wall.',
+        visualContinuityGuidance:
+          buildRoseCourtVisualContinuityGuidance('Keep the same outer wall and same dusk palette, but let this mural feel gentler and more domestic. Its difference should come from relief-and-gilding craft, not from looking like a different ruin entirely.'),
+        visualTransitionIntent: 'drift',
         promptGuidance:
           'This mural is the calmest of the three. Emphasize gentleness, privacy, and domestic grace. It should feel like a place one could write quietly, without becoming sentimental or idyllic beyond the damaged stone.',
         directions: [
@@ -804,12 +647,15 @@ function buildRoseCourtPrologueQuestConfig() {
           'Here the static is harder to ignore. Among the stones, one rock shelters a dull metallic glint from the wind.',
         imageUrl: '/ruin_south_a.png',
         image_prompt:
-          'Windswept plateau stones beneath ruined rose wall, one rock hiding a metallic glint, faint radio-static implied, evening archaeology fantasy scene.',
+          'Lower-angle dusk view at the base of the rose-petal wall, plateau stones and rubble in wind, one rock hiding a metallic glint, the wall looming above, faint radio-static mystery, aged manuscript fantasy tone.',
         referenceImagePrompt:
-          'Ground-level scene beneath the rose-petal ruin wall: scattered plateau stones in evening wind, one partly shielding a small metallic glint. Sparse scrub, dust, weathered stone, no characters. The image should imply a hidden source of faint radio-static without showing it clearly.',
+          'Ground-level storybook plate beneath the outer rose wall. Scattered plateau stones and broken petal-like debris fill the foreground while the wall still looms above at the edge of frame. One rock partly shields a small metallic glint, but the hidden object should not yet be fully visible. Sparse scrub, dust, ivy, evening wind, parchment-gold ruin palette. The composition should feel like the player has knelt down to the source of the static without solving it yet.',
         textPromptPlaceholder: 'Do you search behind the rocks, follow the sound, or leave it alone?',
         expectationSummary: 'The transmission is no longer rumor; the stones now conceal its source.',
         continuitySummary: 'The scene has narrowed from murals to signal.',
+        visualContinuityGuidance:
+          buildRoseCourtVisualContinuityGuidance('This is a downward, more intimate continuation of the outer wall view. Keep the same wall and plateau, but crop lower and closer so the hidden signal becomes physical rather than abstract.'),
+        visualTransitionIntent: 'drift',
         promptGuidance:
           'This screen should reward attention and physical verbs. Listening, moving stones, kneeling, searching behind the rock, or naming the device should all push toward discovery. The key transition here is from vague unease to actionable mystery.',
         directions: [
@@ -823,16 +669,44 @@ function buildRoseCourtPrologueQuestConfig() {
           'Behind the rock rests an impossible handset: part mobile phone, part brass instrument, built as though dwarves and gnomes had agreed on elegance. It crackles with the same repeating distress call, and the voice on the line sounds almost relieved to be heard.',
         imageUrl: '/ruin_south_a.png',
         image_prompt:
-          'Retro-fantasy handset hidden among rocks, crafted like dwarven and gnomish steampunk engineering, weathered metal and brass, faint static transmission at dusk.',
+          'Close detail of a dwarven-gnomish handset among plateau stones, engraved brass and weathered metal, practical antique engineering, dusk ruin light, faint ceremonial glow, no sleek modern phone design.',
         referenceImagePrompt:
-          'Close-up of an impossible handset hidden among plateau stones: part old mobile phone, part brass field instrument, with dwarven and gnomish craftsmanship, engraved metal, worn switches, and a practical steampunk silhouette. Evening light, dust, and a sense that the device has been waiting a long time to be found.',
+          'Close-up of the discovered handset among plateau stones at the base of the rose wall. It should look like an impossible hybrid between an early mobile phone and a brass field instrument, built by dwarven and gnomish hands with engraved metal, worn switches, vent slots, and pragmatic ornament. Avoid sleek retrofuturism; this should feel handmade, old, durable, and slightly ceremonial. Evening dust, weathered rock, and a sense that the device has been waiting a very long time to be found.',
         textPromptPlaceholder: 'Answer the handset, or keep studying it.',
         expectationSummary: 'The handset is live and waiting for first contact.',
         continuitySummary: 'The source of the static has been found beneath the plateau stones.',
+        visualContinuityGuidance:
+          buildRoseCourtVisualContinuityGuidance('Stay on the same patch of ground as the rock-scatter screen, but move into intimate object study. The handset should belong to this ruin-world materially, not feel imported from a cleaner genre.'),
+        visualTransitionIntent: 'drift',
         promptGuidance:
           'Once the handset is answered, the Society clerk may begin immediately. He should sound relieved, formal, discreet, and lightly strained. He must insist on a precise earthly destination, and he should not accept imaginary places, celestial realms, or generic fantasy answers.',
         sceneEndCondition:
           'This screen\'s main purpose is complete when the clerk makes contact and the player understands that an exact real-world Earth location is required.',
+        componentBindings: [
+          {
+            componentId: 'messenger',
+            slot: 'auto_open',
+            props: {
+              sceneId: ROSE_COURT_LOCATION_MESSENGER_SCENE_ID
+            }
+          },
+          {
+            componentId: 'messenger',
+            slot: 'action_button',
+            props: {
+              sceneId: ROSE_COURT_LOCATION_MESSENGER_SCENE_ID,
+              label: 'Answer the handset near the wall'
+            }
+          },
+          {
+            componentId: 'location_mural_materializer',
+            slot: 'screen_effect',
+            props: {
+              trigger: 'after_messenger_complete',
+              messengerSceneId: ROSE_COURT_LOCATION_MESSENGER_SCENE_ID
+            }
+          }
+        ],
         directions: [
           { direction: 'back', label: 'Lower the handset and look back to the wall', targetScreenId: 'rock_scatter' }
         ],
@@ -854,12 +728,15 @@ function buildRoseCourtPrologueQuestConfig() {
           'The wall has changed. Three fresh murals answer the earthly address you gave the clerk, each faithful to the same place but bent toward a different shelter.',
         imageUrl: '/ruin_south_a.png',
         image_prompt:
-          'Ancient rose wall waiting to bloom with new murals, dormant reliefs ready to answer a named earthly destination, dusk, fantasy archaeology mood.',
+          'Awakened second wall of the Hall of the Rose at dusk, three newly formed murals interpreting one real earthly destination, same rose-petal masonry, glowing ouroboros ring knockers, illuminated-manuscript ruin atmosphere.',
         referenceImagePrompt:
-          'Wide ruined wall scene at dusk after the earthly destination has been confirmed: three new murals have appeared in the same rose-petal masonry, all clearly interpretations of one real place on Earth, each leaning toward a different mood of shelter. Ancient ring-shaped door handles worked into the mural surfaces. Quiet ceremonial atmosphere.',
+          'Wide ceremonial view of the second rose wall after the earthly destination is accepted. Three newly appeared murals now glow more legibly within the same elven rose-petal masonry. All three clearly interpret one real place on Earth, but each favors a different shelter and artistic treatment. Their door knockers are luminous ouroboros rings integrated into the mural surfaces. The wall itself remains ancient, cracked, and ceremonial rather than fresh or magical-plastic. Dusk parchment tones, tactile erosion, quiet selection ritual.',
         textPromptPlaceholder: 'Choose which new mural to approach.',
         expectationSummary: 'The wall has answered the filed destination with three new aspects.',
         continuitySummary: 'These murals appeared only after the clerk accepted the address.',
+        visualContinuityGuidance:
+          buildRoseCourtVisualContinuityGuidance('This should clearly be the same court and same wall logic as before, but newly answered. The second wall is more active and legible, not cleaner or newer; its change comes from response, not from abandoning the ruin aesthetic.'),
+        visualTransitionIntent: 'drift',
         promptGuidance:
           'All three murals must clearly belong to the exact Earth location the player named. They may differ in mood, style, shelter, or weather emphasis, but not in geographic identity. This screen should feel like the court answering the filing, not like random new destinations appearing.',
         directions: []
@@ -868,11 +745,105 @@ function buildRoseCourtPrologueQuestConfig() {
   };
 }
 
+function hasQuestAuthoringValue(value) {
+  if (typeof value === 'string') {
+    return Boolean(value.trim());
+  }
+  return value !== undefined && value !== null;
+}
+
+function normalizeQuestSceneTemplate(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized || DEFAULT_SCENE_TEMPLATE;
+}
+
+function normalizeQuestSceneComponentId(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_-]+/g, '')
+    .slice(0, 64);
+}
+
+function normalizeQuestSceneComponents(value = []) {
+  const entries = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [];
+  return [...new Set(entries.map((entry) => normalizeQuestSceneComponentId(entry)).filter(Boolean))];
+}
+
+function cloneQuestAuthoringValue(value) {
+  if (Array.isArray(value) || (value && typeof value === 'object')) {
+    return JSON.parse(JSON.stringify(value));
+  }
+  return value;
+}
+
+function applyScreenAuthoringDefaults(screen = {}, screenDefaults = {}) {
+  if (!screenDefaults || typeof screenDefaults !== 'object') {
+    return { ...screen };
+  }
+  const nextScreen = { ...screen };
+  Object.entries(screenDefaults).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      if ((!Array.isArray(nextScreen[key]) || nextScreen[key].length === 0) && value.length > 0) {
+        nextScreen[key] = cloneQuestAuthoringValue(value);
+      }
+      return;
+    }
+    if (!hasQuestAuthoringValue(nextScreen[key]) && hasQuestAuthoringValue(value)) {
+      nextScreen[key] = cloneQuestAuthoringValue(value);
+    }
+  });
+  return nextScreen;
+}
+
+function applyQuestAuthoringDefaults(config = {}, authoringDefaults = {}) {
+  if (!config || typeof config !== 'object') {
+    return config;
+  }
+
+  const nextConfig = {
+    ...config,
+    screens: Array.isArray(config.screens) ? config.screens.map((screen) => ({ ...screen })) : []
+  };
+
+  ['sceneName', 'sceneTemplate', 'authoringBrief', 'phaseGuidance', 'visualStyleGuide'].forEach((key) => {
+    if (!hasQuestAuthoringValue(nextConfig[key]) && hasQuestAuthoringValue(authoringDefaults[key])) {
+      nextConfig[key] = authoringDefaults[key];
+    }
+  });
+
+  if ((!Array.isArray(nextConfig.sceneComponents) || !nextConfig.sceneComponents.length)
+    && Array.isArray(authoringDefaults.sceneComponents)
+    && authoringDefaults.sceneComponents.length) {
+    nextConfig.sceneComponents = cloneQuestAuthoringValue(authoringDefaults.sceneComponents);
+  }
+
+  if ((!Array.isArray(nextConfig.promptRoutes) || !nextConfig.promptRoutes.length)
+    && Array.isArray(authoringDefaults.promptRoutes)
+    && authoringDefaults.promptRoutes.length) {
+    nextConfig.promptRoutes = cloneQuestAuthoringValue(authoringDefaults.promptRoutes);
+  }
+
+  const screensById = authoringDefaults.screensById && typeof authoringDefaults.screensById === 'object'
+    ? authoringDefaults.screensById
+    : {};
+  nextConfig.screens = nextConfig.screens.map((screen) => applyScreenAuthoringDefaults(screen, screensById[screen.id]));
+  return nextConfig;
+}
+
 function buildDefaultQuestConfigForScope(scope = {}) {
   if (scope?.questId === ROSE_COURT_PROLOGUE_QUEST_ID) {
     return buildRoseCourtPrologueQuestConfig();
   }
-  return JSON.parse(JSON.stringify(DEFAULT_QUEST_CONFIG));
+  return applyQuestAuthoringDefaults(
+    JSON.parse(JSON.stringify(SCENE_AUTHORING_STARTER_CONFIG)),
+    SCENE_AUTHORING_STARTER_AUTHORING_DEFAULTS
+  );
 }
 
 function isRoseCourtLocationScene(sceneId = '') {
@@ -3292,17 +3263,29 @@ app.post('/api/shouldAllowXerofag', async (req, res) => {
 
 app.post('/api/typewriter/session/start', async (req, res) => {
   try {
-    const { sessionId, fragment, playerId } = req.body || {};
+    const { sessionId, fragment, playerId, setInitialFragment } = req.body || {};
     const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
     const session = await startTypewriterSession(sessionId);
     if (typeof fragment === 'string') {
-      const seededSession = await saveTypewriterSessionFragment(session.sessionId, fragment);
+      const seededSession = await saveTypewriterSessionFragment(session.sessionId, fragment, {
+        updateInitialFragment: Boolean(setInitialFragment)
+      });
       return res.status(200).json(
-        await buildTypewriterSessionPayload(session.sessionId, seededSession.fragment, resolvedPlayerId)
+        await buildTypewriterSessionPayload(
+          session.sessionId,
+          seededSession.fragment,
+          seededSession.initialFragment,
+          resolvedPlayerId
+        )
       );
     }
     return res.status(200).json(
-      await buildTypewriterSessionPayload(session.sessionId, session.fragment, resolvedPlayerId)
+      await buildTypewriterSessionPayload(
+        session.sessionId,
+        session.fragment,
+        session.initialFragment,
+        resolvedPlayerId
+      )
     );
   } catch (error) {
     console.error('Error in /api/typewriter/session/start:', error);
@@ -3814,6 +3797,36 @@ function buildTypewriterStorytellerKeyPayload(typewriterKey, slotDefinition) {
   };
 }
 
+function getFallbackTypewriterStorytellerSlotDefinition(index = 0) {
+  if (!TYPEWRITER_STORYTELLER_KEY_SLOTS.length) {
+    return {
+      slotIndex: Number.isInteger(index) ? index : 0,
+      slotKey: 'storyteller_slot_fallback',
+      keyShape: 'horizontal',
+      blankShape: 'horizontal storyteller slot',
+      blankTextureUrl: '/textures/keys/blank_horizontal_1.png',
+      shapePromptHint: 'wide horizontal key face with a centered emblem and calm edge margins'
+    };
+  }
+  const safeIndex = Number.isInteger(index) && index >= 0
+    ? index % TYPEWRITER_STORYTELLER_KEY_SLOTS.length
+    : 0;
+  return TYPEWRITER_STORYTELLER_KEY_SLOTS[safeIndex];
+}
+
+function normalizeGeneratedStorytellerPayload(storyteller, slotDefinition = null, storytellerIndex = 0) {
+  const safeStoryteller = storyteller && typeof storyteller === 'object' ? storyteller : {};
+  const resolvedSlotDefinition = slotDefinition || getFallbackTypewriterStorytellerSlotDefinition(storytellerIndex);
+
+  return {
+    ...safeStoryteller,
+    typewriter_key: buildTypewriterStorytellerKeyPayload(
+      safeStoryteller.typewriter_key,
+      resolvedSlotDefinition
+    )
+  };
+}
+
 function getTypewriterStorytellerSlotDefinition(slotIndex) {
   return TYPEWRITER_STORYTELLER_KEY_SLOTS.find((slot) => slot.slotIndex === slotIndex) || null;
 }
@@ -3939,11 +3952,12 @@ async function listTypewriterStoryEntities(sessionId, playerId = '') {
     .exec();
 }
 
-async function buildTypewriterSessionPayload(sessionId, fragment, playerId = '') {
+async function buildTypewriterSessionPayload(sessionId, fragment, initialFragment = '', playerId = '') {
   const entityKeys = (await listTypewriterStoryEntities(sessionId, playerId)).map(buildTypewriterEntityKeyState);
   return {
     sessionId,
     fragment,
+    initialFragment,
     entityKeys
   };
 }
@@ -3999,9 +4013,13 @@ async function generateTypewriterStorytellerForSlot({
     throw error;
   }
 
-  await validatePayloadForRoute('text_to_storyteller', { storytellers: normalizedStorytellers });
+  const storytellersForValidation = normalizedStorytellers.map((storyteller, storytellerIndex) =>
+    normalizeGeneratedStorytellerPayload(storyteller, slotDefinition, storytellerIndex)
+  );
 
-  const storytellerData = normalizedStorytellers[0];
+  await validatePayloadForRoute('text_to_storyteller', { storytellers: storytellersForValidation });
+
+  const storytellerData = storytellersForValidation[0];
   const payload = {
     session_id: sessionId,
     sessionId,
@@ -4353,6 +4371,49 @@ function normalizeQuestPromptRoute(route) {
   };
 }
 
+function normalizeQuestScreenComponentBinding(binding) {
+  if (!binding || typeof binding !== 'object') {
+    return null;
+  }
+
+  const componentId = normalizeQuestSceneComponentId(binding.componentId);
+  const slot = typeof binding.slot === 'string'
+    ? binding.slot.trim().toLowerCase()
+    : '';
+  if (!componentId || !slot) {
+    return null;
+  }
+
+  const sourceProps = binding.props && typeof binding.props === 'object' && !Array.isArray(binding.props)
+    ? binding.props
+    : {};
+  const props = {};
+  Object.entries(sourceProps).forEach(([key, value]) => {
+    const safeKey = typeof key === 'string' ? key.trim() : '';
+    if (!safeKey) return;
+    if (typeof value === 'string') {
+      props[safeKey] = value;
+      return;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      props[safeKey] = value;
+    }
+  });
+
+  const normalizedId = typeof binding.id === 'string' ? binding.id.trim() : '';
+  const nextBinding = {
+    componentId,
+    slot,
+    props
+  };
+
+  if (normalizedId) {
+    nextBinding.id = normalizedId;
+  }
+
+  return nextBinding;
+}
+
 function normalizeQuestScreen(screen) {
   if (!screen || typeof screen !== 'object') {
     return null;
@@ -4410,6 +4471,9 @@ function normalizeQuestScreen(screen) {
   const directions = Array.isArray(screen.directions)
     ? screen.directions.map(normalizeQuestDirection).filter(Boolean)
     : [];
+  const componentBindings = Array.isArray(screen.componentBindings)
+    ? screen.componentBindings.map(normalizeQuestScreenComponentBinding).filter(Boolean)
+    : [];
   const promptRoutes = Array.isArray(screen.promptRoutes)
     ? screen.promptRoutes.map(normalizeQuestPromptRoute).filter(Boolean)
     : [];
@@ -4423,6 +4487,7 @@ function normalizeQuestScreen(screen) {
     visualContinuityGuidance,
     visualTransitionIntent,
     textPromptPlaceholder,
+    componentBindings,
     directions,
     screenType,
     parentScreenId,
@@ -4700,6 +4765,9 @@ function buildQuestAdvancePromptPayload({
   screenMap = new Map()
 }) {
   return {
+    sceneName: config?.sceneName || '',
+    sceneTemplate: config?.sceneTemplate || DEFAULT_SCENE_TEMPLATE,
+    sceneComponents: JSON.stringify(Array.isArray(config?.sceneComponents) ? config.sceneComponents : []),
     sceneVisualStyleGuide: config?.visualStyleGuide || '',
     phaseGuidance: config?.phaseGuidance || '',
     currentScreenId: currentScreen?.id || '',
@@ -4712,6 +4780,7 @@ function buildQuestAdvancePromptPayload({
     currentScreenContinuitySummary: currentScreen?.continuitySummary || '',
     currentScreenPromptGuidance: currentScreen?.promptGuidance || '',
     currentScreenSceneEndCondition: currentScreen?.sceneEndCondition || '',
+    currentScreenComponentBindings: JSON.stringify(Array.isArray(currentScreen?.componentBindings) ? currentScreen.componentBindings : []),
     currentScreenVisualContinuityGuidance: currentScreen?.visualContinuityGuidance || '',
     currentScreenVisualTransitionIntent: currentScreen?.visualTransitionIntent || 'inherit',
     currentDirections: buildQuestDirectionsPromptSummary(currentScreen?.directions, screenMap),
@@ -4759,6 +4828,15 @@ function buildQuestPromptRoutesPromptSummary(promptRoutes = [], currentScreenId 
 function buildQuestAdvancePromptMessages({ promptTemplate = '', promptPayload = {} }) {
   const compiledPrompt = renderPromptTemplateString(promptTemplate, promptPayload);
   const supplementalGuidance = [
+    typeof promptPayload?.sceneName === 'string' && promptPayload.sceneName.trim()
+      ? `Scene name: ${promptPayload.sceneName.trim()}`
+      : '',
+    typeof promptPayload?.sceneTemplate === 'string' && promptPayload.sceneTemplate.trim()
+      ? `Base scene template: ${promptPayload.sceneTemplate.trim()}`
+      : '',
+    typeof promptPayload?.sceneComponents === 'string' && promptPayload.sceneComponents.trim() && promptPayload.sceneComponents.trim() !== '[]'
+      ? `Attached scene components: ${promptPayload.sceneComponents.trim()}`
+      : '',
     typeof promptPayload?.sceneVisualStyleGuide === 'string' && promptPayload.sceneVisualStyleGuide.trim()
       ? `Scene visual guide:\n${promptPayload.sceneVisualStyleGuide.trim()}`
       : '',
@@ -4770,6 +4848,11 @@ function buildQuestAdvancePromptMessages({ promptTemplate = '', promptPayload = 
       : '',
     typeof promptPayload?.currentScreenSceneEndCondition === 'string' && promptPayload.currentScreenSceneEndCondition.trim()
       ? `Current scene ends when:\n${promptPayload.currentScreenSceneEndCondition.trim()}`
+      : '',
+    typeof promptPayload?.currentScreenComponentBindings === 'string'
+      && promptPayload.currentScreenComponentBindings.trim()
+      && promptPayload.currentScreenComponentBindings.trim() !== '[]'
+      ? `Current screen component bindings:\n${promptPayload.currentScreenComponentBindings.trim()}`
       : '',
     typeof promptPayload?.currentScreenVisualContinuityGuidance === 'string' && promptPayload.currentScreenVisualContinuityGuidance.trim()
       ? `Current screen visual continuity:\n${promptPayload.currentScreenVisualContinuityGuidance.trim()}\nTransition intent: ${promptPayload.currentScreenVisualTransitionIntent || 'inherit'}`
@@ -5168,6 +5251,7 @@ function buildRoseCourtLocationVariantScreens(brief = {}) {
       title: 'Mural of the High Room',
       imageUrl: '/textures/decor/film_frame_desert.png',
       imagePromptMood: 'an elevated attic-like refuge, lamp-lit, observant, urban or cliffside in feeling',
+      muralMedium: 'fractured stone-and-glass mosaic with vertical tesserae and surviving metallic accents',
       expectation: 'This version of the place emphasizes height, outlook, and a writer watching the weather from above.',
       prompt:
         `${placeName} appears here as a high room: a perched refuge translated into narrow steps, skylight glow, and a sense that the whole place can be watched from just under the roof. ${placeSummary}`,
@@ -5182,6 +5266,7 @@ function buildRoseCourtLocationVariantScreens(brief = {}) {
       title: 'Mural of the Weather Cabin',
       imageUrl: '/ruin_south_a.png',
       imagePromptMood: 'a rough shelter under strong weather, remote, timbered, solitary, storm-ready',
+      muralMedium: 'faded fresco and tempera on cracked plaster, with flaked weather damage and exposed underdrawing',
       expectation: 'This version of the place tests the destination against weather, solitude, and endurance.',
       prompt:
         `${placeName} appears here as a weather-beaten cabin, the same earthly destination translated into rough boards, sparse shelter, and a harder edge against wind and distance. ${placeSummary}`,
@@ -5196,6 +5281,7 @@ function buildRoseCourtLocationVariantScreens(brief = {}) {
       title: 'Mural of the Quiet Cottage',
       imageUrl: '/arenas/petal_hex_v1.png',
       imagePromptMood: 'an intimate cottage-like shelter, domestic calm, lamplight, lane or garden nearby',
+      muralMedium: 'incised bas-relief with traces of gilt, limewash, and hand-drawn border ornament',
       expectation: 'This version of the place makes the destination feel inhabited, intimate, and quietly protective.',
       prompt:
         `${placeName} appears here as a quiet cottage, the earthly destination softened into lamplight, a threshold worth crossing, and a shelter that promises privacy without losing the place itself. ${placeSummary}`,
@@ -5211,12 +5297,15 @@ function buildRoseCourtLocationVariantScreens(brief = {}) {
     prompt: variant.prompt,
     imageUrl: variant.imageUrl,
     image_prompt:
-      `Interpret ${placeName} as ${variant.imagePromptMood}. Preserve the same earthly destination, local climate, and recognisable physical cues: ${features}.`,
+      `Aged illuminated-manuscript mural on the second rose wall, ${variant.muralMedium}, interpreting ${placeName} as ${variant.imagePromptMood}. Preserve the same earthly destination, local climate, and recognisable physical cues: ${features}. Include a glowing ouroboros ring handle and crumbling elven rose-petal masonry.`,
     referenceImagePrompt:
-      `Ancient mural door on the second rose wall, showing ${placeName} as ${variant.imagePromptMood}. The place must remain recognisably the same real-world destination, with stable local weather, terrain, and architectural cues. Include an ouroboros-like ring handle worked into the mural surface, dusk ruin lighting, and a ceremonial adventure-game composition.`,
+      `Illustrated mural-door on the second wall of the Hall of the Rose. The mural is made as ${variant.muralMedium} and shows ${placeName} as ${variant.imagePromptMood}. The place must remain recognisably the same real-world destination, with stable local weather, terrain, architecture, and sensory truth carried forward. The mural is still set inside the court's crumbling rose-petal masonry and should include a luminous ouroboros ring knocker worked into the surface. Dusk parchment palette, tactile erosion, ceremonial but ruin-worn atmosphere, old storybook gravity rather than glossy fantasy.`,
     textPromptPlaceholder: 'Which doorway will you eventually trust?',
     expectationSummary: variant.expectation,
     continuitySummary: variant.continuity,
+    visualContinuityGuidance:
+      buildRoseCourtVisualContinuityGuidance(`This is one answered interpretation of the confirmed Earth destination. The geography must stay stable while the shelter, mood, and mural medium shift toward ${variant.caption.toLowerCase()}.`),
+    visualTransitionIntent: 'drift',
     promptGuidance:
       `This mural is one interpretation of the confirmed earthly destination, not a new place. Keep ${placeName} recognisable and let this version lean specifically toward ${variant.caption.toLowerCase()}. The door should feel enterable, but the image must still read as mural before threshold.`,
     directions: [
@@ -5274,14 +5363,34 @@ function buildRoseCourtWellSequenceScreens(brief = {}) {
         'Past the second wall, the court opens onto a broken path cut along the inner cliff. There, almost tucked into the masonry, you finally notice a roofed stone well. Beyond it the rose-like structure rises over the court, stranger and nearer than before.',
       imageUrl: '/ruin_south_a.png',
       image_prompt:
-        'Ruined inner-court path with broken arches and a circular stone well set into the masonry, distant rose-like structure looming over mist, evening fantasy atmosphere, Sierra-inspired cinematic framing.',
+        'Aged illuminated-manuscript inner-court path, broken arches and a roofed stone well set into rose-petal masonry, distant taller petals of the Hall of the Rose looming beyond, dusk ceremonial ruin atmosphere.',
       referenceImagePrompt:
-        'Wide inner-court approach at dusk: broken masonry path, roofed stone well tucked into the wall, the strange rose-like central structure rising in the background, and enough open space that a large falcon could plausibly be watching from above. Quiet, anticipatory, ceremonial ruin mood.',
+        'Wide inner-court approach at dusk, as though stepping beyond the second mural wall into a deeper petal of the same ruin. A broken masonry path curves toward a roofed stone well tucked into the wall. Beyond it, the taller inner petals of the Hall of the Rose rise stranger and less ruined than the outer wall. Keep the same parchment-gold dusk, elven petal-masonry, and tactile age. Leave enough space for a falcon to be implied above or nearby, but do not let the bird dominate yet.',
       textPromptPlaceholder: 'Do you keep your distance, or move to the rim?',
       expectationSummary: 'The well is discovered only after the second wall has answered the filed destination.',
       continuitySummary: `${placeSummary} The falcon is not in your hand; it is somewhere above, already keeping pace.`,
+      visualContinuityGuidance:
+        buildRoseCourtVisualContinuityGuidance('This is the first inward step beyond the mural-door logic. The environment should feel like the same court, one layer deeper and slightly less ruined, not like a different fantasy map.'),
+      visualTransitionIntent: 'drift',
       promptGuidance:
         'This screen should feel like the court opening one layer further inward. The player notices the well before understanding it. The falcon may be implied or glimpsed, but do not let it dominate until the player reaches the rim.',
+      componentBindings: [
+        {
+          componentId: 'messenger',
+          slot: 'auto_open',
+          props: {
+            sceneId: ROSE_COURT_TRANSPORT_MESSENGER_SCENE_ID
+          }
+        },
+        {
+          componentId: 'messenger',
+          slot: 'action_button',
+          props: {
+            sceneId: ROSE_COURT_TRANSPORT_MESSENGER_SCENE_ID,
+            label: 'Answer the returning transmission'
+          }
+        }
+      ],
       directions: [
         {
           direction: 'down',
@@ -5302,15 +5411,25 @@ function buildRoseCourtWellSequenceScreens(brief = {}) {
         'When you lean over the rim, fragments of paper begin resurfacing on the water below. Each one carries a radiant narrative line for a few breaths before the letters loosen, dim, and sink. A falcon lands above you on the well roof, watching until it produces a feather and a scrap of parchment small enough for ten words at most.',
       imageUrl: '/well/well_background.png',
       image_prompt:
-        'Ancient stone well seen from above, dark reflective water, resurfacing paper fragments with glowing handwritten script, falcon perched on the well roof with satchel, ruined rose-court in twilight fantasy style.',
+        'Ancient roofed stone well in the inner rose court, dark reflective water with resurfacing paper fragments and radiant script, large falcon with satchel perched above, aged manuscript fantasy mood, dusk gold and deep water black.',
       referenceImagePrompt:
-        'View into an ancient stone well at twilight: dark water, torn paper fragments surfacing with large radiant handwritten lines, then dissolving back down. A big falcon with a satchel perches above on the well roof, offering feather and parchment. Luminous letters, stillness, no crowd, sacred fantasy atmosphere.',
+        'View into the inner-court well at twilight. Dark water reflects the court while torn paper fragments surface one by one bearing large radiant handwritten lines before they loosen and sink again. Above, on the roof of the well, a large falcon with a satchel watches and offers feather and parchment. The stonework should still belong to the Hall of the Rose: old elven masonry, tactile erosion, quiet ceremonial dread, luminous letters rather than flashy magical beams.',
       textPromptPlaceholder: 'The falcon waits for one line. Ten words at most.',
       expectationSummary: 'Fragments from books and unwritten pages surface, fade, and sink while the falcon waits for a single line in return.',
       continuitySummary: 'This is the final interactive beat of the opening scene: write, surrender the parchment, watch the falcon depart.',
+      visualContinuityGuidance:
+        buildRoseCourtVisualContinuityGuidance('Keep the same court and same dusk world, but shift from architectural distance into vertical stillness, luminous text, and the falcon\'s deliberate presence.'),
+      visualTransitionIntent: 'drift',
       promptGuidance:
         'Hold this scene in stillness and precision. The surfaced lines should feel like fragments of many books, not a single message. The falcon is deliberate and expectant, and the parchment limit of ten words must be clear and binding.',
       sceneEndCondition: 'The scene ends when the player commits a line to the parchment and the falcon carries it toward the dovecot above the inner court.',
+      componentBindings: [
+        {
+          componentId: 'well_sequence',
+          slot: 'screen_media',
+          props: {}
+        }
+      ],
       directions: [
         {
           direction: 'end',
@@ -5339,6 +5458,8 @@ function buildRoseCourtWellSequenceScreens(brief = {}) {
       textPromptPlaceholder: '',
       expectationSummary: '',
       continuitySummary: 'The opening scene ends in blank darkness after the falcon ascends toward the dovecot.',
+      visualContinuityGuidance: 'Break completely from the illustrated manuscript imagery. The opening is over; leave only black.',
+      visualTransitionIntent: 'break',
       promptGuidance:
         'Nothing further should be described here. Once the falcon departs and the screen cuts to black, the opening is over.',
       directions: []
@@ -5383,12 +5504,15 @@ function materializeRoseCourtLocationMurals(config = {}, brief = {}) {
       `The wall answers the earthly destination with three new murals. Each one is unmistakably ${brief?.placeName || 'the place you named'}, but each leans into a different shelter, mood, and way of writing there.`,
     imageUrl: '/ruin_south_a.png',
     image_prompt:
-      `A second trio of ancient murals interpreting ${brief?.placeName || 'a named earthly destination'} in three distinct moods, all on the same ruined rose wall at dusk.`,
+      `Aged illuminated-manuscript second wall of the Hall of the Rose, three newly formed murals interpreting ${brief?.placeName || 'a named earthly destination'} in distinct moods but the same geography, glowing ouroboros ring knockers, crumbling petal masonry at dusk.`,
     referenceImagePrompt:
-      `Wide ceremonial view of the second rose wall at dusk. Three newly appeared murals all interpret ${brief?.placeName || 'the confirmed earthly destination'} in different moods of shelter, but they clearly belong to one real location. Include ouroboros-like ring handles on the mural doors and weathered ruin textures.`,
+      `Wide ceremonial view of the second wall of the Hall of the Rose at dusk. Three newly appeared murals all interpret ${brief?.placeName || 'the confirmed earthly destination'} in different moods of shelter, but they clearly belong to one real location. Keep the same crumbling elven rose-petal masonry, tactile age, and illuminated-manuscript gravity established at the opening wall. Each mural should feel crafted in a different medium and each mural door should carry a luminous ouroboros ring handle.`,
     textPromptPlaceholder: 'Choose which mural interpretation you want to inspect.',
     expectationSummary: 'Three new mural interpretations now fit the earthly destination given to the clerk.',
     continuitySummary: 'These murals were materialized in response to the confirmed address, not discovered before it.',
+    visualContinuityGuidance:
+      buildRoseCourtVisualContinuityGuidance('The second wall should read as the answered cousin of the opening wall: same court, same ruin, more active response, and clearer ring-handles, but not a clean or modernized space.'),
+    visualTransitionIntent: 'drift',
     promptGuidance:
       'This gallery confirms that the court has accepted the earthly address. All three murals should be recognisably the same place, varied by mood and shelter rather than by geography. The sense should be selection, not randomness.',
     directions: nextVariants.map((screen) => screen._direction),
@@ -5644,6 +5768,11 @@ async function advanceQuest(payload = {}) {
 function sanitizeQuestConfig(payload, { preserveUpdatedAt = false, fallbackScope = {} } = {}) {
   const source = payload && typeof payload === 'object' ? payload : {};
   const scope = normalizeQuestScope(source, fallbackScope);
+  const sceneName = typeof source.sceneName === 'string'
+    ? source.sceneName.trim()
+    : '';
+  const sceneTemplate = normalizeQuestSceneTemplate(source.sceneTemplate);
+  const sceneComponents = normalizeQuestSceneComponents(source.sceneComponents);
   const normalizedScreens = Array.isArray(source.screens)
     ? source.screens.map(normalizeQuestScreen).filter(Boolean)
     : [];
@@ -5700,6 +5829,9 @@ function sanitizeQuestConfig(payload, { preserveUpdatedAt = false, fallbackScope
   return {
     sessionId: scope.sessionId,
     questId: scope.questId,
+    sceneName,
+    sceneTemplate,
+    sceneComponents,
     startScreenId,
     authoringBrief,
     phaseGuidance,
@@ -5802,10 +5934,17 @@ function normalizeTraversalEvent(payload = {}) {
 }
 
 function toQuestResponse(doc, fallbackScope = {}) {
-  return sanitizeQuestConfig(
+  const seed = buildDefaultQuestConfigForScope({
+    sessionId: doc?.sessionId || fallbackScope?.sessionId,
+    questId: doc?.questId || fallbackScope?.questId
+  });
+  const hydratedDoc = applyQuestAuthoringDefaults(
     {
       sessionId: doc?.sessionId,
       questId: doc?.questId,
+      sceneName: doc?.sceneName,
+      sceneTemplate: doc?.sceneTemplate,
+      sceneComponents: doc?.sceneComponents || [],
       startScreenId: doc?.startScreenId,
       authoringBrief: doc?.authoringBrief,
       phaseGuidance: doc?.phaseGuidance,
@@ -5814,6 +5953,19 @@ function toQuestResponse(doc, fallbackScope = {}) {
       screens: doc?.screens || [],
       updatedAt: doc?.updatedAt ? new Date(doc.updatedAt).toISOString() : undefined
     },
+    {
+      sceneName: seed?.sceneName,
+      sceneTemplate: seed?.sceneTemplate,
+      sceneComponents: seed?.sceneComponents || [],
+      authoringBrief: seed?.authoringBrief,
+      phaseGuidance: seed?.phaseGuidance,
+      visualStyleGuide: seed?.visualStyleGuide,
+      promptRoutes: seed?.promptRoutes || [],
+      screensById: Object.fromEntries((Array.isArray(seed?.screens) ? seed.screens : []).map((screen) => [screen.id, screen]))
+    }
+  );
+  return sanitizeQuestConfig(
+    hydratedDoc,
     { preserveUpdatedAt: true, fallbackScope }
   );
 }
@@ -5841,6 +5993,9 @@ async function ensureQuestConfig(scopePayload = {}) {
       $set: {
         sessionId: scope.sessionId,
         questId: scope.questId,
+        sceneName: seed.sceneName,
+        sceneTemplate: seed.sceneTemplate,
+        sceneComponents: seed.sceneComponents,
         startScreenId: seed.startScreenId,
         authoringBrief: seed.authoringBrief,
         phaseGuidance: seed.phaseGuidance,
@@ -5866,6 +6021,9 @@ async function saveQuestConfig(payload = {}, scopePayload = {}) {
       $set: {
         sessionId: scope.sessionId,
         questId: scope.questId,
+        sceneName: nextConfig.sceneName,
+        sceneTemplate: nextConfig.sceneTemplate,
+        sceneComponents: nextConfig.sceneComponents,
         startScreenId: nextConfig.startScreenId,
         authoringBrief: nextConfig.authoringBrief,
         phaseGuidance: nextConfig.phaseGuidance,
@@ -5895,6 +6053,9 @@ async function resetQuestConfig(scopePayload = {}) {
       $set: {
         sessionId: scope.sessionId,
         questId: scope.questId,
+        sceneName: resetConfig.sceneName,
+        sceneTemplate: resetConfig.sceneTemplate,
+        sceneComponents: resetConfig.sceneComponents,
         startScreenId: resetConfig.startScreenId,
         authoringBrief: resetConfig.authoringBrief,
         phaseGuidance: resetConfig.phaseGuidance,
@@ -6204,6 +6365,142 @@ async function findEntityById(sessionId, playerId, entityId) {
     )
   );
 }
+
+app.post('/api/well/session/start', async (req, res) => {
+  try {
+    const config = await loadWellSceneConfig();
+    const session = await startWellMemorySession({
+      sessionId: req.body?.sessionId,
+      playerId: req.body?.playerId,
+      config
+    });
+    return res.status(200).json({ session });
+  } catch (error) {
+    console.error('Error in POST /api/well/session/start:', error);
+    return res.status(500).json({ message: error.message || 'Server error while starting the well session.' });
+  }
+});
+
+app.get('/api/well/session/:sessionId', async (req, res) => {
+  try {
+    const playerId = typeof req.query?.playerId === 'string' ? req.query.playerId : '';
+    const session = await getWellMemorySession({
+      sessionId: req.params.sessionId,
+      playerId
+    });
+    if (!session) {
+      return res.status(404).json({ message: 'Well session not found.' });
+    }
+    return res.status(200).json({ session });
+  } catch (error) {
+    console.error('Error in GET /api/well/session/:sessionId:', error);
+    return res.status(500).json({ message: error.message || 'Server error while loading the well session.' });
+  }
+});
+
+app.post('/api/well/session/next-fragment', async (req, res) => {
+  try {
+    const config = await loadWellSceneConfig();
+    const session = await drawNextWellTextualFragment({
+      sessionId: req.body?.sessionId,
+      playerId: req.body?.playerId,
+      config,
+      replaceCurrent: Boolean(req.body?.replaceCurrent)
+    });
+    return res.status(200).json({ session });
+  } catch (error) {
+    console.error('Error in POST /api/well/session/next-fragment:', error);
+    const status = error.code === 'EMPTY_TEXTUAL_BANK' ? 400 : 500;
+    return res.status(status).json({ message: error.message || 'Server error while drawing the next fragment.' });
+  }
+});
+
+app.post('/api/well/session/jot', async (req, res) => {
+  try {
+    const config = await loadWellSceneConfig();
+    const session = await submitWellTextualJot({
+      sessionId: req.body?.sessionId,
+      playerId: req.body?.playerId,
+      fragmentId: req.body?.fragmentId,
+      rawJotText: req.body?.rawJotText,
+      config
+    });
+    return res.status(200).json({ session });
+  } catch (error) {
+    console.error('Error in POST /api/well/session/jot:', error);
+    const status = ['INVALID_SESSION_ID', 'INVALID_FRAGMENT_ID', 'INVALID_JOT_TEXT', 'FRAGMENT_MISMATCH'].includes(error.code)
+      ? 400
+      : error.code === 'SESSION_NOT_FOUND'
+        ? 404
+        : 500;
+    return res.status(status).json({ message: error.message || 'Server error while saving the jot.' });
+  }
+});
+
+app.post('/api/well/session/handoff', async (req, res) => {
+  try {
+    const config = await loadWellSceneConfig();
+    const session = await handoffWellMemorySession({
+      sessionId: req.body?.sessionId,
+      playerId: req.body?.playerId,
+      config
+    });
+    return res.status(200).json({ session });
+  } catch (error) {
+    console.error('Error in POST /api/well/session/handoff:', error);
+    const status = error.code === 'HANDOFF_NOT_READY'
+      ? 400
+      : error.code === 'SESSION_NOT_FOUND'
+        ? 404
+        : 500;
+    return res.status(status).json({ message: error.message || 'Server error while handing the bundle to the falcon.' });
+  }
+});
+
+app.get('/api/well/config', async (_req, res) => {
+  try {
+    const config = await loadWellSceneConfig();
+    return res.status(200).json({
+      config,
+      ...getWellSceneConfigMeta()
+    });
+  } catch (error) {
+    console.error('Error in GET /api/well/config:', error);
+    return res.status(500).json({ message: 'Server error while loading well config.' });
+  }
+});
+
+app.put('/api/admin/well/config', requireAdmin, async (req, res) => {
+  try {
+    const updatedBy = typeof req.body?.updatedBy === 'string' && req.body.updatedBy.trim()
+      ? req.body.updatedBy.trim()
+      : 'admin';
+    const config = await saveWellSceneConfig(req.body, updatedBy);
+    return res.status(200).json({
+      config,
+      ...getWellSceneConfigMeta()
+    });
+  } catch (error) {
+    console.error('Error in PUT /api/admin/well/config:', error);
+    return res.status(500).json({ message: 'Server error while saving well config.' });
+  }
+});
+
+app.post('/api/admin/well/config/reset', requireAdmin, async (req, res) => {
+  try {
+    const updatedBy = typeof req.body?.updatedBy === 'string' && req.body.updatedBy.trim()
+      ? req.body.updatedBy.trim()
+      : 'admin';
+    const config = await resetWellSceneConfig(updatedBy);
+    return res.status(200).json({
+      config,
+      ...getWellSceneConfigMeta()
+    });
+  } catch (error) {
+    console.error('Error in POST /api/admin/well/config/reset:', error);
+    return res.status(500).json({ message: 'Server error while resetting well config.' });
+  }
+});
 
 // --- Admin LLM Route Config ---
 app.get('/api/admin/typewriter/ai-settings', requireAdmin, async (req, res) => {
@@ -6666,6 +6963,92 @@ app.post('/api/admin/quest/scene-image', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error in POST /api/admin/quest/scene-image:', error);
     return res.status(500).json({ message: 'Server error while uploading quest scene image.' });
+  }
+});
+
+app.post('/api/admin/quest/scene-image/compose-prompt', requireAdmin, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const scope = normalizeQuestScope(payload);
+    const composedPrompt = composeQuestSceneImagePrompt({
+      sceneName: typeof payload.sceneName === 'string' ? payload.sceneName : '',
+      sceneTemplate: typeof payload.sceneTemplate === 'string' ? payload.sceneTemplate : '',
+      sceneComponents: Array.isArray(payload.sceneComponents) ? payload.sceneComponents : [],
+      authoringBrief: typeof payload.authoringBrief === 'string' ? payload.authoringBrief : '',
+      visualStyleGuide: typeof payload.visualStyleGuide === 'string' ? payload.visualStyleGuide : '',
+      screenId: typeof payload.screenId === 'string' ? payload.screenId.trim() : '',
+      screenTitle: typeof payload.screenTitle === 'string' ? payload.screenTitle : '',
+      screenPrompt: typeof payload.screenPrompt === 'string'
+        ? payload.screenPrompt
+        : (typeof payload.promptText === 'string' ? payload.promptText : ''),
+      referenceImagePrompt: typeof payload.referenceImagePrompt === 'string' ? payload.referenceImagePrompt : '',
+      image_prompt: typeof payload.image_prompt === 'string'
+        ? payload.image_prompt
+        : (typeof payload.imagePrompt === 'string' ? payload.imagePrompt : ''),
+      visualContinuityGuidance: typeof payload.visualContinuityGuidance === 'string' ? payload.visualContinuityGuidance : '',
+      visualTransitionIntent: typeof payload.visualTransitionIntent === 'string' ? payload.visualTransitionIntent : '',
+      incomingContext: Array.isArray(payload.incomingContext) ? payload.incomingContext : [],
+      outgoingContext: Array.isArray(payload.outgoingContext) ? payload.outgoingContext : []
+    });
+
+    return res.status(200).json({
+      sessionId: scope.sessionId,
+      questId: scope.questId,
+      screenId: typeof payload.screenId === 'string' ? payload.screenId.trim() : '',
+      composedPrompt
+    });
+  } catch (error) {
+    console.error('Error in POST /api/admin/quest/scene-image/compose-prompt:', error);
+    return res.status(500).json({ message: 'Server error while composing quest scene image prompt.' });
+  }
+});
+
+app.post('/api/admin/quest/scene-image/resolve-path', requireAdmin, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const imageUrl = typeof payload.imageUrl === 'string' ? payload.imageUrl.trim() : '';
+    if (!imageUrl) {
+      return res.status(400).json({ message: 'imageUrl is required.' });
+    }
+
+    const resolved = resolveProjectAssetUrl(imageUrl);
+    return res.status(200).json(resolved);
+  } catch (error) {
+    console.error('Error in POST /api/admin/quest/scene-image/resolve-path:', error);
+    return res.status(500).json({ message: 'Server error while resolving quest scene image path.' });
+  }
+});
+
+app.post('/api/admin/quest/scene-image/generate', requireAdmin, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const scope = normalizeQuestScope(payload);
+    const result = await generateQuestSceneImageAsset({
+      sessionId: scope.sessionId,
+      questId: scope.questId,
+      screenId: typeof payload.screenId === 'string' ? payload.screenId.trim() : '',
+      screenTitle: typeof payload.screenTitle === 'string' ? payload.screenTitle.trim() : '',
+      prompt: typeof payload.prompt === 'string' ? payload.prompt : '',
+      referenceImagePrompt: typeof payload.referenceImagePrompt === 'string' ? payload.referenceImagePrompt : '',
+      image_prompt: typeof payload.image_prompt === 'string'
+        ? payload.image_prompt
+        : (typeof payload.imagePrompt === 'string' ? payload.imagePrompt : ''),
+      imageModel: typeof payload.imageModel === 'string' ? payload.imageModel.trim() : '',
+      shouldMock: resolveMockMode(payload, process.env.TYPEWRITER_MOCK_IMAGE_GEN === 'true')
+    });
+
+    return res.status(201).json({
+      sessionId: scope.sessionId,
+      questId: scope.questId,
+      screenId: typeof payload.screenId === 'string' ? payload.screenId.trim() : '',
+      ...result
+    });
+  } catch (error) {
+    console.error('Error in POST /api/admin/quest/scene-image/generate:', error);
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      message: error?.message || 'Server error while generating quest scene image.'
+    });
   }
 });
 
@@ -7531,9 +7914,11 @@ app.post('/api/textToStoryteller', async (req, res) => {
       return res.status(502).json({ message: 'Storyteller generation failed.' });
     }
 
-    await validatePayloadForRoute('text_to_storyteller', { storytellers: normalizedStorytellers });
+    storytellerDataArray = normalizedStorytellers.map((storyteller, storytellerIndex) =>
+      normalizeGeneratedStorytellerPayload(storyteller, null, storytellerIndex)
+    );
 
-    storytellerDataArray = normalizedStorytellers;
+    await validatePayloadForRoute('text_to_storyteller', { storytellers: storytellerDataArray });
 
     const savedStorytellers = [];
     const keyImages = [];

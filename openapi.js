@@ -192,6 +192,16 @@ export function buildOpenApiSpec() {
             targetScreenId: { type: 'string', example: 'rock_scatter' }
           }
         },
+        QuestScreenComponentBinding: {
+          type: 'object',
+          required: ['componentId', 'slot'],
+          properties: {
+            id: { type: 'string' },
+            componentId: { type: 'string', example: 'messenger' },
+            slot: { type: 'string', example: 'action_button' },
+            props: { type: 'object', additionalProperties: true }
+          }
+        },
         QuestScreen: {
           type: 'object',
           required: ['id', 'title', 'prompt', 'imageUrl', 'image_prompt', 'textPromptPlaceholder', 'directions'],
@@ -210,6 +220,7 @@ export function buildOpenApiSpec() {
             visualContinuityGuidance: { type: 'string' },
             visualTransitionIntent: { type: 'string', enum: ['inherit', 'drift', 'break'] },
             textPromptPlaceholder: { type: 'string', example: 'What do you say into the dusk?' },
+            componentBindings: { type: 'array', items: { $ref: '#/components/schemas/QuestScreenComponentBinding' } },
             directions: { type: 'array', items: { $ref: '#/components/schemas/QuestDirection' } },
             screenType: { type: 'string', enum: ['authored', 'generated'] },
             parentScreenId: { type: 'string' },
@@ -233,8 +244,11 @@ export function buildOpenApiSpec() {
           type: 'object',
           required: ['sessionId', 'questId', 'startScreenId', 'screens', 'updatedAt'],
           properties: {
-            sessionId: { type: 'string', example: 'rose-court-demo' },
-            questId: { type: 'string', example: 'ruined_rose_court' },
+            sessionId: { type: 'string', example: 'scene-authoring-demo' },
+            questId: { type: 'string', example: 'scene_authoring_starter' },
+            sceneName: { type: 'string', example: 'Scene Authoring Starter' },
+            sceneTemplate: { type: 'string', example: 'basic_scene' },
+            sceneComponents: { type: 'array', items: { type: 'string' } },
             startScreenId: { type: 'string', example: 'cliff_path' },
             authoringBrief: { type: 'string' },
             phaseGuidance: { type: 'string' },
@@ -260,7 +274,7 @@ export function buildOpenApiSpec() {
           required: ['toScreenId', 'createdAt'],
           properties: {
             playerId: { type: 'string', example: 'wanderer-01' },
-            fromScreenId: { type: 'string', example: 'outer_gate_murals' },
+            fromScreenId: { type: 'string', example: 'opening_tableau' },
             toScreenId: { type: 'string', example: 'mural_center_panel' },
             direction: { type: 'string', example: 'north' },
             promptText: { type: 'string', example: 'I trace the lone traveler with my fingertips.' },
@@ -745,6 +759,7 @@ export function buildOpenApiSpec() {
           properties: {
             sessionId: { type: 'string' },
             fragment: { type: 'string' },
+            initialFragment: { type: 'string' },
             entityKeys: {
               type: 'array',
               items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
@@ -1915,8 +1930,8 @@ export function buildOpenApiSpec() {
           importance: 'Critical',
           flow: 'Primary quest UI hydration route for loading all screens, directions, and start screen.',
           parameters: [
-            queryParam('sessionId', false, 'Quest session scope. Defaults to rose-court demo session.'),
-            queryParam('questId', false, 'Quest graph identifier. Defaults to ruined_rose_court.')
+            queryParam('sessionId', false, 'Quest session scope. Defaults to scene-authoring-demo.'),
+            queryParam('questId', false, 'Quest graph identifier. Defaults to scene_authoring_starter.')
           ],
           responses: {
             '200': {
@@ -1935,8 +1950,8 @@ export function buildOpenApiSpec() {
           flow: 'Used for direct screen lookups, debugging, and editor-specific checks.',
           parameters: [
             pathParam('screenId', 'Quest screen identifier.'),
-            queryParam('sessionId', false, 'Quest session scope. Defaults to rose-court demo session.'),
-            queryParam('questId', false, 'Quest graph identifier. Defaults to ruined_rose_court.')
+            queryParam('sessionId', false, 'Quest session scope. Defaults to scene-authoring-demo.'),
+            queryParam('questId', false, 'Quest graph identifier. Defaults to scene_authoring_starter.')
           ],
           responses: {
             '200': {
@@ -1963,8 +1978,11 @@ export function buildOpenApiSpec() {
                   type: 'object',
                   required: ['startScreenId', 'screens'],
                   properties: {
-                    sessionId: { type: 'string', example: 'rose-court-demo' },
-                    questId: { type: 'string', example: 'ruined_rose_court' },
+                    sessionId: { type: 'string', example: 'scene-authoring-demo' },
+                    questId: { type: 'string', example: 'scene_authoring_starter' },
+                    sceneName: { type: 'string' },
+                    sceneTemplate: { type: 'string', example: 'basic_scene' },
+                    sceneComponents: { type: 'array', items: { type: 'string' } },
                     startScreenId: { type: 'string' },
                     authoringBrief: { type: 'string' },
                     phaseGuidance: { type: 'string' },
@@ -2001,8 +2019,8 @@ export function buildOpenApiSpec() {
                 schema: {
                   type: 'object',
                   properties: {
-                    sessionId: { type: 'string', example: 'rose-court-demo' },
-                    questId: { type: 'string', example: 'ruined_rose_court' },
+                    sessionId: { type: 'string', example: 'scene-authoring-demo' },
+                    questId: { type: 'string', example: 'scene_authoring_starter' },
                     selectedScreenId: { type: 'string', example: 'outer_wall_plateau' },
                     mode: { type: 'string', enum: ['scene', 'selected_screen', 'fill_missing'] },
                     config: { $ref: '#/components/schemas/QuestScreensConfig' },
@@ -2054,8 +2072,8 @@ export function buildOpenApiSpec() {
                 schema: {
                   type: 'object',
                   properties: {
-                    sessionId: { type: 'string', example: 'rose-court-demo' },
-                    questId: { type: 'string', example: 'ruined_rose_court' }
+                    sessionId: { type: 'string', example: 'scene-authoring-demo' },
+                    questId: { type: 'string', example: 'scene_authoring_starter' }
                   }
                 }
               }
@@ -2078,8 +2096,8 @@ export function buildOpenApiSpec() {
           importance: 'High',
           flow: 'Used by quest UI to render player traversal history for the active session + quest scope.',
           parameters: [
-            queryParam('sessionId', false, 'Quest session scope. Defaults to rose-court demo session.'),
-            queryParam('questId', false, 'Quest graph identifier. Defaults to ruined_rose_court.')
+            queryParam('sessionId', false, 'Quest session scope. Defaults to scene-authoring-demo.'),
+            queryParam('questId', false, 'Quest graph identifier. Defaults to scene_authoring_starter.')
           ],
           responses: {
             '200': {
@@ -2102,10 +2120,10 @@ export function buildOpenApiSpec() {
                   type: 'object',
                   required: ['toScreenId'],
                   properties: {
-                    sessionId: { type: 'string', example: 'rose-court-demo' },
-                    questId: { type: 'string', example: 'ruined_rose_court' },
+                    sessionId: { type: 'string', example: 'scene-authoring-demo' },
+                    questId: { type: 'string', example: 'scene_authoring_starter' },
                     playerId: { type: 'string', example: 'wanderer-01' },
-                    fromScreenId: { type: 'string', example: 'outer_gate_murals' },
+                    fromScreenId: { type: 'string', example: 'opening_tableau' },
                     toScreenId: { type: 'string', example: 'mural_center_panel' },
                     direction: { type: 'string', example: 'north' },
                     promptText: { type: 'string', example: 'I run my hand across the faded mural.' }
@@ -2138,10 +2156,10 @@ export function buildOpenApiSpec() {
                   type: 'object',
                   required: ['currentScreenId', 'actionType'],
                   properties: {
-                    sessionId: { type: 'string', example: 'rose-court-demo' },
-                    questId: { type: 'string', example: 'ruined_rose_court' },
+                    sessionId: { type: 'string', example: 'scene-authoring-demo' },
+                    questId: { type: 'string', example: 'scene_authoring_starter' },
                     playerId: { type: 'string', example: 'wanderer-01' },
-                    currentScreenId: { type: 'string', example: 'outer_gate_murals' },
+                    currentScreenId: { type: 'string', example: 'opening_tableau' },
                     actionType: { type: 'string', enum: ['direction', 'prompt'] },
                     direction: { type: 'string', example: 'north' },
                     targetScreenId: { type: 'string', example: 'mural_center_panel' },
@@ -2560,6 +2578,68 @@ export function buildOpenApiSpec() {
             '200': { description: 'Memories returned.', ...jsonResponse({ $ref: '#/components/schemas/FragmentToMemoriesResponse' }) },
             '400': { description: 'Missing required payload fields.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
             '502': { description: 'LLM/schema mismatch.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/memories/{memoryId}/textToImage/front': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Generate a memory card front image',
+          importance: 'High',
+          flow: 'Regenerate the front card image for one persisted memory from Memory Spread admin or recovery tools.',
+          parameters: [pathParam('memoryId', 'Persisted memory document identifier.')],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    text: { type: 'string' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Memory front image generated.' },
+            '400': { description: 'Missing required path params.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Memory not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/memories/{memoryId}/textToImage/back': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Generate a memory card back image',
+          importance: 'High',
+          flow: 'Regenerate the back card image for one persisted memory from Memory Spread admin or recovery tools.',
+          parameters: [pathParam('memoryId', 'Persisted memory document identifier.')],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    text: { type: 'string' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Memory back image generated.' },
+            '400': { description: 'Missing required path params.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Memory not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
