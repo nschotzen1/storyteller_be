@@ -28,6 +28,13 @@ import {
   createStorytellerIllustration
 } from './services/storytellerService.js';
 import { NarrativeEntity, upsertNarrativeEntity } from './storyteller/utils.js';
+import {
+  buildTypewriterKeyState,
+  findTypewriterKeyForSession,
+  listTypewriterKeysForSession,
+  markTypewriterKeyPressed,
+  upsertTypewriterKey
+} from './services/typewriterKeyService.js';
 import { textToEntityFromText } from './services/textToEntityService.js';
 import {
   normalizePredicate,
@@ -380,8 +387,11 @@ const TYPEWRITER_MIN_FONT_SIZE_PX = 28;
 const TYPEWRITER_MIN_FONT_SIZE_REM = 1.75;
 const TYPEWRITER_DEFAULT_FONT_SIZE = '1.9rem';
 const TYPEWRITER_PREFERRED_FONT_SIZE_PX = 30;
+const TYPEWRITER_TEXT_KEY_TEXTURE_URL = '/textures/keys/blank_rect_horizontal_1.png';
 const XEROFAG_CANDIDATE_TERM = 'The Xerofag';
+const XEROFAG_KEY_TEXT = 'THE XEROFAG';
 const XEROFAG_LORE = 'The Xerofag are a group of undead canines.';
+const XEROFAG_ENTITY_EXTERNAL_ID = 'builtin:xerofag';
 const XEROFAG_CANINE_KEYWORDS = [
   'canine',
   'dog',
@@ -1008,6 +1018,75 @@ function buildXerofagInspectionPromptMessages(currentNarrative, candidateNarrati
     payload
   );
 
+  return [
+    { role: 'system', content: renderedPrompt },
+    { role: 'user', content: JSON.stringify(payload) }
+  ];
+}
+
+function buildTypewriterKeyCandidateNarrative(currentNarrative = '', insertText = '') {
+  const baseText = typeof currentNarrative === 'string' ? currentNarrative : '';
+  const normalizedInsertText = typeof insertText === 'string' ? insertText.trim() : '';
+  if (!normalizedInsertText) {
+    return {
+      candidateNarrative: baseText,
+      appendedText: ''
+    };
+  }
+  const candidateNarrative = appendNarrativeTerm(baseText, normalizedInsertText);
+  return {
+    candidateNarrative,
+    appendedText: candidateNarrative.slice(baseText.length)
+  };
+}
+
+function shouldAllowTypewriterKeyInMock(typewriterKey, currentNarrative = '') {
+  const keyText = firstDefinedString(typewriterKey?.keyText);
+  const insertText = firstDefinedString(typewriterKey?.insertText, keyText);
+  const sourceType = firstDefinedString(typewriterKey?.sourceType);
+
+  if (!String(currentNarrative || '').trim() || !insertText) {
+    return false;
+  }
+  if (narrativeEndsWithTerm(currentNarrative, insertText)) {
+    return false;
+  }
+  if (sourceType === 'builtin' && keyText === XEROFAG_KEY_TEXT) {
+    return shouldAllowXerofagInMock(currentNarrative);
+  }
+  return countWords(currentNarrative) >= 3;
+}
+
+function buildTypewriterKeyVerificationPromptPayload(typewriterKey, entity, currentNarrative = '', candidateNarrative = '') {
+  const keyText = firstDefinedString(typewriterKey?.keyText);
+  const insertText = firstDefinedString(typewriterKey?.insertText, keyText);
+  const entityName = firstDefinedString(entity?.name, typewriterKey?.entityName, keyText);
+  const effectiveCandidate = candidateNarrative && candidateNarrative.trim()
+    ? candidateNarrative
+    : buildTypewriterKeyCandidateNarrative(currentNarrative, insertText).candidateNarrative;
+
+  return {
+    current_narrative: typeof currentNarrative === 'string' ? currentNarrative : '',
+    candidate_narrative: effectiveCandidate,
+    key_text: keyText,
+    insert_text: insertText,
+    entity_name: entityName,
+    entity_description: firstDefinedString(entity?.description, typewriterKey?.description),
+    entity_lore: firstDefinedString(entity?.lore),
+    entity_type: firstDefinedString(entity?.type),
+    entity_subtype: firstDefinedString(entity?.subtype),
+    source_type: firstDefinedString(typewriterKey?.sourceType)
+  };
+}
+
+function buildTypewriterKeyVerificationPromptMessages(typewriterKey, entity, currentNarrative, candidateNarrative, promptTemplate) {
+  const payload = buildTypewriterKeyVerificationPromptPayload(
+    typewriterKey,
+    entity,
+    currentNarrative,
+    candidateNarrative
+  );
+  const renderedPrompt = renderPromptTemplateString(promptTemplate, payload);
   return [
     { role: 'system', content: renderedPrompt },
     { role: 'user', content: JSON.stringify(payload) }
@@ -3261,11 +3340,147 @@ app.post('/api/shouldAllowXerofag', async (req, res) => {
   }
 });
 
+app.post('/api/typewriter/keys/shouldAllow', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const { sessionId, currentNarrative, candidateNarrative } = body;
+    const resolvedPlayerId = normalizeOptionalPlayerId(body.playerId);
+    const requestedKeyId = firstDefinedString(body.keyId);
+    const requestedKeyText = firstDefinedString(body.keyText);
+
+    if (!sessionId || typeof currentNarrative !== 'string') {
+      return res.status(400).json({ error: 'Missing sessionId or currentNarrative' });
+    }
+    if (!requestedKeyId && !requestedKeyText) {
+      return res.status(400).json({ error: 'Missing keyId or keyText' });
+    }
+
+    await startTypewriterSession(sessionId);
+    await ensureBuiltinTypewriterKeys(sessionId, resolvedPlayerId);
+
+    const typewriterKey = await findTypewriterKeyForSession({
+      sessionId,
+      playerId: resolvedPlayerId,
+      keyId: requestedKeyId,
+      keyText: requestedKeyText
+    });
+
+    if (!typewriterKey) {
+      return res.status(404).json({ error: 'Typewriter key not found for this session.' });
+    }
+
+    const insertText = firstDefinedString(typewriterKey.insertText, typewriterKey.keyText);
+    const candidate = buildTypewriterKeyCandidateNarrative(currentNarrative, insertText);
+    const effectiveCandidateNarrative = firstDefinedString(candidateNarrative) || candidate.candidateNarrative;
+    const appendedText = effectiveCandidateNarrative.slice(String(currentNarrative || '').length);
+    const verificationPipeline = await getAiPipelineSettings('typewriter_key_verification');
+    const verificationProvider = typeof verificationPipeline?.provider === 'string'
+      ? verificationPipeline.provider
+      : 'openai';
+    const shouldMock = resolveMockMode(body, verificationPipeline.useMock);
+
+    if (!currentNarrative.trim() || narrativeEndsWithTerm(currentNarrative, insertText)) {
+      return res.status(200).json({
+        allowed: false,
+        appendedText,
+        candidateNarrative: effectiveCandidateNarrative,
+        key: buildTypewriterKeyState(typewriterKey),
+        mocked: shouldMock,
+        runtime: {
+          pipeline: 'typewriter_key_verification',
+          provider: verificationProvider,
+          model: verificationPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    }
+
+    const linkedEntity = typewriterKey.entityId
+      ? await NarrativeEntity.findById(typewriterKey.entityId).lean()
+      : null;
+
+    if (shouldMock) {
+      const allowed = shouldAllowTypewriterKeyInMock(typewriterKey, currentNarrative);
+      if (allowed) {
+        await markTypewriterKeyPressed(typewriterKey?._id ? String(typewriterKey._id) : '');
+      }
+      return res.status(200).json({
+        allowed,
+        appendedText,
+        candidateNarrative: effectiveCandidateNarrative,
+        key: buildTypewriterKeyState(typewriterKey),
+        mocked: true,
+        runtime: {
+          pipeline: 'typewriter_key_verification',
+          provider: verificationProvider,
+          model: verificationPipeline.model || '',
+          mocked: true
+        }
+      });
+    }
+
+    try {
+      const promptTemplate = await resolveTypewriterKeyVerificationPromptTemplate();
+      const aiResponse = await callJsonLlm({
+        prompts: buildTypewriterKeyVerificationPromptMessages(
+          typewriterKey,
+          linkedEntity,
+          currentNarrative,
+          effectiveCandidateNarrative,
+          promptTemplate
+        ),
+        provider: verificationProvider,
+        model: verificationPipeline.model || '',
+        max_tokens: 220,
+        explicitJsonObjectFormat: true
+      });
+
+      await validatePayloadForRoute('typewriter_key_verification', aiResponse);
+      const allowed = Boolean(aiResponse.allowed);
+      if (allowed) {
+        await markTypewriterKeyPressed(typewriterKey?._id ? String(typewriterKey._id) : '');
+      }
+
+      return res.status(200).json({
+        allowed,
+        appendedText,
+        candidateNarrative: effectiveCandidateNarrative,
+        reason: firstDefinedString(aiResponse.reason),
+        key: buildTypewriterKeyState(typewriterKey),
+        mocked: false,
+        runtime: {
+          pipeline: 'typewriter_key_verification',
+          provider: verificationProvider,
+          model: verificationPipeline.model || '',
+          mocked: false
+        }
+      });
+    } catch (aiError) {
+      console.error('Error in live /api/typewriter/keys/shouldAllow call:', aiError);
+      return res.status(502).json({
+        error: 'Live typewriter key verification failed.',
+        details: aiError?.message || 'Unknown error',
+        key: buildTypewriterKeyState(typewriterKey),
+        runtime: {
+          pipeline: 'typewriter_key_verification',
+          provider: verificationProvider,
+          model: verificationPipeline.model || '',
+          mocked: false
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error in /api/typewriter/keys/shouldAllow:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.post('/api/typewriter/session/start', async (req, res) => {
   try {
     const { sessionId, fragment, playerId, setInitialFragment } = req.body || {};
     const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
     const session = await startTypewriterSession(sessionId);
+    await ensureBuiltinTypewriterKeys(session.sessionId, resolvedPlayerId);
     if (typeof fragment === 'string') {
       const seededSession = await saveTypewriterSessionFragment(session.sessionId, fragment, {
         updateInitialFragment: Boolean(setInitialFragment)
@@ -3304,6 +3519,7 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
     }
 
     await startTypewriterSession(sessionId);
+    await ensureBuiltinTypewriterKeys(sessionId, resolvedPlayerId);
     const fragmentText = await getTypewriterSessionFragment(sessionId);
     const narrativeWordCount = countWords(fragmentText);
     const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
@@ -3349,7 +3565,8 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
       assignedStorytellerCount: filledCount,
       nextThreshold,
       slots: buildTypewriterStorytellerSlots(visibleStorytellers),
-      entityKeys: (await listTypewriterStoryEntities(sessionId, resolvedPlayerId)).map(buildTypewriterEntityKeyState)
+      typewriterKeys: (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState),
+      entityKeys: (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState)
     });
   } catch (error) {
     console.error('Error in /api/shouldCreateStorytellerKey:', error);
@@ -3373,6 +3590,7 @@ app.post('/api/send_storyteller_typewriter_text', async (req, res) => {
     }
 
     await startTypewriterSession(sessionId);
+    await ensureBuiltinTypewriterKeys(sessionId, resolvedPlayerId);
     const fragmentText = await getTypewriterSessionFragment(sessionId);
     const storyteller = await findTypewriterStorytellerForIntervention(
       sessionId,
@@ -3444,6 +3662,14 @@ app.post('/api/send_storyteller_typewriter_text', async (req, res) => {
       storyteller,
       entity: rawEntity
     });
+    const savedTypewriterKey = await saveTypewriterKeyFromIntervention({
+      sessionId,
+      playerId: resolvedPlayerId,
+      storyteller,
+      entity: savedEntity,
+      keyText: rawEntity?.key_text,
+      insertText: rawEntity?.insert_text
+    });
     const updatedStoryteller = await Storyteller.findOneAndUpdate(
       { _id: storyteller._id },
       {
@@ -3459,6 +3685,7 @@ app.post('/api/send_storyteller_typewriter_text', async (req, res) => {
     );
 
     await saveTypewriterSessionFragment(sessionId, nextFragment);
+    const sessionTypewriterKeys = (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState);
 
     const continuationInsights = normalizeContinuationInsights(
       {
@@ -3490,8 +3717,10 @@ app.post('/api/send_storyteller_typewriter_text', async (req, res) => {
       fragment: nextFragment,
       mocked: shouldMock,
       storyteller: buildStorytellerListItem(updatedStoryteller || storyteller),
-      entityKey: buildTypewriterEntityKeyState(savedEntity),
-      entityKeys: (await listTypewriterStoryEntities(sessionId, resolvedPlayerId)).map(buildTypewriterEntityKeyState),
+      typewriterKey: buildTypewriterKeyState(savedTypewriterKey),
+      typewriterKeys: sessionTypewriterKeys,
+      entityKey: buildTypewriterKeyState(savedTypewriterKey),
+      entityKeys: sessionTypewriterKeys,
       runtime: {
         pipeline: 'storyteller_intervention',
         provider: interventionProvider,
@@ -3884,16 +4113,13 @@ function normalizeTypewriterEntityKeyText(value, fallbackName = '') {
     .join(' ');
 }
 
-function buildTypewriterEntityKeyState(entity) {
-  return {
-    id: String(entity?._id || ''),
-    entityName: firstDefinedString(entity?.name) || 'Unnamed entity',
-    keyText: normalizeTypewriterEntityKeyText(entity?.typewriterKeyText, entity?.name),
-    summary: firstDefinedString(entity?.description, entity?.lore, entity?.relevance),
-    storytellerId: firstDefinedString(entity?.introducedByStorytellerId),
-    storytellerName: firstDefinedString(entity?.introducedByStorytellerName),
-    createdAt: entity?.createdAt || null
-  };
+function normalizeTypewriterKeyInsertText(value, fallbackKeyText = '') {
+  const base = firstDefinedString(value, fallbackKeyText) || fallbackKeyText;
+  return base.trim() || fallbackKeyText || 'Hidden Omen';
+}
+
+function buildTypewriterEntityKeyState(typewriterKey) {
+  return buildTypewriterKeyState(typewriterKey);
 }
 
 function isMockStorytellerKeyUrl(value) {
@@ -3952,13 +4178,85 @@ async function listTypewriterStoryEntities(sessionId, playerId = '') {
     .exec();
 }
 
+async function ensureBuiltinTypewriterKeys(sessionId, playerId = '') {
+  if (!sessionId) return [];
+
+  const xerofagEntity = await upsertNarrativeEntity(
+    {
+      session_id: sessionId,
+      sessionId,
+      playerId,
+      name: XEROFAG_CANDIDATE_TERM,
+      description: XEROFAG_LORE,
+      lore: XEROFAG_LORE,
+      type: 'creature',
+      subtype: 'undead canines',
+      tags: ['undead', 'canines', 'xerofag'],
+      externalId: XEROFAG_ENTITY_EXTERNAL_ID,
+      source: 'typewriter_builtin',
+      sourceRoute: '/api/typewriter/session/start',
+      typewriterKeyText: XEROFAG_KEY_TEXT,
+      typewriterSource: 'builtin',
+      activeInTypewriter: true
+    },
+    {
+      sessionId,
+      playerId,
+      source: 'typewriter_builtin',
+      sourceRoute: '/api/typewriter/session/start',
+      lookup: applyOptionalPlayerId(
+        {
+          session_id: sessionId,
+          externalId: XEROFAG_ENTITY_EXTERNAL_ID
+        },
+        playerId
+      )
+    }
+  );
+
+  const xerofagKey = await upsertTypewriterKey(
+    {
+      session_id: sessionId,
+      sessionId,
+      playerId,
+      entityId: xerofagEntity?._id || null,
+      entityName: XEROFAG_CANDIDATE_TERM,
+      keyText: XEROFAG_KEY_TEXT,
+      insertText: XEROFAG_CANDIDATE_TERM,
+      description: XEROFAG_LORE,
+      sourceType: 'builtin',
+      sourceRoute: '/api/shouldAllowXerofag',
+      verificationKind: 'typewriter_key_verification',
+      activeInTypewriter: true,
+      textureUrl: TYPEWRITER_TEXT_KEY_TEXTURE_URL,
+      sortOrder: 0
+    },
+    {
+      sessionId,
+      playerId,
+      lookup: applyOptionalPlayerId(
+        {
+          session_id: sessionId,
+          keyText: XEROFAG_KEY_TEXT,
+          sourceType: 'builtin'
+        },
+        playerId
+      )
+    }
+  );
+
+  return [xerofagKey].filter(Boolean);
+}
+
 async function buildTypewriterSessionPayload(sessionId, fragment, initialFragment = '', playerId = '') {
-  const entityKeys = (await listTypewriterStoryEntities(sessionId, playerId)).map(buildTypewriterEntityKeyState);
+  await ensureBuiltinTypewriterKeys(sessionId, playerId);
+  const typewriterKeys = (await listTypewriterKeysForSession(sessionId, playerId)).map(buildTypewriterKeyState);
   return {
     sessionId,
     fragment,
     initialFragment,
-    entityKeys
+    typewriterKeys,
+    entityKeys: typewriterKeys
   };
 }
 
@@ -4128,6 +4426,15 @@ async function resolveStorytellerInterventionPromptTemplate() {
   return currentTemplates?.storyteller_intervention?.promptTemplate || '';
 }
 
+async function resolveTypewriterKeyVerificationPromptTemplate() {
+  const latestPrompt = await getLatestPromptTemplate('typewriter_key_verification');
+  if (latestPrompt?.promptTemplate) {
+    return latestPrompt.promptTemplate;
+  }
+  const currentTemplates = await getCurrentTypewriterPromptTemplates();
+  return currentTemplates?.typewriter_key_verification?.promptTemplate || '';
+}
+
 function buildStorytellerInterventionPromptMessages(storyteller, fragmentText, promptTemplate) {
   const payload = buildStorytellerInterventionPromptPayload(storyteller, fragmentText);
   const renderedPrompt = renderPromptTemplateString(promptTemplate, payload);
@@ -4228,6 +4535,56 @@ async function saveTypewriterEntityFromIntervention({
           session_id: sessionId,
           introducedByStorytellerId: String(storyteller?._id || ''),
           typewriterKeyText: keyText
+        },
+        playerId || firstDefinedString(storyteller?.playerId)
+      )
+    }
+  );
+}
+
+async function saveTypewriterKeyFromIntervention({
+  sessionId,
+  playerId = '',
+  storyteller,
+  entity,
+  keyText,
+  insertText
+}) {
+  const normalizedKeyText = normalizeTypewriterEntityKeyText(
+    keyText,
+    firstDefinedString(entity?.typewriterKeyText, entity?.name)
+  );
+  const normalizedInsertText = normalizeTypewriterKeyInsertText(insertText, normalizedKeyText);
+  const description = firstDefinedString(entity?.description, entity?.lore, entity?.relevance);
+
+  return upsertTypewriterKey(
+    {
+      session_id: sessionId,
+      sessionId,
+      playerId: playerId || firstDefinedString(storyteller?.playerId),
+      entityId: entity?._id || null,
+      entityName: firstDefinedString(entity?.name),
+      keyText: normalizedKeyText,
+      insertText: normalizedInsertText,
+      description,
+      sourceType: 'storyteller_intervention',
+      sourceRoute: '/api/send_storyteller_typewriter_text',
+      sourceStorytellerId: String(storyteller?._id || ''),
+      sourceStorytellerName: firstDefinedString(storyteller?.name),
+      sourceStorytellerKeySlot: Number.isInteger(storyteller?.keySlotIndex) ? storyteller.keySlotIndex : null,
+      verificationKind: 'typewriter_key_verification',
+      activeInTypewriter: true,
+      textureUrl: TYPEWRITER_TEXT_KEY_TEXTURE_URL,
+      sortOrder: 100
+    },
+    {
+      sessionId,
+      playerId: playerId || firstDefinedString(storyteller?.playerId),
+      lookup: applyOptionalPlayerId(
+        {
+          session_id: sessionId,
+          keyText: normalizedKeyText,
+          sourceType: 'storyteller_intervention'
         },
         playerId || firstDefinedString(storyteller?.playerId)
       )

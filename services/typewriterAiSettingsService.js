@@ -98,6 +98,19 @@ const PIPELINE_DEFINITIONS = {
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_STORYTELLER_INTERVENTION_PROVIDER || DEFAULT_PROVIDER
   },
+  typewriter_key_verification: {
+    key: 'typewriter_key_verification',
+    label: 'Typewriter Key Verification',
+    description: '/api/typewriter/keys/shouldAllow',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_TYPEWRITER_KEY_VERIFICATION_MODEL
+      || process.env.OPENAI_STORYTELLER_INTERVENTION_MODEL
+      || process.env.OPENAI_STORYTELLER_MODEL
+      || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_TYPEWRITER_KEY_VERIFICATION_PROVIDER || DEFAULT_PROVIDER
+  },
   messenger_chat: {
     key: 'messenger_chat',
     label: 'Messenger Chat',

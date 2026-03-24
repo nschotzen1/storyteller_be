@@ -59,6 +59,12 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/send_storyteller_typewriter_text storyteller entrance continuation',
     settingsKey: 'storyteller_intervention'
   },
+  typewriter_key_verification: {
+    key: 'typewriter_key_verification',
+    label: 'Typewriter key verification',
+    description: '/api/typewriter/keys/shouldAllow textual key insertion judge',
+    settingsKey: 'typewriter_key_verification'
+  },
   messenger_chat: {
     key: 'messenger_chat',
     label: 'Messenger chat',

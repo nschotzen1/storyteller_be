@@ -4,9 +4,10 @@ import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefin
 import { listRouteConfigs } from './services/llmRouteConfigService.js';
 
 describe('story admin API metadata', () => {
-  test('includes xerofag inspection, storyteller intervention, mission, immersive RPG GM, quest generation, and quest authoring in runtime AI pipeline definitions', () => {
+  test('includes xerofag inspection, typewriter key verification, storyteller intervention, mission, immersive RPG GM, quest generation, and quest authoring in runtime AI pipeline definitions', () => {
     const definitions = getTypewriterPipelineDefinitions();
     const xerofagInspection = definitions.find((definition) => definition.key === 'xerofag_inspection');
+    const typewriterKeyVerification = definitions.find((definition) => definition.key === 'typewriter_key_verification');
     const storytellerIntervention = definitions.find((definition) => definition.key === 'storyteller_intervention');
     const storytellerMission = definitions.find((definition) => definition.key === 'storyteller_mission');
     const immersiveRpgGm = definitions.find((definition) => definition.key === 'immersive_rpg_gm');
@@ -16,6 +17,9 @@ describe('story admin API metadata', () => {
     expect(xerofagInspection).toBeDefined();
     expect(xerofagInspection.modelKind).toBe('text');
     expect(xerofagInspection.supportedProviders).toEqual(expect.arrayContaining(['openai', 'anthropic']));
+    expect(typewriterKeyVerification).toBeDefined();
+    expect(typewriterKeyVerification.modelKind).toBe('text');
+    expect(typewriterKeyVerification.supportedProviders).toEqual(expect.arrayContaining(['openai', 'anthropic']));
     expect(storytellerIntervention).toBeDefined();
     expect(storytellerIntervention.modelKind).toBe('text');
     expect(storytellerIntervention.supportedProviders).toEqual(expect.arrayContaining(['openai', 'anthropic']));
@@ -33,12 +37,13 @@ describe('story admin API metadata', () => {
     expect(questSceneAuthoring.supportedProviders).toEqual(expect.arrayContaining(['openai', 'anthropic']));
   });
 
-  test('includes xerofag inspection, storyteller intervention, immersive RPG GM, quest generation, quest scene authoring, storyteller mission and relationship evaluation in prompt definitions', () => {
+  test('includes xerofag inspection, typewriter key verification, storyteller intervention, immersive RPG GM, quest generation, quest scene authoring, storyteller mission and relationship evaluation in prompt definitions', () => {
     const definitions = getTypewriterPromptDefinitions();
 
     expect(definitions.map((definition) => definition.key)).toEqual(
       expect.arrayContaining([
         'xerofag_inspection',
+        'typewriter_key_verification',
         'storyteller_intervention',
         'immersive_rpg_gm',
         'quest_generation',
@@ -49,7 +54,7 @@ describe('story admin API metadata', () => {
     );
   });
 
-  test('includes immersive RPG turn, quest advance, and storyteller intervention in route contracts and keeps storyteller key schema fields aligned', async () => {
+  test('includes immersive RPG turn, quest advance, storyteller intervention, and typewriter key verification in route contracts and keeps storyteller key schema fields aligned', async () => {
     const routeConfigs = await listRouteConfigs();
 
     expect(routeConfigs.immersive_rpg_turn).toBeDefined();
@@ -76,6 +81,9 @@ describe('story admin API metadata', () => {
         shape_prompt_hint: expect.any(Object)
       })
     );
+    expect(routeConfigs.typewriter_key_verification).toBeDefined();
+    expect(routeConfigs.typewriter_key_verification.routePath).toBe('/api/typewriter/keys/shouldAllow');
+    expect(routeConfigs.typewriter_key_verification.responseSchema?.properties?.allowed).toBeDefined();
   });
 
   test('documents story admin and typewriter routes in OpenAPI', () => {
@@ -99,6 +107,7 @@ describe('story admin API metadata', () => {
       '/api/admin/quest/authoring-draft',
       '/api/shouldGenerateContinuation',
       '/api/shouldAllowXerofag',
+      '/api/typewriter/keys/shouldAllow',
       '/api/typewriter/session/start',
       '/api/shouldCreateStorytellerKey',
       '/api/send_storyteller_typewriter_text',
@@ -118,6 +127,7 @@ describe('story admin API metadata', () => {
 
     expect(spec.paths['/api/entities']).toBeDefined();
     expect(spec.components.schemas.NarrativeEntity).toBeDefined();
+    expect(spec.components.schemas.TypewriterKey).toBeDefined();
     expect(spec.components.schemas.NarrativeEntityListResponse).toBeDefined();
     expect(spec.components.schemas.ImmersiveRpgNotebook).toBeDefined();
     expect(spec.components.schemas.ImmersiveRpgStageModule).toBeDefined();

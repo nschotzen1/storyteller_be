@@ -6,6 +6,10 @@ import {
   NARRATIVE_ENTITY_JSON_SCHEMA,
   NARRATIVE_ENTITY_LIST_RESPONSE_SCHEMA
 } from './contracts/narrativeEntityContract.js';
+import {
+  TYPEWRITER_KEY_JSON_SCHEMA,
+  TYPEWRITER_KEY_LIST_RESPONSE_SCHEMA
+} from './contracts/typewriterKeyContract.js';
 
 const pathParam = (name, description) => ({
   name,
@@ -760,23 +764,19 @@ export function buildOpenApiSpec() {
             sessionId: { type: 'string' },
             fragment: { type: 'string' },
             initialFragment: { type: 'string' },
+            typewriterKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterKey' }
+            },
             entityKeys: {
               type: 'array',
-              items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
+              items: { $ref: '#/components/schemas/TypewriterKey' }
             }
           }
         },
+        TypewriterKey: TYPEWRITER_KEY_JSON_SCHEMA,
         TypewriterStoryEntityKey: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' },
-            entityName: { type: 'string' },
-            keyText: { type: 'string' },
-            summary: { type: 'string' },
-            storytellerId: { type: 'string' },
-            storytellerName: { type: 'string' },
-            createdAt: { type: 'string', format: 'date-time', nullable: true }
-          }
+          allOf: [{ $ref: '#/components/schemas/TypewriterKey' }]
         },
         TypewriterStorytellerSlot: {
           type: 'object',
@@ -809,9 +809,13 @@ export function buildOpenApiSpec() {
               type: 'array',
               items: { $ref: '#/components/schemas/TypewriterStorytellerSlot' }
             },
+            typewriterKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterKey' }
+            },
             entityKeys: {
               type: 'array',
-              items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
+              items: { $ref: '#/components/schemas/TypewriterKey' }
             }
           }
         },
@@ -824,10 +828,15 @@ export function buildOpenApiSpec() {
                 sessionId: { type: 'string' },
                 fragment: { type: 'string' },
                 storyteller: { type: 'object', additionalProperties: true },
-                entityKey: { $ref: '#/components/schemas/TypewriterStoryEntityKey' },
+                typewriterKey: { $ref: '#/components/schemas/TypewriterKey' },
+                typewriterKeys: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/TypewriterKey' }
+                },
+                entityKey: { $ref: '#/components/schemas/TypewriterKey' },
                 entityKeys: {
                   type: 'array',
-                  items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
+                  items: { $ref: '#/components/schemas/TypewriterKey' }
                 },
                 mocked: { type: 'boolean' },
                 runtime: {
@@ -843,6 +852,27 @@ export function buildOpenApiSpec() {
               }
             }
           ]
+        },
+        TypewriterKeyVerificationResponse: {
+          type: 'object',
+          properties: {
+            allowed: { type: 'boolean' },
+            appendedText: { type: 'string' },
+            candidateNarrative: { type: 'string' },
+            reason: { type: 'string' },
+            key: { $ref: '#/components/schemas/TypewriterKey' },
+            mocked: { type: 'boolean' },
+            runtime: {
+              type: 'object',
+              properties: {
+                pipeline: { type: 'string' },
+                provider: { type: 'string' },
+                model: { type: 'string' },
+                mocked: { type: 'boolean' }
+              },
+              additionalProperties: true
+            }
+          }
         }
       }
     },
@@ -1402,6 +1432,46 @@ export function buildOpenApiSpec() {
             },
             '400': { description: 'Missing sessionId or currentNarrative.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
             '502': { description: 'LLM Xerofag inspection failed.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/typewriter/keys/shouldAllow': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Check whether a saved textual typewriter key may be appended to the current narrative',
+          importance: 'High',
+          flow: 'Dynamic textual keys such as Xerofag and storyteller-created keys call this before inserting text into the live typewriter narrative.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId', 'currentNarrative'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    playerId: { type: 'string' },
+                    keyId: { type: 'string' },
+                    keyText: { type: 'string' },
+                    currentNarrative: { type: 'string' },
+                    candidateNarrative: { type: 'string' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Verdict returned for the textual key insertion attempt.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterKeyVerificationResponse' })
+            },
+            '400': { description: 'Missing sessionId, currentNarrative, or key target.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Key not found for the session.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '502': { description: 'LLM key verification failed.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },

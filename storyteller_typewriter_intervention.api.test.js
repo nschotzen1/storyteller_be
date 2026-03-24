@@ -6,6 +6,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 let app;
 let Storyteller;
 let NarrativeFragment;
+let TypewriterKey;
 let NarrativeEntity;
 let mongoServer;
 
@@ -20,7 +21,7 @@ beforeAll(async () => {
   const mongoUri = mongoServer.getUri();
 
   ({ app } = await import('./server_new.js'));
-  ({ Storyteller, NarrativeFragment } = await import('./models/models.js'));
+  ({ Storyteller, NarrativeFragment, TypewriterKey } = await import('./models/models.js'));
   ({ NarrativeEntity } = await import('./storyteller/utils.js'));
 
   if (mongoose.connection.readyState !== 0) {
@@ -42,6 +43,9 @@ afterEach(async () => {
   if (NarrativeEntity) {
     await NarrativeEntity.deleteMany({});
   }
+  if (TypewriterKey) {
+    await TypewriterKey.deleteMany({});
+  }
 });
 
 afterAll(async () => {
@@ -52,7 +56,7 @@ afterAll(async () => {
 });
 
 describe('POST /api/send_storyteller_typewriter_text', () => {
-  test('runs a storyteller intervention and saves a textual entity key in Mongo', async () => {
+  test('runs a storyteller intervention and saves a pressable textual typewriter key in Mongo', async () => {
     const sessionId = 'storyteller-intervention-session';
 
     await request(app)
@@ -84,19 +88,24 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
       .expect(200);
 
     expect(interventionResponse.body).toHaveProperty('writing_sequence');
+    expect(interventionResponse.body).toHaveProperty('typewriterKey');
+    expect(interventionResponse.body).toHaveProperty('typewriterKeys');
     expect(interventionResponse.body).toHaveProperty('entityKey');
-    expect(interventionResponse.body.entityKey).toEqual(
+    expect(interventionResponse.body.typewriterKey).toEqual(
       expect.objectContaining({
+        entityId: expect.any(String),
         entityName: expect.any(String),
         keyText: expect.any(String),
+        insertText: expect.any(String),
+        sourceType: 'storyteller_intervention',
         storytellerId: String(storyteller._id),
         storytellerName: storyteller.name
       })
     );
-    expect(interventionResponse.body.entityKeys).toEqual(
+    expect(interventionResponse.body.typewriterKeys).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          keyText: interventionResponse.body.entityKey.keyText
+          keyText: interventionResponse.body.typewriterKey.keyText
         })
       ])
     );
@@ -108,11 +117,11 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
 
     const savedEntity = await NarrativeEntity.findOne({
       session_id: sessionId,
-      typewriterKeyText: interventionResponse.body.entityKey.keyText
+      typewriterKeyText: interventionResponse.body.typewriterKey.keyText
     }).lean();
     expect(savedEntity).toEqual(
       expect.objectContaining({
-        name: interventionResponse.body.entityKey.entityName,
+        name: interventionResponse.body.typewriterKey.entityName,
         source: 'storyteller_intervention',
         sourceRoute: '/api/send_storyteller_typewriter_text',
         introducedByStorytellerName: storyteller.name,
@@ -121,15 +130,31 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
       })
     );
 
+    const savedTypewriterKey = await TypewriterKey.findOne({
+      session_id: sessionId,
+      keyText: interventionResponse.body.typewriterKey.keyText
+    }).lean();
+    expect(savedTypewriterKey).toEqual(
+      expect.objectContaining({
+        entityId: savedEntity._id,
+        entityName: interventionResponse.body.typewriterKey.entityName,
+        insertText: interventionResponse.body.typewriterKey.insertText,
+        sourceType: 'storyteller_intervention',
+        sourceStorytellerId: String(storyteller._id),
+        sourceStorytellerName: storyteller.name,
+        activeInTypewriter: true
+      })
+    );
+
     const refreshedSlotsResponse = await request(app)
       .post('/api/shouldCreateStorytellerKey')
       .send({ sessionId, mocked_api_calls: true })
       .expect(200);
 
-    expect(refreshedSlotsResponse.body.entityKeys).toEqual(
+    expect(refreshedSlotsResponse.body.typewriterKeys).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          keyText: interventionResponse.body.entityKey.keyText
+          keyText: interventionResponse.body.typewriterKey.keyText
         })
       ])
     );

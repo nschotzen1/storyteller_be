@@ -4,6 +4,7 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { ensureMongoConnection } from '../services/mongoConnectionService.js';
+import { TYPEWRITER_KEY_REQUIRED_FIELDS } from '../contracts/typewriterKeyContract.js';
 
 const chatMessageSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, index: true },
@@ -192,6 +193,45 @@ const StorytellerSchema = new mongoose.Schema({
 StorytellerSchema.index({ session_id: 1, playerId: 1, name: 1 });
 
 export const Storyteller = mongoose.model('Storyteller', StorytellerSchema);
+
+const typewriterKeySchemaDefinition = {
+  session_id: { type: String, required: true, index: true },
+  sessionId: { type: String, index: true },
+  playerId: { type: String, index: true },
+  entityId: { type: mongoose.Schema.Types.ObjectId, ref: 'NarrativeEntity', default: null, index: true },
+  entityName: { type: String, default: '' },
+  keyText: { type: String, required: true, index: true },
+  insertText: { type: String, required: true },
+  description: { type: String, default: '' },
+  sourceType: { type: String, required: true, index: true },
+  sourceRoute: { type: String, default: '' },
+  sourceStorytellerId: { type: String, default: '', index: true },
+  sourceStorytellerName: { type: String, default: '' },
+  sourceStorytellerKeySlot: { type: Number, default: null },
+  verificationKind: { type: String, required: true, default: 'typewriter_key_verification' },
+  activeInTypewriter: { type: Boolean, default: true, index: true },
+  textureUrl: { type: String, default: '/textures/keys/blank_rect_horizontal_1.png' },
+  sortOrder: { type: Number, default: 100 },
+  timesPressed: { type: Number, default: 0 },
+  lastPressedAt: { type: Date, default: null }
+};
+
+const TypewriterKeySchema = new mongoose.Schema(typewriterKeySchemaDefinition, {
+  timestamps: true,
+  strict: true
+});
+
+TypewriterKeySchema.index({ session_id: 1, playerId: 1, activeInTypewriter: 1, sortOrder: 1, createdAt: -1 });
+TypewriterKeySchema.index({ session_id: 1, playerId: 1, keyText: 1 });
+TypewriterKeySchema.index({ session_id: 1, playerId: 1, entityId: 1, sourceType: 1 });
+
+for (const field of TYPEWRITER_KEY_REQUIRED_FIELDS) {
+  if (!typewriterKeySchemaDefinition[field]) {
+    throw new Error(`TypewriterKey schema missing required contract field: ${field}`);
+  }
+}
+
+export const TypewriterKey = mongoose.model('TypewriterKey', TypewriterKeySchema);
 
 const QuestTraversalEventSchema = new mongoose.Schema({
   playerId: { type: String, default: '' },
