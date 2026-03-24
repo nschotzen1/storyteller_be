@@ -75,7 +75,31 @@ const mockDeleteMany = jest.fn(async (query = {}) => {
   return { deletedCount: before - memoryStore.length };
 });
 
-const mockDirectExternalApiCall = jest.fn();
+const mockFindById = jest.fn((memoryId) => ({
+  lean: async () => {
+    const found = memoryStore.find((doc) => doc._id === memoryId);
+    return found ? { ...found } : null;
+  }
+}));
+
+const mockFindByIdAndUpdate = jest.fn((memoryId, update = {}) => ({
+  lean: async () => {
+    const index = memoryStore.findIndex((doc) => doc._id === memoryId);
+    if (index === -1) {
+      return null;
+    }
+    const patch = update?.$set || {};
+    const next = {
+      ...memoryStore[index],
+      ...patch,
+      updatedAt: new Date().toISOString()
+    };
+    memoryStore[index] = next;
+    return { ...next };
+  }
+}));
+
+const mockCallJsonLlm = jest.fn();
 const mockEnsureDirectoryExists = jest.fn(async () => {});
 const mockTextToImageOpenAi = jest.fn(async (prompt, samples, localPath) => ({
   revised_prompt: prompt,
@@ -98,12 +122,14 @@ jest.unstable_mockModule('./models/memory_models.js', () => ({
   FragmentMemory: {
     insertMany: mockInsertMany,
     find: mockFind,
+    findById: mockFindById,
+    findByIdAndUpdate: mockFindByIdAndUpdate,
     deleteMany: mockDeleteMany
   }
 }));
 
 jest.unstable_mockModule('./ai/openai/apiService.js', () => ({
-  directExternalApiCall: mockDirectExternalApiCall
+  callJsonLlm: mockCallJsonLlm
 }));
 
 jest.unstable_mockModule('./storyteller/utils.js', () => ({
@@ -150,20 +176,28 @@ function makeRes() {
   };
 }
 
-async function invoke(handler, { body = {}, query = {} } = {}) {
-  const req = { body, query };
+async function invoke(handler, { body = {}, query = {}, params = {} } = {}) {
+  const req = {
+    body,
+    query,
+    params
+  };
   const res = makeRes();
   await handler(req, res);
   return res;
 }
 
 let postFragmentToMemories;
+let postMemoryFrontImage;
+let postMemoryBackImage;
 let getMemories;
 let deleteMemories;
 
 beforeAll(async () => {
   const { default: memoriesRouter } = await import('./routes/memoriesRoutes.js');
   postFragmentToMemories = getRouteHandler(memoriesRouter, 'post', '/fragmentToMemories');
+  postMemoryFrontImage = getRouteHandler(memoriesRouter, 'post', '/memories/:memoryId/textToImage/front');
+  postMemoryBackImage = getRouteHandler(memoriesRouter, 'post', '/memories/:memoryId/textToImage/back');
   getMemories = getRouteHandler(memoriesRouter, 'get', '/memories');
   deleteMemories = getRouteHandler(memoriesRouter, 'delete', '/memories');
 });
@@ -171,7 +205,7 @@ beforeAll(async () => {
 beforeEach(() => {
   memoryStore.length = 0;
   jest.clearAllMocks();
-  mockDirectExternalApiCall.mockResolvedValue({
+  mockCallJsonLlm.mockResolvedValue({
     memories: [buildValidMemory()]
   });
 });
@@ -205,7 +239,7 @@ describe('Memories routes - mock mode and persistence', () => {
       expect(response.body.memories[0].front_image_url).toMatch(/^\/assets\//);
       expect(response.body.memories[0].back_image_url).toMatch(/^\/assets\//);
 
-      expect(mockDirectExternalApiCall).not.toHaveBeenCalled();
+      expect(mockCallJsonLlm).not.toHaveBeenCalled();
       expect(mockTextToImageOpenAi).not.toHaveBeenCalled();
 
       const listResponse = await invoke(getMemories, { query: { sessionId: 'session-mock' } });
@@ -215,7 +249,7 @@ describe('Memories routes - mock mode and persistence', () => {
   );
 
   it('uses non-mock LLM and image builders when mock flags are disabled', async () => {
-    mockDirectExternalApiCall.mockResolvedValue({
+    mockCallJsonLlm.mockResolvedValue({
       memories: [
         buildValidMemory({ dramatic_definition: 'First Echo' }),
         buildValidMemory({ dramatic_definition: 'Second Echo', distance_from_fragment_location_km: 3 })
@@ -241,7 +275,7 @@ describe('Memories routes - mock mode and persistence', () => {
     expect(response.body.cardOptions).toEqual({ includeFront: true, includeBack: false });
     expect(mockGetRouteConfig).toHaveBeenCalledWith('fragment_to_memories');
     expect(mockRenderPrompt).toHaveBeenCalled();
-    expect(mockDirectExternalApiCall).toHaveBeenCalledTimes(1);
+    expect(mockCallJsonLlm).toHaveBeenCalledTimes(1);
     expect(mockValidatePayloadForRoute).toHaveBeenCalledWith('fragment_to_memories', expect.any(Object));
     expect(mockEnsureDirectoryExists).toHaveBeenCalledTimes(1);
     expect(mockTextToImageOpenAi).toHaveBeenCalledTimes(2);
@@ -251,7 +285,7 @@ describe('Memories routes - mock mode and persistence', () => {
   });
 
   it('normalizes live memory field types before schema validation and persistence', async () => {
-    mockDirectExternalApiCall.mockResolvedValue({
+    mockCallJsonLlm.mockResolvedValue({
       memories: [
         buildValidMemory({
           memory_strength: 7,
@@ -295,6 +329,82 @@ describe('Memories routes - mock mode and persistence', () => {
     expect(response.body.memories[0].entities_in_memory).toEqual(['bell tower']);
     expect(response.body.memories[0].relevant_rolls).toEqual(['Perception']);
     expect(response.body.memories[0].short_title).toBe('Stone Gives Way');
+  });
+
+  it('generates and persists a mocked front image for one memory without calling the live image model', async () => {
+    const seedResponse = await invoke(postFragmentToMemories, {
+      body: {
+        sessionId: 'single-card-side-session',
+        playerId: 'single-card-side-player',
+        text: 'A bell rope shivers over black water.',
+        count: 1,
+        includeCards: false,
+        debug: true
+      }
+    });
+
+    expect(seedResponse.statusCode).toBe(200);
+    const memoryId = seedResponse.body.memories[0]._id;
+
+    const response = await invoke(postMemoryFrontImage, {
+      params: { memoryId },
+      body: { mock: true }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.side).toBe('front');
+    expect(response.body.mocked).toBe(true);
+    expect(response.body.card.prompt).toContain('Create a full-frame RPG collector card FRONT illustration');
+    expect(response.body.card.imageUrl).toContain('/assets/mocks/memory_cards/memory_front_');
+    expect(response.body.memory.front?.imageUrl).toContain('/assets/mocks/memory_cards/memory_front_');
+    expect(response.body.memory.front_image_url).toContain('/assets/mocks/memory_cards/memory_front_');
+    expect(mockTextToImageOpenAi).not.toHaveBeenCalled();
+  });
+
+  it('generates and persists a live-like back image for one memory through the image builder', async () => {
+    const seedResponse = await invoke(postFragmentToMemories, {
+      body: {
+        sessionId: 'single-back-side-session',
+        playerId: 'single-back-side-player',
+        text: 'Lantern light sways between carved pylons.',
+        count: 1,
+        includeCards: false,
+        debug: true
+      }
+    });
+
+    expect(seedResponse.statusCode).toBe(200);
+    const seededMemory = seedResponse.body.memories[0];
+
+    const response = await invoke(postMemoryBackImage, {
+      params: { memoryId: seededMemory._id },
+      body: { mock: false }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.side).toBe('back');
+    expect(response.body.mocked).toBe(false);
+    expect(response.body.card.prompt).toContain('Create a full-frame RPG collector card BACK texture');
+    expect(response.body.card.imageUrl).toMatch(
+      /^\/assets\/single-back-side-session\/memory_cards\//
+    );
+    expect(response.body.memory.back?.imageUrl).toMatch(
+      /^\/assets\/single-back-side-session\/memory_cards\//
+    );
+    expect(response.body.memory.back_image_url).toMatch(
+      /^\/assets\/single-back-side-session\/memory_cards\//
+    );
+    expect(mockEnsureDirectoryExists).toHaveBeenCalledTimes(1);
+    expect(mockTextToImageOpenAi).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 404 when a per-memory card image route targets a missing memory', async () => {
+    const response = await invoke(postMemoryBackImage, {
+      params: { memoryId: 'missing-memory-id' },
+      body: { mock: true }
+    });
+
+    expect(response.statusCode).toBe(404);
   });
 
   it('deletes persisted memories via DELETE /api/memories', async () => {

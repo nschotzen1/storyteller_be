@@ -1,0 +1,63 @@
+{
+  "component": {
+    "backgroundSrc": "/well/well_background.png",
+    "wordLimit": 10,
+    "promptDelayMs": 5200,
+    "fragmentSpawnMs": 2200,
+    "fragmentLifetimeMs": 7600,
+    "departureDurationMs": 3600,
+    "promptDock": "side"
+  },
+  "copy": {
+    "sceneEyebrow": "Direct Debug View",
+    "sceneTitle": "Well of Fragments",
+    "promptLabel": "What words do you remember?",
+    "promptHint": "Jot down what you caught before the well swallows it again.",
+    "promptPlaceholder": "A remembered line, name, or place...",
+    "departureStatus": "The falcon folds the gathered bundle into its satchel and rises toward the dovecot.",
+    "footerWaiting": "The well waits for the next line to surface.",
+    "footerReadyPrefix": "Gathered so far:",
+    "footerLatestPrefix": "Latest fragment:",
+    "footerLastSubmittedPrefix": "Latest jot:",
+    "handoffLabel": "Hand the bundle to the falcon",
+    "impatienceStatus": "The falcon grows impatient. It wants the gathered bundle now.",
+    "observingHint": "A scrap hangs in the water. Catch it before it slips your memory.",
+    "jotActionLabel": "Jot this scrap"
+  },
+  "completion": {
+    "required": {
+      "textual": 3
+    }
+  },
+  "runtime": {
+    "sourceMode": "bank"
+  },
+  "banks": {
+    "textual": [
+      { "id": "txt_1", "text": "It was almost night as she", "weight": 1, "tags": [] },
+      { "id": "txt_2", "text": "Nothing could prepare them for such weather", "weight": 1, "tags": [] },
+      { "id": "txt_3", "text": "Elionda was observing herself in the golden embroidered mirror", "weight": 1, "tags": [] },
+      { "id": "txt_4", "text": "The house remembered every vow spoken under rain", "weight": 1, "tags": [] },
+      { "id": "txt_5", "text": "Someone had written the answer before the question existed", "weight": 1, "tags": [] },
+      { "id": "txt_6", "text": "When the bell failed, the birds continued the ceremony", "weight": 1, "tags": [] },
+      { "id": "txt_7", "text": "No one noticed the garden leaning closer to hear", "weight": 1, "tags": [] },
+      { "id": "txt_8", "text": "By dawn the map had changed its mind again", "weight": 1, "tags": [] },
+      { "id": "txt_9", "text": "She kept the key because the lock still dreamed of it", "weight": 1, "tags": [] },
+      { "id": "txt_10", "text": "The sea withdrew only long enough to listen", "weight": 1, "tags": [] }
+    ]
+  },
+  "fragments": [
+    "It was almost night as she",
+    "Nothing could prepare them for such weather",
+    "Elionda was observing herself in the golden embroidered mirror",
+    "The house remembered every vow spoken under rain",
+    "Someone had written the answer before the question existed",
+    "When the bell failed, the birds continued the ceremony",
+    "No one noticed the garden leaning closer to hear",
+    "By dawn the map had changed its mind again",
+    "She kept the key because the lock still dreamed of it",
+    "The sea withdrew only long enough to listen"
+  ],
+  "updatedAt": "",
+  "updatedBy": ""
+}

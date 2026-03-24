@@ -37,6 +37,7 @@ messengerSceneBriefSchema.index({ sessionId: 1, sceneId: 1 }, { unique: true });
 const narrativeFragmentSchema = new mongoose.Schema({
   session_id: { type: String, required: true },
   fragment: { type: mongoose.Schema.Types.Mixed, required: true },
+  initialFragment: { type: mongoose.Schema.Types.Mixed, default: '' },
   turn: { type: Number },
 });
 
@@ -141,6 +142,10 @@ const StorytellerSchema = new mongoose.Schema({
   typewriter_key: {
     symbol: { type: String },
     description: { type: String },
+    key_shape: { type: String },
+    blank_shape: { type: String },
+    blank_texture_url: { type: String },
+    shape_prompt_hint: { type: String }
   },
   influences: { type: [String] },
   known_universes: { type: [String] },
@@ -199,7 +204,10 @@ const QuestTraversalEventSchema = new mongoose.Schema({
 
 const QuestScreenGraphSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, index: true },
-  questId: { type: String, required: true, default: 'ruined_rose_court', index: true },
+  questId: { type: String, required: true, default: 'scene_authoring_starter', index: true },
+  sceneName: { type: String, default: '' },
+  sceneTemplate: { type: String, default: 'basic_scene' },
+  sceneComponents: { type: [String], default: [] },
   startScreenId: { type: String, required: true },
   authoringBrief: { type: String, default: '' },
   phaseGuidance: { type: String, default: '' },
@@ -212,6 +220,50 @@ const QuestScreenGraphSchema = new mongoose.Schema({
 QuestScreenGraphSchema.index({ sessionId: 1, questId: 1 }, { unique: true });
 
 export const QuestScreenGraph = mongoose.model('QuestScreenGraph', QuestScreenGraphSchema);
+
+const WellMemoryFragmentSchema = new mongoose.Schema({
+  id: { type: String, required: true },
+  type: { type: String, enum: ['textual'], default: 'textual' },
+  bankId: { type: String, default: '' },
+  surface: {
+    text: { type: String, default: '' }
+  },
+  surfacedAt: { type: Date, default: Date.now },
+  expiresAt: { type: Date, default: null }
+}, { _id: false });
+
+const WellMemoryJotSchema = new mongoose.Schema({
+  jotId: { type: String, required: true },
+  fragmentId: { type: String, required: true },
+  fragmentType: { type: String, enum: ['textual'], default: 'textual' },
+  rawJotText: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: false });
+
+const WellMemorySessionSchema = new mongoose.Schema({
+  session_id: { type: String, required: true, index: true },
+  playerId: { type: String, default: '', index: true },
+  sceneKey: { type: String, default: 'well', index: true },
+  status: {
+    type: String,
+    enum: ['observing', 'jotting', 'bundle_ready', 'handoff', 'departing', 'completed'],
+    default: 'observing'
+  },
+  required: {
+    textual: { type: Number, default: 3 }
+  },
+  captured: {
+    textual: { type: Number, default: 0 }
+  },
+  currentFragment: { type: WellMemoryFragmentSchema, default: null },
+  seenFragmentIds: { type: [String], default: [] },
+  bundle: { type: [WellMemoryJotSchema], default: [] },
+  completedAt: { type: Date, default: null }
+}, { timestamps: true });
+
+WellMemorySessionSchema.index({ session_id: 1, playerId: 1, sceneKey: 1 }, { unique: true });
+
+export const WellMemorySession = mongoose.model('WellMemorySession', WellMemorySessionSchema);
 
 const ImmersiveRpgTranscriptEntrySchema = new mongoose.Schema({
   entryId: { type: String, default: () => randomUUID() },

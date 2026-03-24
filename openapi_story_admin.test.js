@@ -103,6 +103,8 @@ describe('story admin API metadata', () => {
       '/api/shouldCreateStorytellerKey',
       '/api/send_storyteller_typewriter_text',
       '/api/send_typewriter_text',
+      '/api/memories/{memoryId}/textToImage/front',
+      '/api/memories/{memoryId}/textToImage/back',
       '/api/immersive-rpg/scene',
       '/api/immersive-rpg/chat',
       '/api/immersive-rpg/rolls',

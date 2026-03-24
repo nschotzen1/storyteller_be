@@ -238,7 +238,16 @@ function buildMemoryBackPromptWithTemplate(memory, fragmentText, promptTemplate 
 function pickMockMemoryImageUrl(index, side) {
   const options = side === 'back' ? MEMORY_CARD_MOCK_BACK_IMAGES : MEMORY_CARD_MOCK_FRONT_IMAGES;
   if (!options.length) return '';
-  return options[index % options.length];
+  if (typeof index === 'number' && Number.isFinite(index)) {
+    return options[Math.abs(Math.floor(index)) % options.length];
+  }
+
+  const seed = String(index || '');
+  let hash = 0;
+  for (let cursor = 0; cursor < seed.length; cursor += 1) {
+    hash = ((hash << 5) - hash + seed.charCodeAt(cursor)) >>> 0;
+  }
+  return options[hash % options.length];
 }
 
 async function buildMemoryCardPayload({
@@ -294,6 +303,46 @@ async function buildMemoryCardPayload({
   }
 
   return card;
+}
+
+async function buildSingleMemoryCardSidePayload({
+  memory,
+  memoryId,
+  side,
+  sessionId,
+  batchId,
+  cardsDirAbs,
+  shouldMock,
+  fragmentText,
+  imageModel,
+  promptTemplate
+}) {
+  const isBack = side === 'back';
+  const prompt = isBack
+    ? buildMemoryBackPromptWithTemplate(memory, fragmentText, promptTemplate)
+    : buildMemoryFrontPromptWithTemplate(memory, fragmentText, promptTemplate);
+
+  let imageUrl = '';
+  if (shouldMock) {
+    imageUrl = pickMockMemoryImageUrl(memoryId, side);
+  } else {
+    const baseName = sanitizeFileSegment(
+      memory?.dramatic_definition || memory?.action_name,
+      'memory'
+    );
+    const idSegment = sanitizeFileSegment(memoryId, 'memory');
+    const filename = `${idSegment}_${baseName}_${side}.png`;
+    const localPath = path.join(cardsDirAbs, filename);
+    const result = await textToImageOpenAi(prompt, 1, localPath, false, 3, imageModel);
+    if (result?.localPath) {
+      imageUrl = `/assets/${sessionId}/memory_cards/${batchId}/${filename}`;
+    }
+  }
+
+  return {
+    prompt,
+    imageUrl
+  };
 }
 
 function toPersistenceMemory(memory) {
@@ -420,6 +469,106 @@ function ensurePersistableMemory(memory) {
     throw error;
   }
   return projected;
+}
+
+async function loadMemoryById(memoryId) {
+  if (!memoryId) {
+    return null;
+  }
+  const query = FragmentMemory.findById(memoryId);
+  if (query && typeof query.lean === 'function') {
+    return query.lean();
+  }
+  return query ? await query : null;
+}
+
+async function patchMemoryById(memoryId, patch = {}) {
+  if (!memoryId) {
+    return null;
+  }
+  const query = FragmentMemory.findByIdAndUpdate(
+    memoryId,
+    { $set: patch },
+    { new: true, runValidators: true }
+  );
+  if (query && typeof query.lean === 'function') {
+    return query.lean();
+  }
+  return query ? await query : null;
+}
+
+async function handleMemoryCardSideGeneration(req, res, side) {
+  try {
+    const body = req.body || {};
+    const memoryId = typeof req.params?.memoryId === 'string' ? req.params.memoryId.trim() : '';
+    if (!memoryId) {
+      return res.status(400).json({ message: 'Missing required parameter: memoryId.' });
+    }
+
+    const memory = await loadMemoryById(memoryId);
+    if (!memory) {
+      return res.status(404).json({ message: 'Memory not found.' });
+    }
+
+    const textureSettings = await getPipelineSettings('texture_creation');
+    const textureProvider = typeof textureSettings?.provider === 'string' ? textureSettings.provider : 'openai';
+    const shouldMockTextures = resolveMockMode(body, textureSettings.useMock);
+    const promptKey = side === 'back' ? 'memory_card_back' : 'memory_card_front';
+    const promptTemplate = await getLatestPromptTemplate(promptKey);
+    const fragmentText = getFragmentText(body) || memory.fragmentText || '';
+    const cardsDirAbs = path.resolve(process.cwd(), 'assets', memory.sessionId, 'memory_cards', memory.batchId);
+
+    if (!shouldMockTextures) {
+      await ensureDirectoryExists(cardsDirAbs);
+    }
+
+    const card = await buildSingleMemoryCardSidePayload({
+      memory,
+      memoryId,
+      side,
+      sessionId: memory.sessionId,
+      batchId: memory.batchId,
+      cardsDirAbs,
+      shouldMock: shouldMockTextures,
+      fragmentText,
+      imageModel: textureSettings.model,
+      promptTemplate: promptTemplate?.promptTemplate || ''
+    });
+
+    const patch = side === 'back'
+      ? {
+          back: card,
+          back_image_url: card.imageUrl || ''
+        }
+      : {
+          front: card,
+          front_image_url: card.imageUrl || ''
+        };
+
+    const updatedMemory = await patchMemoryById(memoryId, patch);
+    if (!updatedMemory) {
+      return res.status(404).json({ message: 'Memory not found.' });
+    }
+
+    return res.status(200).json({
+      memoryId,
+      side,
+      mocked: shouldMockTextures,
+      card,
+      memory: updatedMemory,
+      runtime: {
+        textures: {
+          pipeline: 'texture_creation',
+          provider: textureProvider,
+          model: textureSettings.model || '',
+          mocked: shouldMockTextures
+        }
+      }
+    });
+  } catch (error) {
+    console.error(`Error in POST /api/memories/:memoryId/textToImage/${side}:`, error);
+    return res.status(500).json({ message: 'Server error during memory card image generation.' });
+  }
 }
 
 router.post('/fragmentToMemories', async (req, res) => {
@@ -581,6 +730,14 @@ router.post('/fragmentToMemories', async (req, res) => {
     return res.status(500).json({ message: 'Server error during fragment-to-memories generation.' });
   }
 });
+
+router.post('/memories/:memoryId/textToImage/front', async (req, res) =>
+  handleMemoryCardSideGeneration(req, res, 'front')
+);
+
+router.post('/memories/:memoryId/textToImage/back', async (req, res) =>
+  handleMemoryCardSideGeneration(req, res, 'back')
+);
 
 router.get('/memories', async (req, res) => {
   try {

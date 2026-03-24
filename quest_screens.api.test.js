@@ -53,6 +53,9 @@ describe('Quest Screen API', () => {
       expect.objectContaining({
         sessionId: 'quest-test-session',
         questId: 'quest-test-id',
+        sceneName: expect.any(String),
+        sceneTemplate: expect.any(String),
+        sceneComponents: expect.any(Array),
         startScreenId: expect.any(String),
         screens: expect.any(Array),
         updatedAt: expect.any(String)
@@ -66,10 +69,104 @@ describe('Quest Screen API', () => {
     );
   });
 
+  test('rose court defaults include explicit scene and screen component bindings', async () => {
+    const response = await request(app)
+      .get('/api/quest/screens')
+      .query({ sessionId: 'rose-court-prologue-demo', questId: 'rose_court_prologue_phase_1' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.sceneComponents).toEqual(
+      expect.arrayContaining(['rose_court_opening_sequence'])
+    );
+    const openingScreen = response.body.screens.find((screen) => screen.id === 'outer_wall_plateau');
+    expect(openingScreen.componentBindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          componentId: 'rose_court_opening_sequence',
+          slot: 'scene_intro'
+        })
+      ])
+    );
+    const phoneFound = response.body.screens.find((screen) => screen.id === 'phone_found');
+    expect(phoneFound.componentBindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          componentId: 'messenger',
+          slot: 'auto_open'
+        }),
+        expect.objectContaining({
+          componentId: 'messenger',
+          slot: 'action_button'
+        }),
+        expect.objectContaining({
+          componentId: 'location_mural_materializer',
+          slot: 'screen_effect'
+        })
+      ])
+    );
+  });
+
+  test('default scene-authoring starter includes authored reference prompts and continuity guidance', async () => {
+    const response = await request(app)
+      .get('/api/quest/screens')
+      .query({ sessionId: 'scene-authoring-starter-seed-session', questId: 'scene_authoring_starter' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.sceneName).toBe('Scene Authoring Starter');
+    expect(response.body.sceneTemplate).toBe('basic_scene');
+    expect(response.body.sceneComponents).toEqual([]);
+    expect(response.body.visualStyleGuide).toContain('visual language');
+
+    const openingTableau = response.body.screens.find((screen) => screen.id === 'opening_tableau');
+
+    expect(openingTableau).toBeTruthy();
+    expect(openingTableau.referenceImagePrompt).toContain('Standalone illustrated opening tableau');
+    expect(openingTableau.promptGuidance).toContain('first authored threshold');
+    expect(openingTableau.visualContinuityGuidance).toContain('establishing plate');
+    expect(openingTableau.visualTransitionIntent).toBe('inherit');
+  });
+
+  test('saved starter docs inherit missing authoring prompts on load', async () => {
+    await request(app)
+      .put('/api/admin/quest/screens')
+      .send({
+        sessionId: 'legacy-scene-authoring-starter-session',
+        questId: 'scene_authoring_starter',
+        startScreenId: 'opening_tableau',
+        screens: [
+          {
+            id: 'opening_tableau',
+            title: 'Opening Tableau',
+            prompt: 'A new scene begins here.',
+            imageUrl: '/ruin_south_a.png',
+            image_prompt: 'Opening tableau illustration for a newly authored narrative scene.',
+            textPromptPlaceholder: 'What do you do?',
+            directions: []
+          }
+        ]
+      });
+
+    const response = await request(app)
+      .get('/api/quest/screens')
+      .query({ sessionId: 'legacy-scene-authoring-starter-session', questId: 'scene_authoring_starter' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.sceneName).toBe('Scene Authoring Starter');
+    expect(response.body.sceneTemplate).toBe('basic_scene');
+    expect(response.body.sceneComponents).toEqual([]);
+    expect(response.body.visualStyleGuide).toContain('visual language');
+    expect(response.body.screens[0].referenceImagePrompt).toContain('Standalone illustrated opening tableau');
+    expect(response.body.screens[0].promptGuidance).toContain('first authored threshold');
+    expect(response.body.screens[0].visualContinuityGuidance).toContain('establishing plate');
+  });
+
   test('PUT /api/admin/quest/screens saves scoped config and GET returns it', async () => {
     const payload = {
       sessionId: 'quest-save-session',
       questId: 'quest-save-id',
+      sceneName: 'Threshold Hall',
+      sceneTemplate: 'basic_scene',
+      sceneComponents: ['messenger'],
       startScreenId: 'gate',
       authoringBrief: 'A compact authored scene about a threshold and a hidden signal.',
       phaseGuidance: 'Keep the scene constrained to the gate and hall until the player commits to entering.',
@@ -87,6 +184,16 @@ describe('Quest Screen API', () => {
           visualContinuityGuidance: 'Carry the same dusk stone palette into the hall beyond.',
           visualTransitionIntent: 'drift',
           textPromptPlaceholder: 'What now?',
+          componentBindings: [
+            {
+              componentId: 'messenger',
+              slot: 'action_button',
+              props: {
+                sceneId: 'clerk_scene',
+                label: 'Open the relay'
+              }
+            }
+          ],
           directions: [
             { direction: 'north', label: 'Enter', targetScreenId: 'hall' }
           ]
@@ -114,6 +221,9 @@ describe('Quest Screen API', () => {
     expect(saveResponse.status).toBe(200);
     expect(saveResponse.body.sessionId).toBe(payload.sessionId);
     expect(saveResponse.body.questId).toBe(payload.questId);
+    expect(saveResponse.body.sceneName).toBe(payload.sceneName);
+    expect(saveResponse.body.sceneTemplate).toBe(payload.sceneTemplate);
+    expect(saveResponse.body.sceneComponents).toEqual(payload.sceneComponents);
     expect(saveResponse.body.startScreenId).toBe('gate');
     expect(saveResponse.body.authoringBrief).toBe(payload.authoringBrief);
     expect(saveResponse.body.phaseGuidance).toBe(payload.phaseGuidance);
@@ -126,6 +236,9 @@ describe('Quest Screen API', () => {
 
     expect(getResponse.status).toBe(200);
     expect(getResponse.body.startScreenId).toBe('gate');
+    expect(getResponse.body.sceneName).toBe(payload.sceneName);
+    expect(getResponse.body.sceneTemplate).toBe(payload.sceneTemplate);
+    expect(getResponse.body.sceneComponents).toEqual(payload.sceneComponents);
     expect(getResponse.body.authoringBrief).toBe(payload.authoringBrief);
     expect(getResponse.body.phaseGuidance).toBe(payload.phaseGuidance);
     expect(getResponse.body.visualStyleGuide).toBe(payload.visualStyleGuide);
@@ -136,6 +249,7 @@ describe('Quest Screen API', () => {
     expect(getResponse.body.screens[0].sceneEndCondition).toBe(payload.screens[0].sceneEndCondition);
     expect(getResponse.body.screens[0].visualContinuityGuidance).toBe(payload.screens[0].visualContinuityGuidance);
     expect(getResponse.body.screens[0].visualTransitionIntent).toBe(payload.screens[0].visualTransitionIntent);
+    expect(getResponse.body.screens[0].componentBindings).toEqual(payload.screens[0].componentBindings);
     expect(getResponse.body.screens[1].referenceImagePrompt).toBe(payload.screens[1].referenceImagePrompt);
   });
 
@@ -176,7 +290,7 @@ describe('Quest Screen API', () => {
       .send({
         ...scope,
         playerId: 'wanderer-01',
-        fromScreenId: 'outer_gate_murals',
+        fromScreenId: 'opening_tableau',
         toScreenId: 'mural_center_panel',
         direction: 'north',
         promptText: 'The stone remembers footsteps.'
@@ -217,7 +331,7 @@ describe('Quest Screen API', () => {
       .send({
         ...scope,
         playerId: 'wanderer-02',
-        currentScreenId: 'outer_gate_murals',
+        currentScreenId: 'opening_tableau',
         actionType: 'prompt',
         promptText: 'inspect the cracked lantern niche behind the center mural',
         mock: true
@@ -244,8 +358,8 @@ describe('Quest Screen API', () => {
     expect(response.body.mockedData).toEqual(
       expect.objectContaining({
         source: 'deterministic-quest-generator',
-        currentScreenId: 'outer_gate_murals',
-        anchorScreenId: 'outer_gate_murals',
+        currentScreenId: 'opening_tableau',
+        anchorScreenId: 'opening_tableau',
         promptPayload: expect.any(Object),
         plan: expect.objectContaining({
           title: expect.any(String),
@@ -257,8 +371,8 @@ describe('Quest Screen API', () => {
     expect(response.body.createdScreen).toEqual(
       expect.objectContaining({
         screenType: 'generated',
-        parentScreenId: 'outer_gate_murals',
-        anchorScreenId: 'outer_gate_murals',
+        parentScreenId: 'opening_tableau',
+        anchorScreenId: 'opening_tableau',
         generatedByPlayerId: 'wanderer-02',
         generatedFromPrompt: expect.stringContaining('inspect the cracked lantern niche'),
         image_prompt: expect.any(String),
@@ -276,7 +390,7 @@ describe('Quest Screen API', () => {
       .query(scope);
 
     expect(getResponse.status).toBe(200);
-    const parentScreen = getResponse.body.screens.find((screen) => screen.id === 'outer_gate_murals');
+    const parentScreen = getResponse.body.screens.find((screen) => screen.id === 'opening_tableau');
     const generatedScreen = getResponse.body.screens.find((screen) => screen.id === response.body.createdScreen.id);
     expect(parentScreen).toBeTruthy();
     expect(generatedScreen).toBeTruthy();
@@ -298,7 +412,7 @@ describe('Quest Screen API', () => {
     expect(traversalResponse.body.traversal).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          fromScreenId: 'outer_gate_murals',
+          fromScreenId: 'opening_tableau',
           toScreenId: generatedScreen.id,
           direction: 'prompt',
           promptText: 'inspect the cracked lantern niche behind the center mural'
@@ -485,6 +599,144 @@ describe('Quest Screen API', () => {
     expect(getResponse.body.authoringBrief).not.toBe('An authored opening scene with a gate, a hidden signal, and a hall beyond.');
   });
 
+  test('POST /api/admin/quest/scene-image/generate returns generated image metadata in mock mode', async () => {
+    const response = await request(app)
+      .post('/api/admin/quest/scene-image/generate')
+      .send({
+        sessionId: 'quest-image-session',
+        questId: 'quest-image-id',
+        screenId: 'outer_wall_plateau',
+        screenTitle: 'Wall of the Hall of the Rose',
+        referenceImagePrompt: 'Wide dusk manuscript plate of the Hall of the Rose with mural doors and ouroboros rings.',
+        image_prompt: 'Fallback shorter prompt.',
+        imageModel: 'gpt-image-1.5',
+        mock: true
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        sessionId: 'quest-image-session',
+        questId: 'quest-image-id',
+        screenId: 'outer_wall_plateau',
+        imageUrl: '/ruin_south_a.png',
+        promptUsed: expect.stringContaining('Primary image brief:\nWide dusk manuscript plate of the Hall of the Rose with mural doors and ouroboros rings.'),
+        model: 'gpt-image-1.5',
+        mocked: true
+      })
+    );
+  });
+
+  test('POST /api/admin/quest/scene-image uploads a local image asset for a known screen', async () => {
+    const response = await request(app)
+      .post('/api/admin/quest/scene-image')
+      .send({
+        sessionId: 'quest-image-upload-session',
+        questId: 'scene_authoring_starter',
+        screenId: 'opening_tableau',
+        filename: 'upload-test.png',
+        dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WnPZXQAAAAASUVORK5CYII='
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        sessionId: 'quest-image-upload-session',
+        questId: 'scene_authoring_starter',
+        screenId: 'opening_tableau',
+        imageUrl: expect.stringContaining('/assets/quest_scene_uploads/'),
+        mimeType: 'image/png'
+      })
+    );
+  });
+
+  test('POST /api/admin/quest/scene-image/resolve-path returns the local project path for an asset URL', async () => {
+    const uploadResponse = await request(app)
+      .post('/api/admin/quest/scene-image')
+      .send({
+        sessionId: 'quest-image-resolve-session',
+        questId: 'scene_authoring_starter',
+        screenId: 'opening_tableau',
+        filename: 'resolve-test.png',
+        dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WnPZXQAAAAASUVORK5CYII='
+      });
+
+    expect(uploadResponse.status).toBe(201);
+
+    const response = await request(app)
+      .post('/api/admin/quest/scene-image/resolve-path')
+      .send({
+        imageUrl: uploadResponse.body.imageUrl
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.localPath).toContain('/storyteller-vite-tailwind/public/assets/quest_scene_uploads/');
+    expect(response.body.assetDirectory).toContain('/storyteller-vite-tailwind/public/assets/quest_scene_uploads/');
+    expect(response.body.exists).toBe(true);
+  });
+
+  test('POST /api/admin/quest/scene-image/compose-prompt returns a standalone composed prompt', async () => {
+    const response = await request(app)
+      .post('/api/admin/quest/scene-image/compose-prompt')
+      .send({
+        sessionId: 'quest-image-compose-session',
+        questId: 'quest-image-compose-id',
+        screenId: 'outer_wall_plateau',
+        screenTitle: 'Wall of the Hall of the Rose',
+        screenPrompt: 'Three weathered murals face the player at dusk.',
+        authoringBrief: 'Opening scene at the Hall of the Rose.',
+        visualStyleGuide: 'Aged illuminated-manuscript fantasy, tactile ruin surfaces.',
+        referenceImagePrompt: 'Wide dusk manuscript plate of the Hall of the Rose with mural doors and ouroboros rings.',
+        image_prompt: 'Fallback shorter prompt.',
+        visualContinuityGuidance: 'Keep the same outer wall palette as the surrounding screens.',
+        visualTransitionIntent: 'drift',
+        incomingContext: [
+          {
+            via: 'south',
+            title: 'Approach Path',
+            referenceImagePrompt: 'A winding path climbing toward the ruined wall.'
+          }
+        ]
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.composedPrompt).toContain('Create a single finished illustration for a narrative quest screen.');
+    expect(response.body.composedPrompt).toContain('Primary image brief:\nWide dusk manuscript plate of the Hall of the Rose with mural doors and ouroboros rings.');
+    expect(response.body.composedPrompt).toContain('Incoming linked-screen context:');
+  });
+
+  test('rose-court defaults include authored visual prompts and continuity guidance', async () => {
+    const response = await request(app)
+      .get('/api/quest/screens')
+      .query({
+        sessionId: 'rose-court-visual-seed-session',
+        questId: 'rose_court_prologue_phase_1'
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.visualStyleGuide).toContain('illuminated-manuscript');
+
+    const outerWall = response.body.screens.find((screen) => screen.id === 'outer_wall_plateau');
+    const atticMural = response.body.screens.find((screen) => screen.id === 'mural_attic_panel');
+    const cabinMural = response.body.screens.find((screen) => screen.id === 'mural_cabin_panel');
+    const cottageMural = response.body.screens.find((screen) => screen.id === 'mural_cottage_panel');
+
+    expect(outerWall).toBeTruthy();
+    expect(outerWall.referenceImagePrompt).toContain('glowing ouroboros ring knocker');
+    expect(outerWall.visualContinuityGuidance).toContain('rose-petal masonry');
+    expect(outerWall.visualTransitionIntent).toBe('inherit');
+
+    expect(atticMural.referenceImagePrompt).toContain('mosaic');
+    expect(atticMural.visualContinuityGuidance).toContain('left-hand city aspect');
+    expect(atticMural.visualTransitionIntent).toBe('drift');
+
+    expect(cabinMural.referenceImagePrompt).toContain('fresco or tempera');
+    expect(cabinMural.visualContinuityGuidance).toContain('central mural');
+
+    expect(cottageMural.referenceImagePrompt).toContain('incised bas-relief');
+    expect(cottageMural.visualContinuityGuidance).toContain('gentler and more domestic');
+  });
+
   test('rose-court materialization requires a mural choice before the inner court', async () => {
     const scope = {
       sessionId: 'rose-court-materialize-session',
@@ -518,6 +770,8 @@ describe('Quest Screen API', () => {
     const variantScreen = materializeResponse.body.config.screens.find((screen) => screen.id === 'location_mural_high_room');
 
     expect(galleryScreen).toBeTruthy();
+    expect(galleryScreen.referenceImagePrompt).toContain('different medium');
+    expect(galleryScreen.visualContinuityGuidance).toContain('same court');
     expect(galleryScreen.directions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ targetScreenId: 'location_mural_high_room' }),
@@ -528,6 +782,9 @@ describe('Quest Screen API', () => {
     expect(galleryScreen.directions.some((direction) => direction.targetScreenId === 'inner_court_well_approach')).toBe(false);
 
     expect(variantScreen).toBeTruthy();
+    expect(variantScreen.referenceImagePrompt).toContain('ouroboros ring knocker');
+    expect(variantScreen.visualContinuityGuidance).toContain('confirmed Earth destination');
+    expect(variantScreen.visualTransitionIntent).toBe('drift');
     expect(variantScreen.directions).toHaveLength(2);
     expect(variantScreen.directions).toEqual(
       expect.arrayContaining([

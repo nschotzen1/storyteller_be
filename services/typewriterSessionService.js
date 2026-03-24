@@ -13,6 +13,20 @@ function normalizeFragmentText(fragment) {
   return String(fragment);
 }
 
+function normalizeInitialFragment(doc) {
+  const explicitInitialFragment = normalizeFragmentText(doc?.initialFragment);
+  if (explicitInitialFragment) return explicitInitialFragment;
+  return normalizeFragmentText(doc?.fragment);
+}
+
+function buildTypewriterSessionRecord(sessionId, doc = {}) {
+  return {
+    sessionId,
+    fragment: normalizeFragmentText(doc?.fragment),
+    initialFragment: normalizeInitialFragment(doc)
+  };
+}
+
 export function mergeTypewriterFragment(existingFragment, continuation) {
   const base = normalizeFragmentText(existingFragment);
   const next = normalizeFragmentText(continuation);
@@ -30,22 +44,20 @@ export async function startTypewriterSession(requestedSessionId = '') {
   }).lean();
 
   if (existing) {
-    return {
-      sessionId,
-      fragment: normalizeFragmentText(existing.fragment)
-    };
+    return buildTypewriterSessionRecord(sessionId, existing);
   }
 
   await NarrativeFragment.create({
     session_id: sessionId,
     fragment: '',
+    initialFragment: '',
     turn: TYPEWRITER_FRAGMENT_TURN
   });
 
-  return {
-    sessionId,
-    fragment: ''
-  };
+  return buildTypewriterSessionRecord(sessionId, {
+    fragment: '',
+    initialFragment: ''
+  });
 }
 
 export async function getTypewriterSessionFragment(sessionId) {
@@ -60,7 +72,7 @@ export async function getTypewriterSessionFragment(sessionId) {
   return normalizeFragmentText(existing?.fragment);
 }
 
-export async function saveTypewriterSessionFragment(sessionId, fragment) {
+export async function saveTypewriterSessionFragment(sessionId, fragment, options = {}) {
   const safeSessionId = normalizeSessionId(sessionId);
   if (!safeSessionId) {
     const error = new Error('sessionId is required.');
@@ -68,25 +80,33 @@ export async function saveTypewriterSessionFragment(sessionId, fragment) {
     throw error;
   }
 
+  const { updateInitialFragment = false } = options || {};
   const safeFragment = normalizeFragmentText(fragment);
+  const update = {
+    $set: {
+      fragment: safeFragment
+    }
+  };
+
+  if (updateInitialFragment) {
+    update.$set.initialFragment = safeFragment;
+  } else {
+    update.$setOnInsert = {
+      initialFragment: ''
+    };
+  }
+
   const doc = await NarrativeFragment.findOneAndUpdate(
     {
       session_id: safeSessionId,
       turn: TYPEWRITER_FRAGMENT_TURN
     },
-    {
-      $set: {
-        fragment: safeFragment
-      }
-    },
+    update,
     {
       new: true,
       upsert: true
     }
   );
 
-  return {
-    sessionId: safeSessionId,
-    fragment: normalizeFragmentText(doc?.fragment)
-  };
+  return buildTypewriterSessionRecord(safeSessionId, doc);
 }

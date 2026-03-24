@@ -1,0 +1,675 @@
+{
+  "phase1-debug-session::": {
+    "session_id": "phase1-debug-session",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "843a6fe5-945b-419b-a0d2-ce7fa5e76191",
+      "type": "textual",
+      "bankId": "txt_10",
+      "surface": {
+        "text": "The sea withdrew only long enough to listen"
+      },
+      "surfacedAt": "2026-03-23T01:35:25.316Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_10"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "phase1-api-flow::": {
+    "session_id": "phase1-api-flow",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "completed",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 3
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [
+      "txt_9",
+      "txt_5",
+      "txt_10"
+    ],
+    "bundle": [
+      {
+        "jotId": "aff18dd8-5535-4ee9-8368-77c3500e202b",
+        "fragmentId": "6d1e1d7a-f28e-451e-b644-8bfa17a6a85f",
+        "fragmentType": "textual",
+        "rawJotText": "gold mirror at dusk",
+        "createdAt": "2026-03-23T01:35:46.850Z"
+      },
+      {
+        "jotId": "70aebbf0-7255-4ae6-be7d-022dded67ef8",
+        "fragmentId": "640b4eb2-0cdf-4caa-9d9e-2c4e1bb7a8a9",
+        "fragmentType": "textual",
+        "rawJotText": "storm vow remembered",
+        "createdAt": "2026-03-23T01:35:47.052Z"
+      },
+      {
+        "jotId": "b41b0456-6c8e-49cd-bddb-7554a55f4ba5",
+        "fragmentId": "f4387a4a-0492-466e-90c6-d91c3a7300f0",
+        "fragmentType": "textual",
+        "rawJotText": "night tower name",
+        "createdAt": "2026-03-23T01:35:47.192Z"
+      }
+    ],
+    "completedAt": "2026-03-23T01:35:47.266Z"
+  },
+  "well-preview-1774229798263-344842::": {
+    "session_id": "well-preview-1774229798263-344842",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "1b01401e-29d3-4153-ba41-6db0eec7f476",
+      "type": "textual",
+      "bankId": "txt_4",
+      "surface": {
+        "text": "The house remembered every vow spoken under rain"
+      },
+      "surfacedAt": "2026-03-23T01:37:04.668Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_4"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774229875509-e94765::": {
+    "session_id": "well-preview-1774229875509-e94765",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "5c5f789a-52c7-40b7-b52b-86b3bdea9bcf",
+      "type": "textual",
+      "bankId": "txt_10",
+      "surface": {
+        "text": "The sea withdrew only long enough to listen"
+      },
+      "surfacedAt": "2026-03-23T01:38:23.540Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_10"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774229931829-1955cd::": {
+    "session_id": "well-preview-1774229931829-1955cd",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774229969158-20315e::": {
+    "session_id": "well-preview-1774229969158-20315e",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774229969496-80d5ed::": {
+    "session_id": "well-preview-1774229969496-80d5ed",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "completed",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 3
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [
+      "txt_6",
+      "txt_1",
+      "txt_7"
+    ],
+    "bundle": [
+      {
+        "jotId": "1f77ace7-3341-4f10-a315-c829980105b1",
+        "fragmentId": "9e207c93-6674-4bc0-b03f-57a4aa681078",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 1",
+        "createdAt": "2026-03-23T01:39:36.647Z"
+      },
+      {
+        "jotId": "0b019484-f6db-4879-85c7-c2b633fe9426",
+        "fragmentId": "bbf1268d-cbfc-4467-8e4d-99e7e358efcb",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 2",
+        "createdAt": "2026-03-23T01:39:40.531Z"
+      },
+      {
+        "jotId": "6a567643-1b12-49e0-a9d4-a28cd3b68a5e",
+        "fragmentId": "2cb8490e-6278-4628-890a-88bf17f42f05",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 3",
+        "createdAt": "2026-03-23T01:39:44.296Z"
+      }
+    ],
+    "completedAt": "2026-03-23T01:39:44.970Z"
+  },
+  "well-preview-1774230011797-83a589::": {
+    "session_id": "well-preview-1774230011797-83a589",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774230012227-00d051::": {
+    "session_id": "well-preview-1774230012227-00d051",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "completed",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 3
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [
+      "txt_9",
+      "txt_6",
+      "txt_2"
+    ],
+    "bundle": [
+      {
+        "jotId": "fcf6c7e0-1788-46ec-b7f9-9d9867f4874b",
+        "fragmentId": "194ab2f6-06df-446e-bed0-afb46441c4e0",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 1",
+        "createdAt": "2026-03-23T01:40:19.204Z"
+      },
+      {
+        "jotId": "e7d58ebb-059b-4599-ab4c-770507ba6114",
+        "fragmentId": "7a19862b-2529-49a9-bbb9-910cf5cdd27c",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 2",
+        "createdAt": "2026-03-23T01:40:23.057Z"
+      },
+      {
+        "jotId": "f364a8c8-97e8-4936-b943-bd0efa2f6f9e",
+        "fragmentId": "2c5ac6a7-cf04-4383-92ee-d18776c11f54",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 3",
+        "createdAt": "2026-03-23T01:40:27.023Z"
+      }
+    ],
+    "completedAt": "2026-03-23T01:40:27.608Z"
+  },
+  "well-preview-1774230035100-16002a::": {
+    "session_id": "well-preview-1774230035100-16002a",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774230035454-c91368::": {
+    "session_id": "well-preview-1774230035454-c91368",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "completed",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 3
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [
+      "txt_1",
+      "txt_5",
+      "txt_7"
+    ],
+    "bundle": [
+      {
+        "jotId": "b6d07a29-e6bf-4992-9611-9a06e6ee4deb",
+        "fragmentId": "84efe9bf-de3e-4c76-995e-111dc5a56067",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 1",
+        "createdAt": "2026-03-23T01:40:42.315Z"
+      },
+      {
+        "jotId": "06f1e78d-a203-4a40-b91b-63e2d37ee83e",
+        "fragmentId": "33b3e467-3ec2-4892-a19a-d51a72a67ecd",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 2",
+        "createdAt": "2026-03-23T01:40:46.246Z"
+      },
+      {
+        "jotId": "3af1a40a-82eb-49f8-8e21-094b0a64b8a3",
+        "fragmentId": "3e509490-f26c-4ae6-a612-8990d8ce66cd",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 3",
+        "createdAt": "2026-03-23T01:40:50.076Z"
+      }
+    ],
+    "completedAt": "2026-03-23T01:40:50.752Z"
+  },
+  "well-preview-1774230145229-5fc096::": {
+    "session_id": "well-preview-1774230145229-5fc096",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774230145602-5b4589::": {
+    "session_id": "well-preview-1774230145602-5b4589",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "f7c49da4-6a20-4824-9273-41061141101b",
+      "type": "textual",
+      "bankId": "txt_7",
+      "surface": {
+        "text": "No one noticed the garden leaning closer to hear"
+      },
+      "surfacedAt": "2026-03-23T01:42:30.983Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_7"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774230194067-4f53d5::": {
+    "session_id": "well-preview-1774230194067-4f53d5",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774230194354-d7c926::": {
+    "session_id": "well-preview-1774230194354-d7c926",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "3ac75ede-94c3-4c9a-94d7-13780dc55ad2",
+      "type": "textual",
+      "bankId": "txt_10",
+      "surface": {
+        "text": "The sea withdrew only long enough to listen"
+      },
+      "surfacedAt": "2026-03-23T01:43:19.728Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_10"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774231569225-bc83e8::": {
+    "session_id": "well-preview-1774231569225-bc83e8",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774231569399-494ad6::": {
+    "session_id": "well-preview-1774231569399-494ad6",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "completed",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 3
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [
+      "txt_3",
+      "txt_8",
+      "txt_7"
+    ],
+    "bundle": [
+      {
+        "jotId": "e3073caa-6d35-4fc8-a9da-64c9a5deacc9",
+        "fragmentId": "0528ee8e-9057-466a-ac6d-3b596741635a",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 1",
+        "createdAt": "2026-03-23T02:06:17.853Z"
+      },
+      {
+        "jotId": "b8579ca7-1b06-4179-886a-067e8142fc02",
+        "fragmentId": "530782b0-143b-4bbe-9957-6c2105c7f166",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 2",
+        "createdAt": "2026-03-23T02:06:23.483Z"
+      },
+      {
+        "jotId": "98182dfb-3d6e-43bb-adf7-a8e8d94f235d",
+        "fragmentId": "fee63600-d4d8-4208-bacd-4f1398a0786e",
+        "fragmentType": "textual",
+        "rawJotText": "remembered jot 3",
+        "createdAt": "2026-03-23T02:06:28.946Z"
+      }
+    ],
+    "completedAt": "2026-03-23T02:06:29.463Z"
+  },
+  "well-preview-1774231635404-12497e::": {
+    "session_id": "well-preview-1774231635404-12497e",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "f63ed7b8-4e6f-44b0-a84d-279aec66379d",
+      "type": "textual",
+      "bankId": "txt_1",
+      "surface": {
+        "text": "It was almost night as she"
+      },
+      "surfacedAt": "2026-03-23T02:07:23.589Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_1"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774231690575-6c7f0f::": {
+    "session_id": "well-preview-1774231690575-6c7f0f",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "a4a52c7e-f5cb-4c0d-970a-31f35977d2aa",
+      "type": "textual",
+      "bankId": "txt_9",
+      "surface": {
+        "text": "She kept the key because the lock still dreamed of it"
+      },
+      "surfacedAt": "2026-03-23T02:08:18.724Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_9"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774231764472-8507e3::": {
+    "session_id": "well-preview-1774231764472-8507e3",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "96d7ec32-48bc-47a1-823b-6a0b48a6ec4b",
+      "type": "textual",
+      "bankId": "txt_10",
+      "surface": {
+        "text": "The sea withdrew only long enough to listen"
+      },
+      "surfacedAt": "2026-03-23T02:09:32.483Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_10"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774258621867-4939fc::": {
+    "session_id": "well-preview-1774258621867-4939fc",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774258643157-2ea137::": {
+    "session_id": "well-preview-1774258643157-2ea137",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 1
+    },
+    "currentFragment": {
+      "id": "334655c9-2113-4995-a820-4c2ebdf28303",
+      "type": "textual",
+      "bankId": "txt_3",
+      "surface": {
+        "text": "Elionda was observing herself in the golden embroidered mirror"
+      },
+      "surfacedAt": "2026-03-23T09:40:00.039Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_1",
+      "txt_9",
+      "txt_6",
+      "txt_2",
+      "txt_5",
+      "txt_8",
+      "txt_7",
+      "txt_3",
+      "txt_10",
+      "txt_4"
+    ],
+    "bundle": [
+      {
+        "jotId": "c919c966-fdf0-4d3a-9ed9-0302e7c39ff0",
+        "fragmentId": "c75b5884-2325-490e-b025-de60db8d806e",
+        "fragmentType": "textual",
+        "rawJotText": "sdfs",
+        "createdAt": "2026-03-23T09:38:01.629Z"
+      }
+    ],
+    "completedAt": null
+  },
+  "well-preview-1774258748969-67d7ef::": {
+    "session_id": "well-preview-1774258748969-67d7ef",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774258824189-7ca5dc::": {
+    "session_id": "well-preview-1774258824189-7ca5dc",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774386336208-0d12ff::": {
+    "session_id": "well-preview-1774386336208-0d12ff",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "b3484c61-9c1d-4d76-ae2c-dc08c359ef35",
+      "type": "textual",
+      "bankId": "txt_4",
+      "surface": {
+        "text": "The house remembered every vow spoken under rain"
+      },
+      "surfacedAt": "2026-03-24T21:14:18.911Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_4"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774386861777-66e7b0::": {
+    "session_id": "well-preview-1774386861777-66e7b0",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  }
+}

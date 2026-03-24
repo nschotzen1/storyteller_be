@@ -105,7 +105,7 @@ function buildBeatTableRows(promptPayload, aiSettings) {
     },
     {
       beat: 'Tactical branch stand-in',
-      component: 'QuestAdventurePage.jsx',
+      component: 'RoseCourtProloguePage.jsx',
       api: 'GET /api/quest/screens; POST /api/quest/advance',
       pipelineKey: 'quest_generation'
     },
