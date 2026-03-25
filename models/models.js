@@ -210,7 +210,10 @@ const typewriterKeySchemaDefinition = {
   sourceStorytellerKeySlot: { type: Number, default: null },
   verificationKind: { type: String, required: true, default: 'typewriter_key_verification' },
   activeInTypewriter: { type: Boolean, default: true, index: true },
+  knowledgeState: { type: String, default: 'known' },
+  playerFacingTooltip: { type: String, default: '' },
   textureUrl: { type: String, default: '/textures/keys/blank_rect_horizontal_1.png' },
+  keyImageUrl: { type: String, default: '' },
   sortOrder: { type: Number, default: 100 },
   timesPressed: { type: Number, default: 0 },
   lastPressedAt: { type: Date, default: null }

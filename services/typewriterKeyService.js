@@ -21,6 +21,17 @@ function normalizeNumber(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function normalizeOptionalTooltip(sourceKey = {}, options = {}) {
+  if (typeof sourceKey.playerFacingTooltip === 'string') {
+    return sourceKey.playerFacingTooltip.trim();
+  }
+  if (typeof options.playerFacingTooltip === 'string') {
+    return options.playerFacingTooltip.trim();
+  }
+  const fallbackDescription = normalizeString(sourceKey.description || options.description, '');
+  return fallbackDescription;
+}
+
 export function normalizeTypewriterKeyDocument(rawKey = {}, options = {}) {
   const sourceKey = rawKey && typeof rawKey === 'object' ? rawKey : {};
   const sessionId = normalizeString(
@@ -60,10 +71,13 @@ export function normalizeTypewriterKeyDocument(rawKey = {}, options = {}) {
       'typewriter_key_verification'
     ),
     activeInTypewriter: Boolean(sourceKey.activeInTypewriter ?? options.activeInTypewriter ?? true),
+    knowledgeState: normalizeString(sourceKey.knowledgeState || options.knowledgeState, 'known'),
+    playerFacingTooltip: normalizeOptionalTooltip(sourceKey, options),
     textureUrl: normalizeString(
       sourceKey.textureUrl || options.textureUrl,
       '/textures/keys/blank_rect_horizontal_1.png'
     ),
+    keyImageUrl: normalizeString(sourceKey.keyImageUrl || options.keyImageUrl, ''),
     sortOrder: normalizeNumber(sourceKey.sortOrder ?? options.sortOrder, 100),
     timesPressed: normalizeNumber(sourceKey.timesPressed ?? options.timesPressed, 0),
     lastPressedAt: sourceKey.lastPressedAt || options.lastPressedAt || null
@@ -155,12 +169,19 @@ export function buildTypewriterKeyState(typewriterKey) {
     description,
     summary: description,
     sourceType: normalizeString(typewriterKey?.sourceType, ''),
+    sourceRoute: normalizeString(typewriterKey?.sourceRoute, ''),
     storytellerId: normalizeString(typewriterKey?.sourceStorytellerId, ''),
     storytellerName: normalizeString(typewriterKey?.sourceStorytellerName, ''),
+    knowledgeState: normalizeString(typewriterKey?.knowledgeState, 'known'),
+    playerFacingTooltip: normalizeOptionalTooltip(typewriterKey),
     textureUrl: normalizeString(typewriterKey?.textureUrl, '/textures/keys/blank_rect_horizontal_1.png'),
+    keyImageUrl: normalizeString(typewriterKey?.keyImageUrl, ''),
     verificationKind: normalizeString(typewriterKey?.verificationKind, 'typewriter_key_verification'),
     sortOrder: normalizeNumber(typewriterKey?.sortOrder, 100),
-    createdAt: typewriterKey?.createdAt || null
+    timesPressed: normalizeNumber(typewriterKey?.timesPressed, 0),
+    lastPressedAt: typewriterKey?.lastPressedAt || null,
+    createdAt: typewriterKey?.createdAt || null,
+    updatedAt: typewriterKey?.updatedAt || null
   };
 }
 

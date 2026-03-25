@@ -19,6 +19,7 @@ import {
   Arena,
   World,
   WorldElement,
+  NarrativeFragment,
   QuestScreenGraph,
   ImmersiveRpgSceneSession,
   ImmersiveRpgCharacterSheet
@@ -388,6 +389,7 @@ const TYPEWRITER_MIN_FONT_SIZE_REM = 1.75;
 const TYPEWRITER_DEFAULT_FONT_SIZE = '1.9rem';
 const TYPEWRITER_PREFERRED_FONT_SIZE_PX = 30;
 const TYPEWRITER_TEXT_KEY_TEXTURE_URL = '/textures/keys/blank_rect_horizontal_1.png';
+const TYPEWRITER_XEROFAG_KEY_IMAGE_URL = '/textures/keys/THE_XEROFAG_1.png';
 const XEROFAG_CANDIDATE_TERM = 'The Xerofag';
 const XEROFAG_KEY_TEXT = 'THE XEROFAG';
 const XEROFAG_LORE = 'The Xerofag are a group of undead canines.';
@@ -3508,6 +3510,27 @@ app.post('/api/typewriter/session/start', async (req, res) => {
   }
 });
 
+app.get('/api/typewriter/session/inspect', async (req, res) => {
+  try {
+    const sessionId = firstDefinedString(req.query?.sessionId);
+    const resolvedPlayerId = normalizeOptionalPlayerId(req.query?.playerId);
+
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const payload = await buildTypewriterSessionInspectPayload(sessionId, resolvedPlayerId);
+    if (!payload) {
+      return res.status(404).json({ message: 'Typewriter session not found.' });
+    }
+
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Error in GET /api/typewriter/session/inspect:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
   try {
     const body = req.body || {};
@@ -4122,6 +4145,32 @@ function buildTypewriterEntityKeyState(typewriterKey) {
   return buildTypewriterKeyState(typewriterKey);
 }
 
+function buildTypewriterSessionEntityItem(entity) {
+  const source = entity && typeof entity.toObject === 'function' ? entity.toObject() : entity || {};
+  return {
+    id: String(source?._id || ''),
+    session_id: firstDefinedString(source?.session_id, source?.sessionId),
+    sessionId: firstDefinedString(source?.sessionId, source?.session_id),
+    playerId: firstDefinedString(source?.playerId),
+    name: firstDefinedString(source?.name, 'Unnamed'),
+    description: firstDefinedString(source?.description),
+    lore: firstDefinedString(source?.lore),
+    type: firstDefinedString(source?.type),
+    subtype: firstDefinedString(source?.subtype),
+    tags: normalizeLooseStringArray(source?.tags),
+    externalId: firstDefinedString(source?.externalId),
+    source: firstDefinedString(source?.source, 'unknown'),
+    sourceRoute: firstDefinedString(source?.sourceRoute),
+    typewriterKeyText: firstDefinedString(source?.typewriterKeyText),
+    typewriterSource: firstDefinedString(source?.typewriterSource),
+    introducedByStorytellerId: firstDefinedString(source?.introducedByStorytellerId),
+    introducedByStorytellerName: firstDefinedString(source?.introducedByStorytellerName),
+    activeInTypewriter: Boolean(source?.activeInTypewriter),
+    createdAt: source?.createdAt || null,
+    updatedAt: source?.updatedAt || null
+  };
+}
+
 function isMockStorytellerKeyUrl(value) {
   return typeof value === 'string' && value.includes('/assets/mocks/storyteller_keys/');
 }
@@ -4228,7 +4277,10 @@ async function ensureBuiltinTypewriterKeys(sessionId, playerId = '') {
       sourceRoute: '/api/shouldAllowXerofag',
       verificationKind: 'typewriter_key_verification',
       activeInTypewriter: true,
+      knowledgeState: 'hidden',
+      playerFacingTooltip: '',
       textureUrl: TYPEWRITER_TEXT_KEY_TEXTURE_URL,
+      keyImageUrl: TYPEWRITER_XEROFAG_KEY_IMAGE_URL,
       sortOrder: 0
     },
     {
@@ -4391,6 +4443,57 @@ function buildStorytellerListItem(storyteller) {
       slotDefinition?.blankTextureUrl
     ),
     lastMission: buildLastMissionSummary(storyteller)
+  };
+}
+
+function buildTypewriterSessionStorytellerItem(storyteller) {
+  return {
+    ...buildStorytellerListItem(storyteller),
+    introducedInTypewriter: Boolean(storyteller?.introducedInTypewriter),
+    typewriterInterventionsCount: Number.isFinite(Number(storyteller?.typewriterInterventionsCount))
+      ? Number(storyteller.typewriterInterventionsCount)
+      : 0,
+    lastTypewriterInterventionAt: storyteller?.lastTypewriterInterventionAt || null,
+    symbol: firstDefinedString(storyteller?.typewriter_key?.symbol),
+    description: firstDefinedString(storyteller?.typewriter_key?.description),
+    createdAt: storyteller?.createdAt || null,
+    updatedAt: storyteller?.updatedAt || null
+  };
+}
+
+async function buildTypewriterSessionInspectPayload(sessionId, playerId = '') {
+  if (!sessionId) return null;
+
+  const fragmentDoc = await NarrativeFragment.findOne({ session_id: sessionId })
+    .sort({ turn: 1 })
+    .lean();
+  if (!fragmentDoc) {
+    return null;
+  }
+
+  const storytellers = await listTypewriterSlotStorytellers(sessionId, playerId);
+  const typewriterKeys = (await listTypewriterKeysForSession(sessionId, playerId)).map(buildTypewriterKeyState);
+  const entities = (await listTypewriterStoryEntities(sessionId, playerId)).map(buildTypewriterSessionEntityItem);
+  const slots = buildTypewriterStorytellerSlots(storytellers);
+  const narrativeText = firstDefinedString(fragmentDoc?.fragment);
+
+  return {
+    sessionId,
+    playerId,
+    fragment: narrativeText,
+    initialFragment: firstDefinedString(fragmentDoc?.initialFragment),
+    narrativeWordCount: countWords(narrativeText),
+    slots,
+    typewriterKeys,
+    entityKeys: typewriterKeys,
+    storytellers: storytellers.map(buildTypewriterSessionStorytellerItem),
+    entities,
+    counts: {
+      storytellerCount: storytellers.length,
+      slotFilledCount: slots.filter((slot) => slot.filled).length,
+      typewriterKeyCount: typewriterKeys.length,
+      entityCount: entities.length
+    }
   };
 }
 
@@ -4574,6 +4677,8 @@ async function saveTypewriterKeyFromIntervention({
       sourceStorytellerKeySlot: Number.isInteger(storyteller?.keySlotIndex) ? storyteller.keySlotIndex : null,
       verificationKind: 'typewriter_key_verification',
       activeInTypewriter: true,
+      knowledgeState: 'known',
+      playerFacingTooltip: description,
       textureUrl: TYPEWRITER_TEXT_KEY_TEXTURE_URL,
       sortOrder: 100
     },

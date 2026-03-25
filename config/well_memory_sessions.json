@@ -671,5 +671,61 @@
     "seenFragmentIds": [],
     "bundle": [],
     "completedAt": null
+  },
+  "well-preview-1774422629381-717d06::": {
+    "session_id": "well-preview-1774422629381-717d06",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "15acc6ff-0fb6-4f73-bb25-38060981fdd6",
+      "type": "textual",
+      "bankId": "txt_4",
+      "surface": {
+        "text": "The house remembered every vow spoken under rain"
+      },
+      "surfacedAt": "2026-03-25T07:40:44.430Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_4"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1774425957929-07ff86::": {
+    "session_id": "well-preview-1774425957929-07ff86",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "64abd043-b056-4875-9937-94ea13b34ff2",
+      "type": "textual",
+      "bankId": "txt_5",
+      "surface": {
+        "text": "Someone had written the answer before the question existed"
+      },
+      "surfacedAt": "2026-03-25T09:41:23.800Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_8",
+      "txt_7",
+      "txt_5"
+    ],
+    "bundle": [],
+    "completedAt": null
   }
 }

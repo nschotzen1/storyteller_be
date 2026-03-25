@@ -72,7 +72,10 @@ describe('typewriter dynamic keys', () => {
         expect.objectContaining({
           keyText: 'THE XEROFAG',
           insertText: 'The Xerofag',
-          sourceType: 'builtin'
+          sourceType: 'builtin',
+          keyImageUrl: '/textures/keys/THE_XEROFAG_1.png',
+          knowledgeState: 'hidden',
+          playerFacingTooltip: ''
         })
       ])
     );
@@ -84,6 +87,9 @@ describe('typewriter dynamic keys', () => {
     }).lean();
     expect(savedKey).toBeTruthy();
     expect(savedKey.insertText).toBe('The Xerofag');
+    expect(savedKey.keyImageUrl).toBe('/textures/keys/THE_XEROFAG_1.png');
+    expect(savedKey.knowledgeState).toBe('hidden');
+    expect(savedKey.playerFacingTooltip).toBe('');
   });
 
   test('generic typewriter key verification allows the builtin Xerofag key in mock mode when the narrative supports it', async () => {
@@ -170,5 +176,70 @@ describe('typewriter dynamic keys', () => {
     );
     expect(typeof verificationResponse.body.appendedText).toBe('string');
     expect(verificationResponse.body.appendedText.trim()).toBe(dynamicKey.insertText);
+  });
+
+  test('session inspector returns fragment, storyteller slots, typewriter keys, storytellers, and linked entities together', async () => {
+    const sessionId = 'typewriter-session-inspector-session';
+
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({
+        sessionId,
+        fragment: buildNarrative(36)
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/shouldCreateStorytellerKey')
+      .send({ sessionId, mocked_api_calls: true })
+      .expect(200);
+
+    const storyteller = await Storyteller.findOne({ session_id: sessionId, keySlotIndex: 0 }).lean();
+    expect(storyteller).toBeTruthy();
+
+    await request(app)
+      .post('/api/send_storyteller_typewriter_text')
+      .send({
+        sessionId,
+        storytellerId: String(storyteller._id),
+        mocked_api_calls: true
+      })
+      .expect(200);
+
+    const response = await request(app)
+      .get('/api/typewriter/session/inspect')
+      .query({ sessionId })
+      .expect(200);
+
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        sessionId,
+        fragment: expect.any(String),
+        slots: expect.any(Array),
+        typewriterKeys: expect.arrayContaining([
+          expect.objectContaining({
+            keyText: 'THE XEROFAG',
+            knowledgeState: 'hidden'
+          })
+        ]),
+        storytellers: expect.arrayContaining([
+          expect.objectContaining({
+            name: storyteller.name,
+            keySlotIndex: 0
+          })
+        ]),
+        entities: expect.arrayContaining([
+          expect.objectContaining({
+            typewriterKeyText: expect.any(String),
+            activeInTypewriter: true
+          })
+        ]),
+        counts: expect.objectContaining({
+          storytellerCount: 1,
+          typewriterKeyCount: expect.any(Number),
+          entityCount: expect.any(Number)
+        })
+      })
+    );
   });
 });

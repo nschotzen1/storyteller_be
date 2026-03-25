@@ -774,6 +774,46 @@ export function buildOpenApiSpec() {
             }
           }
         },
+        TypewriterSessionInspectResponse: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            playerId: { type: 'string' },
+            fragment: { type: 'string' },
+            initialFragment: { type: 'string' },
+            narrativeWordCount: { type: 'integer' },
+            slots: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterStorytellerSlot' }
+            },
+            typewriterKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterKey' }
+            },
+            entityKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterKey' }
+            },
+            storytellers: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true }
+            },
+            entities: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/NarrativeEntity' }
+            },
+            counts: {
+              type: 'object',
+              properties: {
+                storytellerCount: { type: 'integer' },
+                slotFilledCount: { type: 'integer' },
+                typewriterKeyCount: { type: 'integer' },
+                entityCount: { type: 'integer' }
+              },
+              additionalProperties: true
+            }
+          }
+        },
         TypewriterKey: TYPEWRITER_KEY_JSON_SCHEMA,
         TypewriterStoryEntityKey: {
           allOf: [{ $ref: '#/components/schemas/TypewriterKey' }]
@@ -1501,6 +1541,26 @@ export function buildOpenApiSpec() {
               description: 'Session returned or created.',
               ...jsonResponse({ $ref: '#/components/schemas/TypewriterSessionResponse' })
             }
+          }
+        })
+      },
+      '/api/typewriter/session/inspect': {
+        get: op({
+          tags: ['Sessions'],
+          summary: 'Inspect a typewriter session',
+          importance: 'High',
+          flow: 'Used by Story Admin and QA to inspect fragment, storyteller slots, textual keys, and linked entities for one live session.',
+          parameters: [
+            queryParam('sessionId', true, 'Typewriter session identifier.'),
+            queryParam('playerId', false, 'Optional player scope for session overlays.')
+          ],
+          responses: {
+            '200': {
+              description: 'Typewriter session inspection payload.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterSessionInspectResponse' })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Typewriter session not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
