@@ -8,9 +8,41 @@ const KEYS_TYPE = {
 
 const OPENAI_DEFAULT_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL || 'gpt-5';
 const OPENAI_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
-const FALLBACK_TEXT_MODELS = ['gpt-5.3-chat-latest', 'gpt-5.2-pro', 'gpt-5.2-chat-latest', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'];
+const FALLBACK_TEXT_MODELS = [
+    'gpt-5.4-pro',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.4-nano',
+    'gpt-5.3-chat-latest',
+    'gpt-5.2-pro',
+    'gpt-5.2-chat-latest',
+    'gpt-5.2',
+    'gpt-5.1',
+    'gpt-5',
+    'gpt-5-mini',
+    'gpt-4.1',
+    'gpt-4.1-mini',
+    'gpt-4o',
+    'gpt-4o-mini'
+];
 const FALLBACK_IMAGE_MODELS = ['gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3'];
-const MAIN_TEXT_MODELS = ['gpt-5.3-chat-latest', 'gpt-5.2-pro', 'gpt-5.2-chat-latest', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'];
+const MAIN_TEXT_MODELS = [
+    'gpt-5.4-pro',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.4-nano',
+    'gpt-5.3-chat-latest',
+    'gpt-5.2-pro',
+    'gpt-5.2-chat-latest',
+    'gpt-5.2',
+    'gpt-5.1',
+    'gpt-5',
+    'gpt-5-mini',
+    'gpt-4.1',
+    'gpt-4.1-mini',
+    'gpt-4o',
+    'gpt-4o-mini'
+];
 const MAIN_IMAGE_MODELS = ['gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3'];
 const ANTHROPIC_DEFAULT_TEXT_MODEL = process.env.ANTHROPIC_TEXT_MODEL || 'claude-3-7-sonnet-latest';
 const FALLBACK_ANTHROPIC_TEXT_MODELS = [
@@ -145,6 +177,95 @@ function sortModels(models) {
         if (createdDiff !== 0) return createdDiff;
         return a.id.localeCompare(b.id);
     });
+}
+
+function summarizeRawLlmResponse(rawResp, maxLength = 280) {
+    if (typeof rawResp !== 'string') return '';
+    const normalized = rawResp.replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength)}...`;
+}
+
+function sanitizeJsonResponse(rawResp) {
+    if (typeof rawResp !== 'string') {
+        throw new Error('LLM response was not textual.');
+    }
+
+    return rawResp
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/```$/, '')
+        .replace(/^[^{[]*/, '')
+        .replace(/[^}\]]*$/, '');
+}
+
+function buildDirectExternalApiCallError({
+    code = 'LLM_API_REQUEST_ERROR',
+    providerLabel,
+    selectedModel,
+    attempts,
+    lastError,
+    rawResp
+}) {
+    const attemptsLabel = `${attempts} attempt${attempts === 1 ? '' : 's'}`;
+    let message = `${providerLabel} request failed after ${attemptsLabel} for model ${selectedModel}`;
+
+    if (code === 'LLM_INVALID_JSON_RESPONSE') {
+        message = `${providerLabel} returned invalid JSON after ${attemptsLabel} for model ${selectedModel}`;
+    }
+
+    if (lastError?.message) {
+        message += `: ${lastError.message}`;
+    }
+
+    const rawResponsePreview = summarizeRawLlmResponse(rawResp);
+    if (code === 'LLM_INVALID_JSON_RESPONSE' && rawResponsePreview) {
+        message += `. Response preview: ${rawResponsePreview}`;
+    }
+
+    const error = new Error(message);
+    error.name = 'DirectExternalApiCallError';
+    error.code = code;
+    error.statusCode = 502;
+    error.provider = providerLabel.toLowerCase();
+    error.model = selectedModel;
+    error.attempts = attempts;
+    if (typeof rawResp === 'string') {
+        error.rawResponse = rawResp;
+    }
+    if (rawResponsePreview) {
+        error.rawResponsePreview = rawResponsePreview;
+    }
+    if (lastError) {
+        error.cause = lastError;
+    }
+
+    return error;
+}
+
+export function resolveDirectExternalApiRouteError(error, fallbackMessage = 'Internal Server Error') {
+    const isKnownLlmError = Boolean(
+        error
+        && typeof error === 'object'
+        && typeof error.code === 'string'
+        && (
+            error.code === 'LLM_API_REQUEST_ERROR'
+            || error.code === 'LLM_INVALID_JSON_RESPONSE'
+        )
+    );
+
+    if (isKnownLlmError) {
+        return {
+            statusCode: Number.isInteger(error.statusCode) ? error.statusCode : 502,
+            message: error.message || fallbackMessage
+        };
+    }
+
+    return {
+        statusCode: 500,
+        message: fallbackMessage
+    };
 }
 
 function looksLikeImageModel(id = '') {
@@ -353,91 +474,126 @@ export async function directExternalApiCall(prompts, max_tokens = 2500, temperat
         modelOverride = opts.model ?? opts.modelOverride;
     }
 
-    try {
-        let rawResp;
-        const maxRetries = 3;
-        let attempts = 0;
-        const useOpenAi = isOpenAi !== false;
-        const selectedModel = normalizeModelObject(modelOverride)
-            || (useOpenAi ? OPENAI_DEFAULT_TEXT_MODEL : ANTHROPIC_DEFAULT_TEXT_MODEL);
+    const maxRetries = 3;
+    let attempts = 0;
+    let lastError = null;
+    let lastRawResp = null;
+    const useOpenAi = isOpenAi !== false;
+    const providerLabel = useOpenAi ? 'OpenAI' : 'Anthropic';
+    const selectedModel = normalizeModelObject(modelOverride)
+        || (useOpenAi ? OPENAI_DEFAULT_TEXT_MODEL : ANTHROPIC_DEFAULT_TEXT_MODEL);
 
-        async function makeApiCall() {
-            if (useOpenAi) {
-                if (isResponsesPreferredOpenAiModel(selectedModel)) {
-                    const response = await getOpenaiClient().responses.create({
-                        model: selectedModel,
-                        input: prompts
-                    });
-                    const responseText = extractResponsesOutputText(response);
-                    if (!responseText) {
-                        throw new Error('Responses API did not return textual output.');
-                    }
-                    return responseText;
+    async function makeApiCall() {
+        if (useOpenAi) {
+            if (isResponsesPreferredOpenAiModel(selectedModel)) {
+                const response = await getOpenaiClient().responses.create({
+                    model: selectedModel,
+                    input: prompts
+                });
+                const responseText = extractResponsesOutputText(response);
+                if (!responseText) {
+                    throw new Error('Responses API did not return textual output.');
                 }
-
-                let req_obj = {
-                    // max_tokens,
-                    // model: 'gpt-4.1-mini',
-                    model: selectedModel,
-                    messages: prompts,
-                    // temperature: 1,
-                    presence_penalty: 0.0,
-                    top_p: 1.0,
-                };
-
-                // if (explicitJsonObjectFormat)
-                //     req_obj['response_format'] = { "type": "json_object" };
-
-                const completion = await getOpenaiClient().chat.completions.create(req_obj);
-                return completion.choices[0].message.content;
-            } else {
-                const client = getAnthropicClient();
-
-                prompts = prompts.map((p) => {
-                    if (p.role === 'system') {
-                        p.role = 'user';
-                    }
-                    return p;
-                });
-
-                const resp = await client.messages.create({
-                    messages: prompts,
-                    model: selectedModel,
-                    max_tokens: 8192,
-                    temperature: 0.8,
-                });
-
-                return resp.content[0].text;
+                return responseText;
             }
+
+            let req_obj = {
+                // max_tokens,
+                // model: 'gpt-4.1-mini',
+                model: selectedModel,
+                messages: prompts,
+                // temperature: 1,
+                presence_penalty: 0.0,
+                top_p: 1.0,
+            };
+
+            // if (explicitJsonObjectFormat)
+            //     req_obj['response_format'] = { "type": "json_object" };
+
+            const completion = await getOpenaiClient().chat.completions.create(req_obj);
+            const responseText = completion?.choices?.[0]?.message?.content;
+            if (typeof responseText !== 'string' || !responseText.trim()) {
+                throw new Error('Chat Completions API did not return textual output.');
+            }
+            return responseText;
         }
 
-        while (attempts < maxRetries) {
-            try {
-                let rawResp = await makeApiCall();
-                rawResp = rawResp
-                    .trim()
-                    .replace(/^```(?:json)?\s*/i, '')         // Remove starting ``` or ```json
-                    .replace(/```$/, '')                      // Remove ending ```
-                    .replace(/^[^{[]*/, '')                   // Remove characters before first { or [
-                    .replace(/[^}\]]*$/, '');   
-                
-                return JSON.parse(rawResp);
-                
-            } catch (error) {
-                attempts++;
-                console.warn(`Attempt ${attempts} failed:`, error);
+        const client = getAnthropicClient();
+        const anthropicPrompts = Array.isArray(prompts)
+            ? prompts.map((prompt) => ({
+                ...prompt,
+                role: prompt?.role === 'system' ? 'user' : prompt?.role
+            }))
+            : prompts;
 
-                if (attempts >= maxRetries) {
-                    console.error('Failed to get a valid response after retries. Returning raw response.');
-                    return rawResp || null;
-                }
-            }
+        const resp = await client.messages.create({
+            messages: anthropicPrompts,
+            model: selectedModel,
+            max_tokens: 8192,
+            temperature: 0.8,
+        });
+        const responseText = Array.isArray(resp?.content)
+            ? resp.content.find((entry) => entry?.type === 'text' && typeof entry?.text === 'string')?.text
+            : null;
+        if (typeof responseText !== 'string' || !responseText.trim()) {
+            throw new Error('Anthropic Messages API did not return textual output.');
         }
-
-    } catch (error) {
-        console.error('Error:', error);
+        return responseText;
     }
 
+    while (attempts < maxRetries) {
+        attempts++;
+        lastRawResp = null;
+
+        try {
+            lastRawResp = await makeApiCall();
+        } catch (error) {
+            lastError = error;
+            console.warn(`Attempt ${attempts} failed:`, error);
+
+            if (attempts >= maxRetries) {
+                console.error(`Failed to get a valid response from ${providerLabel} after ${maxRetries} attempts.`);
+                throw buildDirectExternalApiCallError({
+                    code: 'LLM_API_REQUEST_ERROR',
+                    providerLabel,
+                    selectedModel,
+                    attempts,
+                    lastError
+                });
+            }
+
+            continue;
+        }
+
+        try {
+            return JSON.parse(sanitizeJsonResponse(lastRawResp));
+        } catch (error) {
+            lastError = error;
+            const parseError = buildDirectExternalApiCallError({
+                code: 'LLM_INVALID_JSON_RESPONSE',
+                providerLabel,
+                selectedModel,
+                attempts,
+                lastError,
+                rawResp: lastRawResp
+            });
+            console.warn(`Attempt ${attempts} failed:`, parseError);
+
+            if (attempts >= maxRetries) {
+                console.error(`Failed to parse a valid JSON response from ${providerLabel} after ${maxRetries} attempts.`);
+                throw parseError;
+            }
+        }
+    }
+
+    throw buildDirectExternalApiCallError({
+        code: lastError?.code || 'LLM_API_REQUEST_ERROR',
+        providerLabel,
+        selectedModel,
+        attempts,
+        lastError,
+        rawResp: lastRawResp
+    });
 }
 
 export async function generate_cards(fragmentText, chatHistory) {

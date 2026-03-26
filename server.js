@@ -58,7 +58,7 @@ import path from 'path';
 import { generateInitialChatPrompt, generateInitialScenePrompt } from './ai/openai/personaChatPrompts.js';
 import { ChatMessage, NarrativeFragment, SessionVector, Storyteller } from './models/models.js'; // Consolidated and corrected ChatMessage import; Added SessionVector
 import { createStoryTellerKey } from './services/storytellerService.js';
-import { directExternalApiCall } from './ai/openai/apiService.js';
+import { directExternalApiCall, resolveDirectExternalApiRouteError } from './ai/openai/apiService.js';
 import { generateStoryTellerForFragmentPrompt } from './services/storytellerService.js';
 import {
   generateContinuationPrompt,
@@ -124,6 +124,11 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 import { getOrGenerateSpread, chooseSpreadOption } from './services/story_deck_service.js';
+
+function sendLlmAwareError(res, error, fallbackMessage, field = 'message') {
+  const { statusCode, message } = resolveDirectExternalApiRouteError(error, fallbackMessage);
+  return res.status(statusCode).json({ [field]: message });
+}
 
 function parseBooleanFlag(value) {
   if (typeof value === 'boolean') return value;
@@ -360,7 +365,7 @@ app.post('/api/sendMessage', async (req, res) => {
 
   } catch (err) {
     console.error("Error in /api/sendMessage:", err);
-    return res.status(500).json({ error: "Internal Server Error" });
+    return sendLlmAwareError(res, err, 'Internal Server Error', 'error');
   }
 });
 
@@ -872,7 +877,7 @@ app.post('/api/send_typewriter_text', async (req, res) => {
   } catch (error) {
     console.error('Error in /api/send_typewriter_text:', error);
     if (!res.headersSent) {
-      return res.status(500).json({ error: 'Internal Server Error in typewriter route' });
+      return sendLlmAwareError(res, error, 'Internal Server Error in typewriter route', 'error');
     }
   }
 });
@@ -1006,7 +1011,7 @@ app.post('/api/getNarrationScript', async (req, res) => {
 
   } catch (err) {
     console.error('Error in /api/getNarrationScript:', err);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return sendLlmAwareError(res, err, 'Internal Server Error', 'error');
   }
 });
 
@@ -1054,7 +1059,7 @@ const storytellingRouteHandler = async (req, res) => {
     });
   } catch (err) {
     console.error('Error in /api/storytelling:', err);
-    res.status(500).json({ message: 'Server error' });
+    return sendLlmAwareError(res, err, 'Server error');
   }
 };
 
@@ -1155,7 +1160,7 @@ const characterCreationGetHandler = async (req, res) => {
     if (err.name === 'CastError') {
       return res.status(400).json({ message: 'Invalid ID format provided.' });
     }
-    res.status(500).json({ message: 'Server error during character creation process.' });
+    return sendLlmAwareError(res, err, 'Server error during character creation process.');
   }
 };
 
@@ -1252,7 +1257,7 @@ const chatWithMasterWorkingGetHandler = async (req, res) => {
 
   } catch (err) {
     console.error('Error in /chatWithMasterWorking:', err);
-    res.status(500).json({ message: 'Server error during master chat.' });
+    return sendLlmAwareError(res, err, 'Server error during master chat.');
   }
 };
 
@@ -1337,7 +1342,7 @@ const developEntityPostHandler = async (req, res) => {
     if (error.message.includes("could not find entity")) {
       return res.status(404).json({ message: 'Entity not found for development.' });
     }
-    res.status(500).json({ message: 'Server error during entity development.' });
+    return sendLlmAwareError(res, error, 'Server error during entity development.');
   }
 };
 
@@ -1357,7 +1362,7 @@ const generateEntitiesPostHandler = async (req, res) => {
 
   } catch (error) {
     console.error('Error in /api/generateEntities:', error);
-    res.status(500).json({ message: 'Server error during entity generation.' });
+    return sendLlmAwareError(res, error, 'Server error during entity generation.');
   }
 };
 
@@ -1416,7 +1421,7 @@ const textToEntityPostHandler = async (req, res) => {
     res.status(200).json(response);
   } catch (error) {
     console.error('Error in /api/textToEntity:', error);
-    res.status(500).json({ message: 'Server error during text-to-entity generation.' });
+    return sendLlmAwareError(res, error, 'Server error during text-to-entity generation.');
   }
 };
 
@@ -1452,7 +1457,7 @@ const generateTexturesPostHandler = async (req, res) => {
 
   } catch (error) {
     console.error('Error in /api/generateTextures:', error);
-    res.status(500).json({ message: 'Server error during texture generation.' });
+    return sendLlmAwareError(res, error, 'Server error during texture generation.');
   }
 };
 
@@ -1507,7 +1512,7 @@ const dynamicPrefixesPostHandler = async (req, res) => {
 
   } catch (error) {
     console.error('Error in /api/prefixes POST:', error);
-    res.status(500).json({ message: 'Server error during prefix generation.' });
+    return sendLlmAwareError(res, error, 'Server error during prefix generation.');
   }
 };
 

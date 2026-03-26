@@ -70,7 +70,8 @@ describe('POST /api/shouldCreateStorytellerKey', () => {
         slotKey: 'STORYTELLER_SLOT_HORIZONTAL',
         filled: true,
         storytellerName: expect.any(String),
-        keyImageUrl: expect.stringContaining('/assets/mocks/storyteller_keys/')
+        keyImageUrl: expect.stringContaining('/assets/mocks/storyteller_keys/'),
+        canPress: true
       })
     );
     expect(firstResponse.body.nextThreshold).toBe(50);
@@ -95,7 +96,8 @@ describe('POST /api/shouldCreateStorytellerKey', () => {
         slotKey: 'STORYTELLER_SLOT_VERTICAL',
         filled: true,
         storytellerName: expect.any(String),
-        keyImageUrl: expect.stringContaining('/assets/mocks/storyteller_keys/')
+        keyImageUrl: expect.stringContaining('/assets/mocks/storyteller_keys/'),
+        canPress: true
       })
     );
     expect(secondResponse.body.nextThreshold).toBe(100);
@@ -120,7 +122,8 @@ describe('POST /api/shouldCreateStorytellerKey', () => {
         slotKey: 'STORYTELLER_SLOT_RECT_HORIZONTAL',
         filled: true,
         storytellerName: expect.any(String),
-        keyImageUrl: expect.stringContaining('/assets/mocks/storyteller_keys/')
+        keyImageUrl: expect.stringContaining('/assets/mocks/storyteller_keys/'),
+        canPress: true
       })
     );
     expect(thirdResponse.body.nextThreshold).toBeNull();

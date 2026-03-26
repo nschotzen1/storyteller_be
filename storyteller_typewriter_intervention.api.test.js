@@ -15,6 +15,12 @@ jest.setTimeout(30000);
 const buildNarrative = (wordCount) =>
   Array.from({ length: wordCount }, (_, index) => `word${index + 1}`).join(' ');
 
+const growNarrativeBeyondTenPercent = (text) => {
+  const additionsNeeded = Math.max(8, Math.ceil(String(text || '').length / 20));
+  const addition = Array.from({ length: additionsNeeded }, (_, index) => `tail${index + 1}`).join(' ');
+  return `${text} ${addition}`.trim();
+};
+
 beforeAll(async () => {
   process.env.NODE_ENV = 'test';
   mongoServer = await MongoMemoryServer.create();
@@ -114,6 +120,9 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
     expect(updatedStoryteller.introducedInTypewriter).toBe(true);
     expect(updatedStoryteller.typewriterInterventionsCount).toBe(1);
     expect(updatedStoryteller.lastTypewriterInterventionAt).toBeTruthy();
+    expect(updatedStoryteller.lastTypewriterPressAt).toBeTruthy();
+    expect(updatedStoryteller.lastTypewriterPressFragmentLength).toBe(interventionResponse.body.fragment.length);
+    expect(updatedStoryteller.typewriterInterventionInFlight).toBe(false);
 
     const savedEntity = await NarrativeEntity.findOne({
       session_id: sessionId,
@@ -158,5 +167,80 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
         })
       ])
     );
+    expect(refreshedSlotsResponse.body.slots[0]).toEqual(
+      expect.objectContaining({
+        canPress: false,
+        pressLockedReason: 'growth_required'
+      })
+    );
+  });
+
+  test('blocks repeated storyteller presses until the persisted fragment grows by more than ten percent', async () => {
+    const sessionId = 'storyteller-intervention-cooldown';
+
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({
+        sessionId,
+        fragment: buildNarrative(36)
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/shouldCreateStorytellerKey')
+      .send({ sessionId, mocked_api_calls: true })
+      .expect(200);
+
+    const storyteller = await Storyteller.findOne({ session_id: sessionId, keySlotIndex: 0 }).lean();
+    expect(storyteller).toBeTruthy();
+
+    const firstIntervention = await request(app)
+      .post('/api/send_storyteller_typewriter_text')
+      .send({
+        sessionId,
+        storytellerId: String(storyteller._id),
+        mocked_api_calls: true
+      })
+      .expect(200);
+
+    const immediateRetry = await request(app)
+      .post('/api/send_storyteller_typewriter_text')
+      .send({
+        sessionId,
+        storytellerId: String(storyteller._id),
+        mocked_api_calls: true
+      })
+      .expect(409);
+
+    expect(immediateRetry.body.code).toBe('STORYTELLER_PRESS_NOT_ALLOWED');
+    expect(immediateRetry.body.slots[0]).toEqual(
+      expect.objectContaining({
+        canPress: false,
+        pressLockedReason: 'growth_required',
+        lastPressFragmentLength: firstIntervention.body.fragment.length,
+        requiredFragmentLength: expect.any(Number)
+      })
+    );
+    expect(immediateRetry.body.slots[0].requiredFragmentLength).toBeGreaterThan(firstIntervention.body.fragment.length);
+
+    const grownFragment = growNarrativeBeyondTenPercent(firstIntervention.body.fragment);
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({
+        sessionId,
+        fragment: grownFragment
+      })
+      .expect(200);
+
+    const retryAfterGrowth = await request(app)
+      .post('/api/send_storyteller_typewriter_text')
+      .send({
+        sessionId,
+        storytellerId: String(storyteller._id),
+        mocked_api_calls: true
+      })
+      .expect(200);
+
+    expect(retryAfterGrowth.body.fragment.length).toBeGreaterThan(grownFragment.length);
   });
 });

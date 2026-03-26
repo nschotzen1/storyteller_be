@@ -2634,7 +2634,7 @@ so this is how it begins: may this story rise, and grow and prosper live to its 
 
   const wordCount = existing_text ? existing_text.trim().split(/\s+/).filter(Boolean).length : 0;
     const minWords = Math.max(5, parseInt(wordCount / (1.61 * 1.61), 10) || 0);
-    const maxWords = Math.max(80, parseInt(wordCount / 1.61, 10) || 0);
+    const maxWords = Math.max(80, parseInt(wordCount / 1.61, 10) || minWords);
 
     const userContent = JSON.stringify({
         current_narrative: existing_text,

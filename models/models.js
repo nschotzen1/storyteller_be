@@ -167,7 +167,10 @@ const StorytellerSchema = new mongoose.Schema({
   keyBlankTextureUrl: { type: String },
   keySlotIndex: { type: Number },
   introducedInTypewriter: { type: Boolean, default: false },
+  typewriterInterventionInFlight: { type: Boolean, default: false },
   lastTypewriterInterventionAt: { type: Date, default: null },
+  lastTypewriterPressAt: { type: Date, default: null },
+  lastTypewriterPressFragmentLength: { type: Number, default: null },
   typewriterInterventionsCount: { type: Number, default: 0 },
   status: { type: String, enum: ['active', 'in_mission'], default: 'active' },
   missions: {

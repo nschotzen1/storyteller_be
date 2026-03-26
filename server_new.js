@@ -10,7 +10,8 @@ import {
   callJsonLlm,
   directExternalApiCall,
   listAvailableAnthropicModels,
-  listAvailableOpenAiModels
+  listAvailableOpenAiModels,
+  resolveDirectExternalApiRouteError
 } from './ai/openai/apiService.js';
 import {
   ChatMessage,
@@ -187,6 +188,11 @@ const QUEST_SCENE_UPLOAD_MIME_TYPES = new Map([
   ['image/webp', '.webp'],
   ['image/gif', '.gif']
 ]);
+
+function sendLlmAwareError(res, error, fallbackMessage, field = 'message') {
+  const { statusCode, message } = resolveDirectExternalApiRouteError(error, fallbackMessage);
+  return res.status(statusCode).json({ [field]: message });
+}
 
 function parseQuestSceneImageDataUrl(dataUrl = '') {
   const match = String(dataUrl || '').match(/^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([\s\S]+)$/i);
@@ -894,10 +900,9 @@ function parseBooleanFlag(value) {
   return null;
 }
 
-function resolveExplicitMockOverride(body = {}) {
-  const explicitFlags = [body.mock, body.debug, body.mock_api_calls, body.mocked_api_calls];
-  for (const flag of explicitFlags) {
-    const parsed = parseBooleanFlag(flag);
+function resolveExplicitBooleanOverride(body = {}, flagNames = []) {
+  for (const flagName of flagNames) {
+    const parsed = parseBooleanFlag(body?.[flagName]);
     if (parsed !== null) {
       return parsed;
     }
@@ -905,8 +910,41 @@ function resolveExplicitMockOverride(body = {}) {
   return null;
 }
 
+function resolveExplicitMockOverride(body = {}) {
+  return resolveExplicitBooleanOverride(body, [
+    'mock',
+    'debug',
+    'mock_api_calls',
+    'mocked_api_calls'
+  ]);
+}
+
 function resolveMockMode(body = {}, fallback = false) {
   const explicit = resolveExplicitMockOverride(body);
+  if (explicit !== null) {
+    return explicit;
+  }
+  return Boolean(fallback);
+}
+
+function resolveImageMockMode(body = {}, fallback = false, extraFlagNames = []) {
+  const explicit = resolveExplicitBooleanOverride(body, [
+    ...extraFlagNames,
+    'mockImage',
+    'mock_image',
+    'mockImages',
+    'mock_images',
+    'mockTextures',
+    'mock_texture',
+    'mock_textures',
+    'mock_texture_generation',
+    'mockedTextures',
+    'mocked_textures',
+    'mockIllustration',
+    'mockIllustrations',
+    'mock_illustration',
+    'mock_illustrations'
+  ]);
   if (explicit !== null) {
     return explicit;
   }
@@ -2264,7 +2302,7 @@ async function handleMessengerChatPost(req, res) {
       });
     }
     console.error('Error in POST /api/messenger/chat:', error);
-    return res.status(500).json({ message: 'Server error during messenger chat.' });
+    return sendLlmAwareError(res, error, 'Server error during messenger chat.');
   }
 }
 
@@ -2935,7 +2973,7 @@ app.post('/api/immersive-rpg/chat', async (req, res) => {
       });
     }
     console.error('Error in POST /api/immersive-rpg/chat:', error);
-    return res.status(500).json({ message: 'Server error while advancing immersive RPG chat.' });
+    return sendLlmAwareError(res, error, 'Server error while advancing immersive RPG chat.');
   }
 });
 
@@ -3338,7 +3376,7 @@ app.post('/api/shouldAllowXerofag', async (req, res) => {
     }
   } catch (error) {
     console.error('Error in /api/shouldAllowXerofag:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return sendLlmAwareError(res, error, 'Internal Server Error', 'error');
   }
 });
 
@@ -3473,7 +3511,7 @@ app.post('/api/typewriter/keys/shouldAllow', async (req, res) => {
     }
   } catch (error) {
     console.error('Error in /api/typewriter/keys/shouldAllow:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return sendLlmAwareError(res, error, 'Internal Server Error', 'error');
   }
 });
 
@@ -3587,7 +3625,7 @@ app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
       createdStoryteller: createdStoryteller ? buildStorytellerListItem(createdStoryteller) : null,
       assignedStorytellerCount: filledCount,
       nextThreshold,
-      slots: buildTypewriterStorytellerSlots(visibleStorytellers),
+      slots: buildTypewriterStorytellerSlots(visibleStorytellers, fragmentText.length),
       typewriterKeys: (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState),
       entityKeys: (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState)
     });
@@ -3626,6 +3664,26 @@ app.post('/api/send_storyteller_typewriter_text', async (req, res) => {
       return res.status(404).json({ error: 'Storyteller not found for this session.' });
     }
 
+    const currentFragmentLength = fragmentText.length;
+    let storytellerLockHeld = false;
+    const lockedStoryteller = await acquireTypewriterStorytellerInterventionLock(
+      storyteller._id,
+      currentFragmentLength
+    );
+
+    if (!lockedStoryteller) {
+      const visibleStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
+      return res.status(409).json({
+        error: 'Storyteller press is not allowed yet.',
+        code: 'STORYTELLER_PRESS_NOT_ALLOWED',
+        sessionId,
+        currentFragmentLength,
+        slots: buildTypewriterStorytellerSlots(visibleStorytellers, currentFragmentLength),
+        storyteller: buildTypewriterSessionStorytellerItem(storyteller)
+      });
+    }
+
+    storytellerLockHeld = true;
     const interventionPipeline = await getAiPipelineSettings('storyteller_intervention');
     const interventionProvider = typeof interventionPipeline?.provider === 'string'
       ? interventionPipeline.provider
@@ -3633,127 +3691,145 @@ app.post('/api/send_storyteller_typewriter_text', async (req, res) => {
     const shouldMock = resolveMockMode(body, interventionPipeline.useMock);
     const requestedFadeTimingScale = toFiniteNumber(body?.fadeTimingScale);
 
-    let interventionResponse;
-    if (shouldMock) {
-      interventionResponse = buildMockStorytellerIntervention(storyteller, fragmentText);
-    } else {
-      const promptTemplate = await resolveStorytellerInterventionPromptTemplate();
-      interventionResponse = await callJsonLlm({
-        prompts: buildStorytellerInterventionPromptMessages(storyteller, fragmentText, promptTemplate),
-        provider: interventionProvider,
-        model: interventionPipeline.model || '',
-        max_tokens: 1800,
-        explicitJsonObjectFormat: true
-      });
-    }
-
-    const continuation = firstDefinedString(interventionResponse?.continuation);
-    if (!continuation) {
-      return res.status(502).json({
-        error: 'Storyteller intervention did not return valid continuation text.',
-        runtime: {
-          pipeline: 'storyteller_intervention',
+    try {
+      let interventionResponse;
+      if (shouldMock) {
+        interventionResponse = buildMockStorytellerIntervention(lockedStoryteller, fragmentText);
+      } else {
+        const promptTemplate = await resolveStorytellerInterventionPromptTemplate();
+        interventionResponse = await callJsonLlm({
+          prompts: buildStorytellerInterventionPromptMessages(lockedStoryteller, fragmentText, promptTemplate),
           provider: interventionProvider,
           model: interventionPipeline.model || '',
-          mocked: shouldMock
-        }
-      });
-    }
-
-    const rawEntity = interventionResponse?.entity && typeof interventionResponse.entity === 'object'
-      ? interventionResponse.entity
-      : null;
-    if (!rawEntity || !firstDefinedString(rawEntity.name, rawEntity.key_text)) {
-      return res.status(502).json({
-        error: 'Storyteller intervention did not return a valid entity.',
-        runtime: {
-          pipeline: 'storyteller_intervention',
-          provider: interventionProvider,
-          model: interventionPipeline.model || '',
-          mocked: shouldMock
-        }
-      });
-    }
-
-    const metadata = normalizeTypewriterMetadata(interventionResponse?.style)
-      || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
-      || TYPEWRITER_DEFAULT_FONTS[0];
-    const nextFragment = mergeTypewriterFragment(fragmentText, continuation);
-    const savedEntity = await saveTypewriterEntityFromIntervention({
-      sessionId,
-      playerId: resolvedPlayerId,
-      storyteller,
-      entity: rawEntity
-    });
-    const savedTypewriterKey = await saveTypewriterKeyFromIntervention({
-      sessionId,
-      playerId: resolvedPlayerId,
-      storyteller,
-      entity: savedEntity,
-      keyText: rawEntity?.key_text,
-      insertText: rawEntity?.insert_text
-    });
-    const updatedStoryteller = await Storyteller.findOneAndUpdate(
-      { _id: storyteller._id },
-      {
-        $set: {
-          introducedInTypewriter: true,
-          lastTypewriterInterventionAt: new Date()
-        },
-        $inc: {
-          typewriterInterventionsCount: 1
-        }
-      },
-      { new: true }
-    );
-
-    await saveTypewriterSessionFragment(sessionId, nextFragment);
-    const sessionTypewriterKeys = (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState);
-
-    const continuationInsights = normalizeContinuationInsights(
-      {
-        meaning: [
-          `${firstDefinedString(updatedStoryteller?.name, storyteller?.name)} briefly entered the narrative.`
-        ],
-        contextual_strengthening: `The intervention surfaced ${firstDefinedString(savedEntity?.name)} as a fresh point of interest in the scene.`,
-        entities: [
-          {
-            entity_name: firstDefinedString(savedEntity?.name),
-            ner_category: firstDefinedString(savedEntity?.type),
-            ascope_pmesii: firstDefinedString(savedEntity?.subtype),
-            reuse: false
-          }
-        ],
-        style: metadata
-      },
-      continuation,
-      metadata
-    );
-
-    return res.status(200).json({
-      ...createTypewriterResponse(continuation, metadata, null, {
-        narrativeWordCount: countWords(fragmentText),
-        fadeTimingScale: requestedFadeTimingScale
-      }),
-      continuation_insights: continuationInsights,
-      sessionId,
-      fragment: nextFragment,
-      mocked: shouldMock,
-      storyteller: buildStorytellerListItem(updatedStoryteller || storyteller),
-      typewriterKey: buildTypewriterKeyState(savedTypewriterKey),
-      typewriterKeys: sessionTypewriterKeys,
-      entityKey: buildTypewriterKeyState(savedTypewriterKey),
-      entityKeys: sessionTypewriterKeys,
-      runtime: {
-        pipeline: 'storyteller_intervention',
-        provider: interventionProvider,
-        model: interventionPipeline.model || '',
-        mocked: shouldMock
+          max_tokens: 1800,
+          explicitJsonObjectFormat: true
+        });
       }
-    });
+
+      const continuation = firstDefinedString(interventionResponse?.continuation);
+      if (!continuation) {
+        return res.status(502).json({
+          error: 'Storyteller intervention did not return valid continuation text.',
+          runtime: {
+            pipeline: 'storyteller_intervention',
+            provider: interventionProvider,
+            model: interventionPipeline.model || '',
+            mocked: shouldMock
+          }
+        });
+      }
+
+      const rawEntity = interventionResponse?.entity && typeof interventionResponse.entity === 'object'
+        ? interventionResponse.entity
+        : null;
+      if (!rawEntity || !firstDefinedString(rawEntity.name, rawEntity.key_text)) {
+        return res.status(502).json({
+          error: 'Storyteller intervention did not return a valid entity.',
+          runtime: {
+            pipeline: 'storyteller_intervention',
+            provider: interventionProvider,
+            model: interventionPipeline.model || '',
+            mocked: shouldMock
+          }
+        });
+      }
+
+      const metadata = normalizeTypewriterMetadata(interventionResponse?.style)
+        || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
+        || TYPEWRITER_DEFAULT_FONTS[0];
+      const nextFragment = mergeTypewriterFragment(fragmentText, continuation);
+      const savedEntity = await saveTypewriterEntityFromIntervention({
+        sessionId,
+        playerId: resolvedPlayerId,
+        storyteller: lockedStoryteller,
+        entity: rawEntity
+      });
+      const savedTypewriterKey = await saveTypewriterKeyFromIntervention({
+        sessionId,
+        playerId: resolvedPlayerId,
+        storyteller: lockedStoryteller,
+        entity: savedEntity,
+        keyText: rawEntity?.key_text,
+        insertText: rawEntity?.insert_text
+      });
+
+      await saveTypewriterSessionFragment(sessionId, nextFragment);
+
+      const updatedStoryteller = await Storyteller.findOneAndUpdate(
+        { _id: lockedStoryteller._id },
+        {
+          $set: {
+            introducedInTypewriter: true,
+            lastTypewriterInterventionAt: new Date(),
+            lastTypewriterPressAt: new Date(),
+            lastTypewriterPressFragmentLength: nextFragment.length,
+            typewriterInterventionInFlight: false
+          },
+          $inc: {
+            typewriterInterventionsCount: 1
+          }
+        },
+        { new: true }
+      );
+      storytellerLockHeld = false;
+
+      const sessionTypewriterKeys = (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState);
+      const sessionStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
+      const sessionSlots = buildTypewriterStorytellerSlots(sessionStorytellers, nextFragment.length);
+
+      const continuationInsights = normalizeContinuationInsights(
+        {
+          meaning: [
+            `${firstDefinedString(updatedStoryteller?.name, lockedStoryteller?.name)} briefly entered the narrative.`
+          ],
+          contextual_strengthening: `The intervention surfaced ${firstDefinedString(savedEntity?.name)} as a fresh point of interest in the scene.`,
+          entities: [
+            {
+              entity_name: firstDefinedString(savedEntity?.name),
+              ner_category: firstDefinedString(savedEntity?.type),
+              ascope_pmesii: firstDefinedString(savedEntity?.subtype),
+              reuse: false
+            }
+          ],
+          style: metadata
+        },
+        continuation,
+        metadata
+      );
+
+      return res.status(200).json({
+        ...createTypewriterResponse(continuation, metadata, null, {
+          narrativeWordCount: countWords(fragmentText),
+          fadeTimingScale: requestedFadeTimingScale
+        }),
+        continuation_insights: continuationInsights,
+        sessionId,
+        fragment: nextFragment,
+        mocked: shouldMock,
+        storyteller: buildStorytellerListItem(updatedStoryteller || lockedStoryteller),
+        slots: sessionSlots,
+        typewriterKey: buildTypewriterKeyState(savedTypewriterKey),
+        typewriterKeys: sessionTypewriterKeys,
+        entityKey: buildTypewriterKeyState(savedTypewriterKey),
+        entityKeys: sessionTypewriterKeys,
+        runtime: {
+          pipeline: 'storyteller_intervention',
+          provider: interventionProvider,
+          model: interventionPipeline.model || '',
+          mocked: shouldMock
+        }
+      });
+    } finally {
+      if (storytellerLockHeld) {
+        await Storyteller.findOneAndUpdate(
+          { _id: lockedStoryteller._id },
+          { $set: { typewriterInterventionInFlight: false } }
+        );
+      }
+    }
   } catch (error) {
     console.error('Error in /api/send_storyteller_typewriter_text:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return sendLlmAwareError(res, error, 'Internal Server Error', 'error');
   }
 });
 
@@ -4083,8 +4159,50 @@ function getTypewriterStorytellerSlotDefinition(slotIndex) {
   return TYPEWRITER_STORYTELLER_KEY_SLOTS.find((slot) => slot.slotIndex === slotIndex) || null;
 }
 
-function buildTypewriterStorytellerSlotState(slotDefinition, storyteller = null) {
+const STORYTELLER_REPRESS_GROWTH_FACTOR = 1.1;
+
+function normalizeTypewriterFragmentLength(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.floor(numeric));
+}
+
+function getStorytellerLastPressFragmentLength(storyteller) {
+  const normalized = normalizeTypewriterFragmentLength(storyteller?.lastTypewriterPressFragmentLength);
+  return normalized > 0 ? normalized : null;
+}
+
+function getStorytellerRequiredFragmentLength(storyteller) {
+  const lastPressFragmentLength = getStorytellerLastPressFragmentLength(storyteller);
+  if (lastPressFragmentLength === null) return 0;
+  return Math.floor(lastPressFragmentLength * STORYTELLER_REPRESS_GROWTH_FACTOR) + 1;
+}
+
+function buildTypewriterStorytellerPressState(storyteller, currentFragmentLength = 0) {
+  const safeFragmentLength = normalizeTypewriterFragmentLength(currentFragmentLength);
+  const lastPressFragmentLength = getStorytellerLastPressFragmentLength(storyteller);
+  const requiredFragmentLength = getStorytellerRequiredFragmentLength(storyteller);
+  const typewriterInterventionInFlight = Boolean(storyteller?.typewriterInterventionInFlight);
+  const canPressByGrowth = !requiredFragmentLength || safeFragmentLength >= requiredFragmentLength;
+  return {
+    currentFragmentLength: safeFragmentLength,
+    lastPressFragmentLength,
+    requiredFragmentLength,
+    fragmentGrowthNeeded: Math.max(0, requiredFragmentLength - safeFragmentLength),
+    lastTypewriterPressAt: storyteller?.lastTypewriterPressAt || null,
+    typewriterInterventionInFlight,
+    pressLockedReason: typewriterInterventionInFlight
+      ? 'processing'
+      : canPressByGrowth
+        ? ''
+        : 'growth_required',
+    canPress: Boolean(storyteller) && !typewriterInterventionInFlight && canPressByGrowth
+  };
+}
+
+function buildTypewriterStorytellerSlotState(slotDefinition, storyteller = null, currentFragmentLength = 0) {
   const keyImageUrl = firstDefinedString(storyteller?.keyImageLocalUrl, storyteller?.keyImageUrl);
+  const pressState = buildTypewriterStorytellerPressState(storyteller, currentFragmentLength);
   return {
     slotIndex: slotDefinition.slotIndex,
     slotKey: slotDefinition.slotKey,
@@ -4096,11 +4214,19 @@ function buildTypewriterStorytellerSlotState(slotDefinition, storyteller = null)
     storytellerName: storyteller?.name || '',
     keyImageUrl,
     symbol: firstDefinedString(storyteller?.typewriter_key?.symbol),
-    description: firstDefinedString(storyteller?.typewriter_key?.description)
+    description: firstDefinedString(storyteller?.typewriter_key?.description),
+    canPress: Boolean(storyteller && keyImageUrl && pressState.canPress),
+    pressLockedReason: pressState.pressLockedReason,
+    currentFragmentLength: pressState.currentFragmentLength,
+    lastPressFragmentLength: pressState.lastPressFragmentLength,
+    requiredFragmentLength: pressState.requiredFragmentLength,
+    fragmentGrowthNeeded: pressState.fragmentGrowthNeeded,
+    lastTypewriterPressAt: pressState.lastTypewriterPressAt,
+    typewriterInterventionInFlight: pressState.typewriterInterventionInFlight
   };
 }
 
-function buildTypewriterStorytellerSlots(storytellers = []) {
+function buildTypewriterStorytellerSlots(storytellers = [], currentFragmentLength = 0) {
   const storytellerBySlot = new Map();
   for (const storyteller of storytellers) {
     if (!Number.isInteger(storyteller?.keySlotIndex)) continue;
@@ -4110,7 +4236,11 @@ function buildTypewriterStorytellerSlots(storytellers = []) {
     }
   }
   return TYPEWRITER_STORYTELLER_KEY_SLOTS.map((slotDefinition) =>
-    buildTypewriterStorytellerSlotState(slotDefinition, storytellerBySlot.get(slotDefinition.slotIndex) || null)
+    buildTypewriterStorytellerSlotState(
+      slotDefinition,
+      storytellerBySlot.get(slotDefinition.slotIndex) || null,
+      currentFragmentLength
+    )
   );
 }
 
@@ -4447,6 +4577,7 @@ function buildStorytellerListItem(storyteller) {
 }
 
 function buildTypewriterSessionStorytellerItem(storyteller) {
+  const pressState = buildTypewriterStorytellerPressState(storyteller, 0);
   return {
     ...buildStorytellerListItem(storyteller),
     introducedInTypewriter: Boolean(storyteller?.introducedInTypewriter),
@@ -4454,6 +4585,10 @@ function buildTypewriterSessionStorytellerItem(storyteller) {
       ? Number(storyteller.typewriterInterventionsCount)
       : 0,
     lastTypewriterInterventionAt: storyteller?.lastTypewriterInterventionAt || null,
+    lastTypewriterPressAt: pressState.lastTypewriterPressAt,
+    lastPressFragmentLength: pressState.lastPressFragmentLength,
+    requiredFragmentLength: pressState.requiredFragmentLength,
+    typewriterInterventionInFlight: pressState.typewriterInterventionInFlight,
     symbol: firstDefinedString(storyteller?.typewriter_key?.symbol),
     description: firstDefinedString(storyteller?.typewriter_key?.description),
     createdAt: storyteller?.createdAt || null,
@@ -4474,14 +4609,16 @@ async function buildTypewriterSessionInspectPayload(sessionId, playerId = '') {
   const storytellers = await listTypewriterSlotStorytellers(sessionId, playerId);
   const typewriterKeys = (await listTypewriterKeysForSession(sessionId, playerId)).map(buildTypewriterKeyState);
   const entities = (await listTypewriterStoryEntities(sessionId, playerId)).map(buildTypewriterSessionEntityItem);
-  const slots = buildTypewriterStorytellerSlots(storytellers);
   const narrativeText = firstDefinedString(fragmentDoc?.fragment);
+  const narrativeLength = narrativeText.length;
+  const slots = buildTypewriterStorytellerSlots(storytellers, narrativeLength);
 
   return {
     sessionId,
     playerId,
     fragment: narrativeText,
     initialFragment: firstDefinedString(fragmentDoc?.initialFragment),
+    currentFragmentLength: narrativeLength,
     narrativeWordCount: countWords(narrativeText),
     slots,
     typewriterKeys,
@@ -4721,6 +4858,38 @@ async function findTypewriterStorytellerForIntervention(sessionId, storytellerId
     );
   }
   return null;
+}
+
+async function acquireTypewriterStorytellerInterventionLock(storytellerId, currentFragmentLength) {
+  if (!storytellerId) return null;
+  const safeFragmentLength = normalizeTypewriterFragmentLength(currentFragmentLength);
+  const maxEligibleBaseline = safeFragmentLength / STORYTELLER_REPRESS_GROWTH_FACTOR;
+  return Storyteller.findOneAndUpdate(
+    {
+      _id: storytellerId,
+      $and: [
+        {
+          $or: [
+            { typewriterInterventionInFlight: { $exists: false } },
+            { typewriterInterventionInFlight: false }
+          ]
+        },
+        {
+          $or: [
+            { lastTypewriterPressFragmentLength: { $exists: false } },
+            { lastTypewriterPressFragmentLength: null },
+            { lastTypewriterPressFragmentLength: { $lt: maxEligibleBaseline } }
+          ]
+        }
+      ]
+    },
+    {
+      $set: {
+        typewriterInterventionInFlight: true
+      }
+    },
+    { new: true }
+  );
 }
 
 async function resolveFragmentText(body) {
@@ -7884,7 +8053,7 @@ app.post('/api/worlds', async (req, res) => {
       });
     }
     console.error('Error in /api/worlds:', error);
-    return res.status(500).json({ message: 'Server error during world creation.' });
+    return sendLlmAwareError(res, error, 'Server error during world creation.');
   }
 });
 
@@ -8019,7 +8188,7 @@ async function handleWorldElements(req, res, type) {
       });
     }
     console.error(`Error in /api/worlds/:worldId/${type}:`, error);
-    return res.status(500).json({ message: 'Server error during world element generation.' });
+    return sendLlmAwareError(res, error, 'Server error during world element generation.');
   }
 }
 
@@ -8219,6 +8388,8 @@ app.post('/api/textToEntity', async (req, res) => {
       includeCards,
       includeFront,
       includeBack,
+      mockImage,
+      mockTextures,
       debug,
       mock,
       mock_api_calls,
@@ -8244,7 +8415,10 @@ app.post('/api/textToEntity', async (req, res) => {
       normalizeEntityCount(entityPipeline.entityCount, 8)
     );
     const shouldMockEntities = resolveMockMode(body, entityPipeline.useMock);
-    const shouldMockTextures = resolveMockMode(body, texturePipeline.useMock);
+    const shouldMockTextures = resolveImageMockMode(body, texturePipeline.useMock, [
+      'mockImage',
+      'mockTextures'
+    ]);
     const options = {
       sessionId,
       playerId: resolvedPlayerId,
@@ -8314,6 +8488,8 @@ app.post('/api/textToStoryteller', async (req, res) => {
       count,
       numberOfStorytellers,
       generateKeyImages,
+      mockImage,
+      mockIllustrations,
       debug,
       mock,
       mock_api_calls,
@@ -8338,7 +8514,10 @@ app.post('/api/textToStoryteller', async (req, res) => {
     const storytellerKeyPromptDoc = await getLatestPromptTemplate('storyteller_key_creation');
     const illustrationPromptDoc = await getLatestPromptTemplate('illustration_creation');
     const shouldMockStorytellers = resolveMockMode(body, storytellerPipeline.useMock);
-    const shouldMockIllustrations = resolveMockMode(body, illustrationPipeline.useMock);
+    const shouldMockIllustrations = resolveImageMockMode(body, illustrationPipeline.useMock, [
+      'mockImage',
+      'mockIllustrations'
+    ]);
     let storytellerDataArray;
 
     if (shouldMockStorytellers) {
@@ -8519,7 +8698,7 @@ app.post('/api/textToStoryteller', async (req, res) => {
       });
     }
     console.error('Error in /api/textToStoryteller:', err);
-    res.status(500).json({ message: 'Server error during storyteller generation.' });
+    return sendLlmAwareError(res, err, 'Server error during storyteller generation.');
   }
 });
 
@@ -8730,7 +8909,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       });
     }
     console.error('Error in /api/sendStorytellerToEntity:', err);
-    return res.status(500).json({ message: 'Server error during storyteller mission.' });
+    return sendLlmAwareError(res, err, 'Server error during storyteller mission.');
   }
 });
 
