@@ -103,6 +103,43 @@ const ArenaSchema = new mongoose.Schema({
 
 export const Arena = mongoose.model('Arena', ArenaSchema);
 
+const SeerReadingSchema = new mongoose.Schema({
+  readingId: { type: String, required: true, index: true, unique: true },
+  sessionId: { type: String, required: true, index: true },
+  playerId: { type: String, index: true },
+  status: { type: String, enum: ['active', 'closed'], default: 'active', index: true },
+  beat: {
+    type: String,
+    enum: [
+      'invocation',
+      'triad_revealed',
+      'memory_in_focus',
+      'seer_question_pending',
+      'player_answer_received',
+      'memory_deepening',
+      'cross_memory_synthesis',
+      'apparition_offer',
+      'reading_closed'
+    ],
+    default: 'invocation'
+  },
+  fragment: { type: mongoose.Schema.Types.Mixed, default: {} },
+  seer: { type: mongoose.Schema.Types.Mixed, default: {} },
+  memories: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  entities: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  apparitions: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  spread: { type: mongoose.Schema.Types.Mixed, default: {} },
+  transcript: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  unresolvedThreads: { type: [String], default: [] },
+  worldbuildingOutputs: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  version: { type: Number, default: 1 }
+}, { timestamps: true });
+
+SeerReadingSchema.index({ sessionId: 1, playerId: 1, createdAt: -1 });
+
+export const SeerReading = mongoose.model('SeerReading', SeerReadingSchema);
+
 const WorldSchema = new mongoose.Schema({
   worldId: { type: String, required: true, index: true, unique: true },
   sessionId: { type: String, required: true, index: true },

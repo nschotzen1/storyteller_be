@@ -18,6 +18,7 @@ import {
   Storyteller,
   SessionPlayer,
   Arena,
+  SeerReading,
   World,
   WorldElement,
   NarrativeFragment,
@@ -25,6 +26,7 @@ import {
   ImmersiveRpgSceneSession,
   ImmersiveRpgCharacterSheet
 } from './models/models.js';
+import { FragmentMemory } from './models/memory_models.js';
 import {
   createStoryTellerKey,
   createStorytellerIllustration
@@ -4903,6 +4905,240 @@ async function resolveFragmentText(body) {
   return getTypewriterSessionFragment(body.sessionId);
 }
 
+const SEER_READING_FIELD_TIERS = {
+  0: [],
+  1: ['short_title', 'whose_eyes', 'time_of_day', 'location', 'emotional_sentiment'],
+  2: ['what_is_being_watched', 'entities_in_memory', 'temporal_relation', 'related_through_what'],
+  3: ['action_name', 'dramatic_definition', 'actual_result', 'organizational_affiliation'],
+  4: ['miseenscene'],
+  5: ['consequences', 'relevant_rolls', 'estimated_action_length', 'action_level']
+};
+
+const SEER_MEMORY_STRENGTH_PROFILES = {
+  vivid: { revealTier: 2, clarity: 0.45 },
+  durable: { revealTier: 1, clarity: 0.3 },
+  faint: { revealTier: 0, clarity: 0.15 }
+};
+
+const SEER_TRIAD_POSITIONS = {
+  before: { x: -1, y: -0.16 },
+  during: { x: 0, y: -0.9 },
+  after: { x: 1, y: -0.16 }
+};
+
+function normalizeSeerMemoryStrength(value) {
+  const normalized = firstDefinedString(value).toLowerCase();
+  if (normalized === 'vivid' || normalized === 'durable' || normalized === 'faint') {
+    return normalized;
+  }
+  return 'durable';
+}
+
+function deriveSeerTemporalSlot(memory = {}) {
+  const temporalText = firstDefinedString(memory.temporal_relation, memory.time_within_action, memory.memory_distance).toLowerCase();
+  if (
+    /\b(minutes earlier|earlier|before|prior|previous|preceding|just before)\b/.test(temporalText)
+  ) {
+    return 'before';
+  }
+  if (
+    /\b(simultaneous|same moment|the instant|at the moment|during|while|simultaneous with fragment)\b/.test(temporalText)
+  ) {
+    return 'during';
+  }
+  if (
+    /\b(after|later|hours later|days later|that night|following|afterward|afterwards)\b/.test(temporalText)
+  ) {
+    return 'after';
+  }
+  return 'during';
+}
+
+function getSeerVisibleFieldsForTier(revealTier = 0) {
+  const fields = [];
+  for (let tier = 1; tier <= revealTier; tier += 1) {
+    const tierFields = SEER_READING_FIELD_TIERS[tier] || [];
+    fields.push(...tierFields);
+  }
+  return [...new Set(fields)];
+}
+
+function selectTriadMemories(memories = []) {
+  const buckets = {
+    before: [],
+    during: [],
+    after: []
+  };
+
+  memories.forEach((memory) => {
+    buckets[deriveSeerTemporalSlot(memory)].push(memory);
+  });
+
+  const selected = [];
+  const usedIds = new Set();
+
+  ['before', 'during', 'after'].forEach((slot) => {
+    const memory = buckets[slot][0];
+    if (!memory) return;
+    selected.push({ slot, memory });
+    usedIds.add(String(memory._id || memory.id || ''));
+  });
+
+  if (selected.length < 3) {
+    memories.forEach((memory) => {
+      if (selected.length >= 3) return;
+      const key = String(memory._id || memory.id || '');
+      if (usedIds.has(key)) return;
+      const nextSlot = ['before', 'during', 'after'].find((slot) => !selected.some((entry) => entry.slot === slot)) || deriveSeerTemporalSlot(memory);
+      selected.push({ slot: nextSlot, memory });
+      usedIds.add(key);
+    });
+  }
+
+  return selected.slice(0, 3);
+}
+
+async function resolveSeerReadingMemories(sessionId, playerId = '', batchId = '') {
+  const baseQuery = applyOptionalPlayerId({ sessionId }, playerId);
+  const safeBatchId = firstDefinedString(batchId);
+  if (safeBatchId) {
+    return FragmentMemory.find({ ...baseQuery, batchId: safeBatchId }).sort({ createdAt: 1 }).lean();
+  }
+
+  const latestMemory = await FragmentMemory.findOne(baseQuery).sort({ createdAt: -1 }).lean();
+  if (!latestMemory) {
+    return [];
+  }
+
+  if (firstDefinedString(latestMemory.batchId)) {
+    return FragmentMemory.find({ ...baseQuery, batchId: latestMemory.batchId }).sort({ createdAt: 1 }).lean();
+  }
+
+  return FragmentMemory.find(baseQuery).sort({ createdAt: -1 }).limit(3).lean();
+}
+
+function chooseInitialSeerFocusMemoryId(memories = []) {
+  const duringMemory = memories.find((memory) => memory.temporalSlot === 'during');
+  if (duringMemory) return duringMemory.id;
+  const vividMemory = memories.find((memory) => memory.strength === 'vivid');
+  if (vividMemory) return vividMemory.id;
+  return memories[0]?.id || '';
+}
+
+function buildSeerReadingMemory(memory = {}, temporalSlot = 'during', isFocused = false) {
+  const strength = normalizeSeerMemoryStrength(memory.memory_strength);
+  const profile = SEER_MEMORY_STRENGTH_PROFILES[strength] || SEER_MEMORY_STRENGTH_PROFILES.durable;
+  const id = String(memory._id || memory.id || randomUUID());
+  return {
+    id,
+    sourceMemoryId: id,
+    temporalSlot,
+    strength,
+    clarity: profile.clarity,
+    revealTier: profile.revealTier,
+    focusState: isFocused ? 'active' : 'idle',
+    witness: firstDefinedString(memory.whose_eyes),
+    sentiment: firstDefinedString(memory.emotional_sentiment),
+    location: firstDefinedString(memory.location),
+    timeOfDay: firstDefinedString(memory.time_of_day),
+    visibleFields: getSeerVisibleFieldsForTier(profile.revealTier),
+    candidateEntityIds: [],
+    confirmedEntityIds: [],
+    card: {
+      title: firstDefinedString(memory.short_title, memory.dramatic_definition, memory.action_name, 'Unknown glimpse'),
+      subtitle: firstDefinedString(memory.temporal_relation),
+      artUrl: firstDefinedString(memory.front_image_url, memory.back_image_url, memory.front?.imageUrl, memory.back?.imageUrl)
+    },
+    raw: memory
+  };
+}
+
+function buildSeerReadingEntity(entity = {}) {
+  return {
+    ...buildTypewriterSessionEntityItem(entity),
+    kind: 'existing',
+    status: 'present',
+    provenance: 'session'
+  };
+}
+
+function buildSeerReadingApparition(storyteller = {}) {
+  const item = buildStorytellerListItem(storyteller);
+  return {
+    id: String(item.id || ''),
+    name: firstDefinedString(item.name, 'Unnamed apparition'),
+    status: firstDefinedString(item.status, 'active'),
+    iconUrl: firstDefinedString(item.iconUrl),
+    level: Number.isFinite(Number(item.level)) ? Number(item.level) : null,
+    state: 'available'
+  };
+}
+
+function buildSeerReadingSpread(fragmentText, memories = [], focusMemoryId = '') {
+  const fragmentNodeId = 'fragment-anchor';
+  const nodes = [
+    {
+      id: fragmentNodeId,
+      kind: 'fragment',
+      label: 'Fragment',
+      excerpt: firstDefinedString(fragmentText).slice(0, 220),
+      x: 0,
+      y: 0
+    },
+    ...memories.map((memory) => ({
+      id: memory.id,
+      kind: 'memory',
+      label: memory.card?.title || 'Unknown glimpse',
+      temporalSlot: memory.temporalSlot,
+      strength: memory.strength,
+      clarity: memory.clarity,
+      x: SEER_TRIAD_POSITIONS[memory.temporalSlot]?.x ?? 0,
+      y: SEER_TRIAD_POSITIONS[memory.temporalSlot]?.y ?? 0
+    }))
+  ];
+
+  const edges = memories.map((memory) => ({
+    id: `edge-${fragmentNodeId}-${memory.id}`,
+    fromId: fragmentNodeId,
+    toId: memory.id,
+    status: 'present',
+    strength: memory.clarity,
+    distance: memory.temporalSlot === 'during' ? 0.45 : 0.72,
+    rationale: `Glimpse aligned to ${memory.temporalSlot}.`
+  }));
+
+  return {
+    layoutMode: 'seer_triad',
+    focusMemoryId,
+    nodes,
+    edges
+  };
+}
+
+function normalizeSeerReadingPayload(doc) {
+  const source = doc && typeof doc.toObject === 'function' ? doc.toObject() : (doc || {});
+  return {
+    readingId: firstDefinedString(source.readingId),
+    sessionId: firstDefinedString(source.sessionId),
+    playerId: firstDefinedString(source.playerId),
+    status: firstDefinedString(source.status),
+    beat: firstDefinedString(source.beat),
+    fragment: source.fragment || {},
+    seer: source.seer || {},
+    memories: Array.isArray(source.memories) ? source.memories : [],
+    entities: Array.isArray(source.entities) ? source.entities : [],
+    apparitions: Array.isArray(source.apparitions) ? source.apparitions : [],
+    spread: source.spread || {},
+    transcript: Array.isArray(source.transcript) ? source.transcript : [],
+    unresolvedThreads: Array.isArray(source.unresolvedThreads) ? source.unresolvedThreads : [],
+    worldbuildingOutputs: Array.isArray(source.worldbuildingOutputs) ? source.worldbuildingOutputs : [],
+    metadata: source.metadata || {},
+    version: Number.isFinite(Number(source.version)) ? Number(source.version) : 1,
+    createdAt: source.createdAt || null,
+    updatedAt: source.updatedAt || null
+  };
+}
+
 function resolveSchemaErrorMessage(error, fallback) {
   if (!error?.details || !Array.isArray(error.details) || error.details.length === 0) {
     return fallback;
@@ -7887,6 +8123,164 @@ app.post('/api/quest/advance', async (req, res) => {
 app.use('/api', memoriesRouter);
 
 // --- Routes ---
+
+app.post('/api/seer/readings', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = firstDefinedString(body.sessionId);
+    const resolvedPlayerId = normalizeOptionalPlayerId(body.playerId);
+    const readingId = firstDefinedString(body.readingId) || randomUUID();
+    const batchId = firstDefinedString(body.batchId);
+    const fragmentText = await resolveFragmentText(body);
+
+    if (!sessionId || !fragmentText) {
+      return res.status(400).json({ message: 'Missing required parameters: sessionId or text.' });
+    }
+
+    const triadSourceMemories = selectTriadMemories(await resolveSeerReadingMemories(sessionId, resolvedPlayerId, batchId));
+    if (triadSourceMemories.length < 3) {
+      return res.status(409).json({
+        message: 'Seer readings require at least 3 memories in the selected session or batch.'
+      });
+    }
+
+    const triadMemories = triadSourceMemories.map(({ slot, memory }) => buildSeerReadingMemory(memory, slot, false));
+    const focusMemoryId = chooseInitialSeerFocusMemoryId(triadMemories);
+    const hydratedMemories = triadMemories.map((memory) => ({
+      ...memory,
+      focusState: memory.id === focusMemoryId ? 'active' : 'idle'
+    }));
+
+    const seedEntities = (await NarrativeEntity.find(
+      applyOptionalPlayerId({ session_id: sessionId }, resolvedPlayerId)
+    )
+      .sort({ createdAt: -1 })
+      .limit(12)
+      .lean())
+      .map(buildSeerReadingEntity);
+
+    const apparitions = (await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId))
+      .map(buildSeerReadingApparition);
+
+    const openingMessage = 'The thread tightens. Three glimpses gather around the fragment. One presses nearest the wound in time.';
+    const transcript = [
+      {
+        id: randomUUID(),
+        role: 'seer',
+        kind: 'invocation',
+        content: openingMessage,
+        createdAt: new Date().toISOString()
+      }
+    ];
+
+    const payload = {
+      readingId,
+      sessionId,
+      playerId: resolvedPlayerId,
+      status: 'active',
+      beat: 'triad_revealed',
+      fragment: {
+        text: fragmentText,
+        anchorLabel: 'Fragment'
+      },
+      seer: {
+        personaId: 'default-seer',
+        voice: 'ritual witness'
+      },
+      memories: hydratedMemories,
+      entities: seedEntities,
+      apparitions,
+      spread: buildSeerReadingSpread(fragmentText, hydratedMemories, focusMemoryId),
+      transcript,
+      unresolvedThreads: [],
+      worldbuildingOutputs: [],
+      metadata: {
+        specVersion: 'seer-reading-v1-alpha',
+        batchId,
+        observableMilestone: 'M1'
+      }
+    };
+
+    const readingDoc = await SeerReading.findOneAndUpdate(
+      applyOptionalPlayerId({ readingId }, resolvedPlayerId),
+      payload,
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    return res.status(201).json(normalizeSeerReadingPayload(readingDoc));
+  } catch (error) {
+    console.error('Error in /api/seer/readings:', error);
+    return res.status(500).json({ message: 'Server error while creating seer reading.' });
+  }
+});
+
+app.get('/api/seer/readings/:readingId', async (req, res) => {
+  try {
+    const readingId = firstDefinedString(req.params?.readingId);
+    const resolvedPlayerId = normalizeOptionalPlayerId(req.query?.playerId);
+
+    if (!readingId) {
+      return res.status(400).json({ message: 'Missing required parameter: readingId.' });
+    }
+
+    const reading = await SeerReading.findOne(
+      applyOptionalPlayerId({ readingId }, resolvedPlayerId)
+    ).lean();
+
+    if (!reading) {
+      return res.status(404).json({ message: 'Seer reading not found.' });
+    }
+
+    return res.status(200).json(normalizeSeerReadingPayload(reading));
+  } catch (error) {
+    console.error('Error in /api/seer/readings/:readingId:', error);
+    return res.status(500).json({ message: 'Server error while loading seer reading.' });
+  }
+});
+
+app.post('/api/seer/readings/:readingId/close', async (req, res) => {
+  try {
+    const readingId = firstDefinedString(req.params?.readingId);
+    const resolvedPlayerId = normalizeOptionalPlayerId(req.body?.playerId);
+    const closeReason = firstDefinedString(req.body?.reason, 'closed_by_user');
+
+    if (!readingId) {
+      return res.status(400).json({ message: 'Missing required parameter: readingId.' });
+    }
+
+    const reading = await SeerReading.findOneAndUpdate(
+      applyOptionalPlayerId({ readingId }, resolvedPlayerId),
+      {
+        $set: {
+          status: 'closed',
+          beat: 'reading_closed',
+          'metadata.closedReason': closeReason,
+          'metadata.closedAt': new Date().toISOString()
+        },
+        $push: {
+          transcript: {
+            id: randomUUID(),
+            role: 'system',
+            kind: 'closure',
+            content: `Reading closed: ${closeReason}.`,
+            createdAt: new Date().toISOString()
+          }
+        },
+        $inc: { version: 1 }
+      },
+      { new: true }
+    );
+
+    if (!reading) {
+      return res.status(404).json({ message: 'Seer reading not found.' });
+    }
+
+    return res.status(200).json(normalizeSeerReadingPayload(reading));
+  } catch (error) {
+    console.error('Error in /api/seer/readings/:readingId/close:', error);
+    return res.status(500).json({ message: 'Server error while closing seer reading.' });
+  }
+});
 
 // Session Players
 app.get('/api/sessions/:sessionId/players', async (req, res) => {
