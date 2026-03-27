@@ -256,6 +256,83 @@ const IMMERSIVE_RPG_TURN_RESPONSE_SCHEMA = {
   additionalProperties: true
 };
 
+const SEER_ORCHESTRATOR_TOOL_CALL_SCHEMA = {
+  type: 'object',
+  required: ['tool_id', 'input'],
+  properties: {
+    tool_id: { type: 'string', minLength: 1 },
+    reason: { type: 'string' },
+    input: {
+      type: 'object',
+      additionalProperties: true
+    }
+  },
+  additionalProperties: true
+};
+
+const SEER_ORCHESTRATOR_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['spoken_message', 'transition_type', 'beat', 'tool_calls', 'ui', 'state_patch'],
+  properties: {
+    spoken_message: { type: 'string', minLength: 1 },
+    transition_type: {
+      type: 'string',
+      enum: [
+        'reveal',
+        'focus_shift',
+        'relation_proposed',
+        'relation_strengthened',
+        'relation_rejected',
+        'new_entity_created',
+        'new_entity_suggested',
+        'synthesis',
+        'dead_end',
+        'apparition_offer',
+        'closure'
+      ]
+    },
+    beat: { type: 'string', minLength: 1 },
+    tool_calls: {
+      type: 'array',
+      items: SEER_ORCHESTRATOR_TOOL_CALL_SCHEMA
+    },
+    ui: {
+      type: 'object',
+      properties: {
+        focus_memory_id: { type: 'string' },
+        reveal_fields: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        suggested_entity_labels: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        composer_mode: { type: 'string' },
+        suggestions: {
+          type: 'array',
+          items: { type: 'string' }
+        }
+      },
+      additionalProperties: true
+    },
+    state_patch: {
+      type: 'object',
+      properties: {
+        clarity_delta: { type: 'number' },
+        reveal_tier_delta: { type: 'number' },
+        focus_memory_id: { type: 'string' },
+        unresolved_threads: {
+          type: 'array',
+          items: { type: 'string' }
+        }
+      },
+      additionalProperties: true
+    }
+  },
+  additionalProperties: true
+};
+
 const ROUTE_KEY_ALIASES = Object.freeze({
   immersive_rpg_turn: Object.freeze(['immersive_rpg_chat'])
 });
@@ -748,6 +825,90 @@ Rules:
       'GM output must stay in-world and must not mention prompts, APIs, JSON, or tooling.'
     ],
     responseSchema: IMMERSIVE_RPG_TURN_RESPONSE_SCHEMA
+  },
+  seer_reading_orchestrator: {
+    routeKey: 'seer_reading_orchestrator',
+    routePath: '/api/seer/readings/:readingId/turn',
+    method: 'POST',
+    description: 'Reserved tool-using orchestrator contract for Seer Reading turns.',
+    promptMode: 'manual',
+    promptTemplate: `You are the Seer Reading Orchestrator.
+
+You are not merely narrating. You are deciding one ritual move for a single turn.
+
+You receive:
+- the current reading state
+- the focused memory
+- the player reply
+- the currently available tools
+
+Your job:
+- make exactly one primary consequence happen this turn
+- keep the seer voice specific, ritual, and world-facing
+- prefer precision over verbosity
+- preserve ambiguity when it is dramatically stronger than certainty
+- use only tools that are actually available
+
+Potential tools may include:
+- focus_memory
+- reveal_memory_tier
+- create_entity
+- propose_relation
+- invoke_storyteller
+- create_world_truth
+- close_reading
+- roll_dice
+
+Rules:
+- one turn, one dominant consequence
+- do not reveal everything at once
+- if you create a new entity, make it reusable in later worldbuilding
+- if no tool should fire, return an intentional dead_end with a sharper spoken question
+
+Return JSON only in the configured schema.`,
+    promptCore: '',
+    fieldDocs: {
+      spoken_message: 'What the seer says aloud to the player for this turn.',
+      transition_type: 'The single dominant ritual consequence.',
+      tool_calls: 'Explicit tool invocations the runtime should execute.',
+      ui: 'Minimal UI directives for focus, reveal, and composer hints.',
+      state_patch: 'Small deterministic state changes implied by the turn.'
+    },
+    examplePayload: {
+      spoken_message: 'The rope is not merely seen. It is recognized. The glimpse leans toward Maris Kest.',
+      transition_type: 'relation_strengthened',
+      beat: 'seer_question_pending',
+      tool_calls: [
+        {
+          tool_id: 'propose_relation',
+          reason: 'The player identified the actor behind the sign.',
+          input: {
+            memory_id: 'memory-during',
+            entity_label: 'Maris Kest',
+            rationale: 'The rope is recognized as hers.'
+          }
+        }
+      ],
+      ui: {
+        focus_memory_id: 'memory-during',
+        suggested_entity_labels: ['Maris Kest', 'braided rope'],
+        composer_mode: 'tagged_inference',
+        suggestions: ['recognition', 'warning', 'concealment']
+      },
+      state_patch: {
+        clarity_delta: 0.12,
+        reveal_tier_delta: 0,
+        focus_memory_id: 'memory-during',
+        unresolved_threads: []
+      }
+    },
+    outputRules: [
+      'Return JSON only.',
+      'Choose exactly one dominant transition_type.',
+      'tool_calls must only reference tools that the runtime made available.',
+      'spoken_message should sound like an authored seer, not a generic assistant.'
+    ],
+    responseSchema: SEER_ORCHESTRATOR_RESPONSE_SCHEMA
   },
   quest_advance: {
     routeKey: 'quest_advance',

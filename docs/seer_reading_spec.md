@@ -1,5 +1,9 @@
 # Seer Reading Spec
 
+## Companion Docs
+
+- `storyteller_be/docs/seer_reading_onboarding.md` for design principles, architecture boundaries, and developer/designer onboarding
+
 ## Purpose
 
 `Seer Reading` reframes Memory Spread as a single-screen ritual:

@@ -77,6 +77,12 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/immersive-rpg/chat GM orchestration prompt',
     settingsKey: 'immersive_rpg_gm'
   },
+  seer_reading_orchestrator: {
+    key: 'seer_reading_orchestrator',
+    label: 'Seer Reading Orchestrator',
+    description: '/api/seer/readings/:readingId/turn orchestration prompt',
+    settingsKey: 'seer_reading_orchestrator'
+  },
   quest_generation: {
     key: 'quest_generation',
     label: 'Quest generation',

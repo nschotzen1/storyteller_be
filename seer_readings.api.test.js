@@ -181,6 +181,133 @@ describe('Seer reading API skeleton', () => {
     expect(response.body.readingId).toBe('reading-2');
     expect(response.body.fragment.text).toContain('warning');
     expect(response.body.spread.focusMemoryId).toBe('m1');
+    expect(response.body.composer.prompt).toBeTruthy();
+  });
+
+  it('advances a reading turn by revealing the next memory tier', async () => {
+    const sessionId = 'seer-session-turn-1';
+    const playerId = 'seer-player-turn-1';
+    const batchId = 'seer-batch-turn-1';
+
+    await FragmentMemory.insertMany([
+      buildMemoryDoc({
+        sessionId,
+        playerId,
+        batchId,
+        shortTitle: 'River Haul',
+        temporalRelation: 'minutes earlier than the fragment',
+        memoryStrength: 'durable'
+      }),
+      buildMemoryDoc({
+        sessionId,
+        playerId,
+        batchId,
+        shortTitle: 'Rope on Cairn',
+        temporalRelation: 'simultaneous with fragment',
+        memoryStrength: 'vivid'
+      }),
+      buildMemoryDoc({
+        sessionId,
+        playerId,
+        batchId,
+        shortTitle: 'Ash Mark Signal',
+        temporalRelation: 'hours later the same night',
+        memoryStrength: 'faint'
+      })
+    ]);
+
+    const created = await request(app)
+      .post('/api/seer/readings')
+      .send({
+        sessionId,
+        playerId,
+        text: 'It was almost night as they finally reached the plateau.',
+        batchId
+      })
+      .expect(201);
+
+    const focusedBefore = created.body.memories.find((memory) => memory.focusState === 'active');
+    expect(focusedBefore.revealTier).toBe(2);
+
+    const response = await request(app)
+      .post(`/api/seer/readings/${created.body.readingId}/turn`)
+      .send({
+        playerId,
+        message: 'This feels like recognition sharpened by danger.'
+      })
+      .expect(200);
+
+    const focusedAfter = response.body.memories.find((memory) => memory.focusState === 'active');
+    expect(focusedAfter.revealTier).toBe(3);
+    expect(focusedAfter.clarity).toBeGreaterThan(focusedBefore.clarity);
+    expect(response.body.lastTurn.transitionType).toBe('reveal');
+    expect(response.body.lastTurn.runtimeId).toBe('seer-agent-runtime-v1');
+    expect(Array.isArray(response.body.lastTurn.toolCalls)).toBe(true);
+    expect(response.body.orchestrator?.runtimeId).toBe('seer-agent-runtime-v1');
+    expect(response.body.transcript[response.body.transcript.length - 2].role).toBe('player');
+    expect(response.body.transcript[response.body.transcript.length - 1].role).toBe('seer');
+  });
+
+  it('creates a memory-to-entity relation after repeated attunement turns', async () => {
+    const sessionId = 'seer-session-turn-2';
+    const playerId = 'seer-player-turn-2';
+    const batchId = 'seer-batch-turn-2';
+
+    await FragmentMemory.insertMany([
+      buildMemoryDoc({
+        sessionId,
+        playerId,
+        batchId,
+        shortTitle: 'River Haul',
+        temporalRelation: 'minutes earlier than the fragment',
+        memoryStrength: 'durable'
+      }),
+      buildMemoryDoc({
+        sessionId,
+        playerId,
+        batchId,
+        shortTitle: 'Rope on Cairn',
+        temporalRelation: 'simultaneous with fragment',
+        memoryStrength: 'vivid'
+      }),
+      buildMemoryDoc({
+        sessionId,
+        playerId,
+        batchId,
+        shortTitle: 'Ash Mark Signal',
+        temporalRelation: 'hours later the same night',
+        memoryStrength: 'faint'
+      })
+    ]);
+
+    const created = await request(app)
+      .post('/api/seer/readings')
+      .send({
+        sessionId,
+        playerId,
+        text: 'It was almost night as they finally reached the plateau.',
+        batchId
+      })
+      .expect(201);
+
+    await request(app)
+      .post(`/api/seer/readings/${created.body.readingId}/turn`)
+      .send({ playerId, message: 'The vision sharpens around the act itself.' })
+      .expect(200);
+
+    const response = await request(app)
+      .post(`/api/seer/readings/${created.body.readingId}/turn`)
+      .send({ playerId, message: 'It is Ashward Marrow reading the sign in the rope.' })
+      .expect(200);
+
+    const focusedAfter = response.body.memories.find((memory) => memory.focusState === 'active');
+    expect(response.body.lastTurn.transitionType).toMatch(/relation|entity/);
+    expect(response.body.entities.length).toBeGreaterThan(0);
+    expect(Array.isArray(focusedAfter.confirmedEntityIds)).toBe(true);
+    expect(focusedAfter.confirmedEntityIds.length).toBeGreaterThan(0);
+    expect(
+      response.body.spread.edges.some((edge) => edge.fromId === focusedAfter.id && focusedAfter.confirmedEntityIds.includes(edge.toId))
+    ).toBe(true);
   });
 
   it('closes a seer reading and persists closure state', async () => {

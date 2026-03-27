@@ -339,6 +339,11 @@ function buildImmersiveRpgGmPromptTemplate() {
   return getDefaultImmersiveRpgGmPromptTemplate();
 }
 
+async function buildSeerReadingOrchestratorPromptTemplate() {
+  const routeConfig = await getRouteConfig('seer_reading_orchestrator');
+  return routeConfig?.promptTemplate || '';
+}
+
 async function buildStorytellerMissionPromptTemplate() {
   const routeConfig = await getRouteConfig('storyteller_mission');
   return routeConfig?.promptTemplate || '';
@@ -578,6 +583,17 @@ export async function getCurrentTypewriterPromptTemplates() {
       promptTemplate: buildImmersiveRpgGmPromptTemplate(),
       source: 'services/immersiveRpgService.js:getDefaultImmersiveRpgGmPromptTemplate',
       variables: []
+    },
+    seer_reading_orchestrator: {
+      pipelineKey: 'seer_reading_orchestrator',
+      promptTemplate: await buildSeerReadingOrchestratorPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:seer_reading_orchestrator.promptTemplate',
+      variables: [
+        'reading_state_json',
+        'focused_memory_json',
+        'player_reply',
+        'available_tools_json'
+      ]
     },
     quest_generation: {
       pipelineKey: 'quest_generation',

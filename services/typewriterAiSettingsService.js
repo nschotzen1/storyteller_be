@@ -131,6 +131,16 @@ const PIPELINE_DEFINITIONS = {
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_IMMERSIVE_RPG_PROVIDER || DEFAULT_PROVIDER
   },
+  seer_reading_orchestrator: {
+    key: 'seer_reading_orchestrator',
+    label: 'Seer Reading Orchestrator',
+    description: '/api/seer/readings/:readingId/turn',
+    modelKind: 'text',
+    defaultUseMock: true,
+    defaultModel: process.env.OPENAI_SEER_READING_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_SEER_READING_PROVIDER || DEFAULT_PROVIDER
+  },
   quest_generation: {
     key: 'quest_generation',
     label: 'Quest Generation',

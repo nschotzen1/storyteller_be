@@ -91,6 +91,7 @@ import {
   seedCurrentTypewriterPromptTemplates
 } from './services/typewriterDefaultPromptSeedService.js';
 import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefinitionsService.js';
+import { runSeerReadingTurn } from './services/seerReadingRuntimeService.js';
 import { ensureMongoConnection } from './services/mongoConnectionService.js';
 import {
   appendStoredMessengerMessage,
@@ -5115,8 +5116,244 @@ function buildSeerReadingSpread(fragmentText, memories = [], focusMemoryId = '')
   };
 }
 
+function clampSeerClarity(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.min(1, Math.max(0, numeric));
+}
+
+function createSeerTranscriptEntry(role = 'seer', content = '', extra = {}) {
+  return {
+    id: `seer-turn-${randomUUID()}`,
+    role,
+    content: firstDefinedString(content),
+    createdAt: new Date().toISOString(),
+    ...extra
+  };
+}
+
+function findSeerFocusMemory(memories = []) {
+  return memories.find((memory) => memory.focusState === 'active') || memories[0] || null;
+}
+
+function setSeerFocusedMemory(memories = [], focusMemoryId = '') {
+  return memories.map((memory) => ({
+    ...memory,
+    focusState: memory.id === focusMemoryId ? 'active' : (memory.focusState === 'resolved' ? 'resolved' : 'idle')
+  }));
+}
+
+function findNextSeerFocusMemory(memories = [], currentMemoryId = '') {
+  const unresolved = memories.filter((memory) => memory.id !== currentMemoryId && Number(memory.revealTier) < 5);
+  if (unresolved.length) {
+    const during = unresolved.find((memory) => memory.temporalSlot === 'during');
+    return during || unresolved[0];
+  }
+  return memories.find((memory) => memory.id !== currentMemoryId) || null;
+}
+
+function extractSeerEntityLabels(memory = {}) {
+  const labels = [];
+  const rawEntities = Array.isArray(memory?.raw?.entities_in_memory) ? memory.raw.entities_in_memory : [];
+  rawEntities.forEach((label) => {
+    const safeLabel = firstDefinedString(label);
+    if (safeLabel) {
+      labels.push(safeLabel);
+    }
+  });
+  const witness = firstDefinedString(memory?.witness, memory?.raw?.whose_eyes);
+  if (witness) {
+    labels.push(witness);
+  }
+  return Array.from(new Set(labels));
+}
+
+function createSeerEntityFromLabel(label = '', provenance = 'memory') {
+  return {
+    id: `seer-entity-${randomUUID()}`,
+    name: firstDefinedString(label, 'Unnamed entity'),
+    kind: 'generated_during_reading',
+    status: 'suggested',
+    provenance
+  };
+}
+
+function ensureSeerEntityForTurn(reading = {}, focusMemory = {}, requestedEntityId = '', replyText = '') {
+  const entities = Array.isArray(reading.entities) ? [...reading.entities] : [];
+  const safeRequestedEntityId = firstDefinedString(requestedEntityId);
+  const normalizedReply = firstDefinedString(replyText).toLowerCase();
+
+  let entity = safeRequestedEntityId
+    ? entities.find((candidate) => candidate.id === safeRequestedEntityId)
+    : null;
+
+  if (!entity && normalizedReply) {
+    entity = entities.find((candidate) => normalizedReply.includes(firstDefinedString(candidate.name).toLowerCase()));
+  }
+
+  const candidateLabels = extractSeerEntityLabels(focusMemory);
+
+  if (!entity && candidateLabels.length) {
+    entity = entities.find((candidate) =>
+      candidateLabels.some((label) => firstDefinedString(candidate.name).toLowerCase() === label.toLowerCase())
+    );
+  }
+
+  let created = false;
+  if (!entity && candidateLabels.length) {
+    entity = createSeerEntityFromLabel(
+      candidateLabels[0],
+      normalizedReply ? 'player_reply' : 'memory'
+    );
+    entities.push(entity);
+    created = true;
+  }
+
+  return { entities, entity, created };
+}
+
+function computeSeerEntityNodePosition(memoryNode = {}, entityCount = 0) {
+  const angle = -Math.PI / 4 + entityCount * 0.68;
+  const radius = 0.78 + entityCount * 0.12;
+  const originX = Number.isFinite(Number(memoryNode.x)) ? Number(memoryNode.x) : 0;
+  const originY = Number.isFinite(Number(memoryNode.y)) ? Number(memoryNode.y) : 0;
+  return {
+    x: originX + Math.cos(angle) * radius,
+    y: originY + Math.sin(angle) * radius
+  };
+}
+
+function upsertSeerSpreadRelation(spread = {}, focusMemory = {}, entity = {}, options = {}) {
+  const nextNodes = Array.isArray(spread.nodes) ? [...spread.nodes] : [];
+  const nextEdges = Array.isArray(spread.edges) ? [...spread.edges] : [];
+  const focusMemoryId = firstDefinedString(focusMemory.id);
+  const entityId = firstDefinedString(entity.id);
+
+  if (!focusMemoryId || !entityId) {
+    return spread;
+  }
+
+  const memoryNode = nextNodes.find((node) => node.id === focusMemoryId) || {
+    x: SEER_TRIAD_POSITIONS[focusMemory.temporalSlot]?.x ?? 0,
+    y: SEER_TRIAD_POSITIONS[focusMemory.temporalSlot]?.y ?? 0
+  };
+  const entityNode = nextNodes.find((node) => node.id === entityId);
+  if (!entityNode) {
+    const position = computeSeerEntityNodePosition(
+      memoryNode,
+      nextNodes.filter((node) => node.kind === 'entity').length
+    );
+    nextNodes.push({
+      id: entityId,
+      kind: 'entity',
+      label: firstDefinedString(entity.name, 'Unknown entity'),
+      x: position.x,
+      y: position.y
+    });
+  }
+
+  const relationEdgeId = `edge-${focusMemoryId}-${entityId}`;
+  const existingEdgeIndex = nextEdges.findIndex((edge) => edge.id === relationEdgeId);
+  const strength = clampSeerClarity(options.strength ?? 0.62);
+  const confidence = clampSeerClarity(options.confidence ?? 0.58);
+  const relationEdge = {
+    id: relationEdgeId,
+    fromId: focusMemoryId,
+    toId: entityId,
+    status: firstDefinedString(options.status, 'forming'),
+    strength,
+    confidence,
+    distance: Math.max(0.22, 0.78 - strength * 0.4),
+    rationale: firstDefinedString(options.rationale, 'The seer senses a tightening pull.')
+  };
+
+  if (existingEdgeIndex >= 0) {
+    nextEdges[existingEdgeIndex] = {
+      ...nextEdges[existingEdgeIndex],
+      ...relationEdge
+    };
+  } else {
+    nextEdges.push(relationEdge);
+  }
+
+  return {
+    ...spread,
+    focusMemoryId,
+    nodes: nextNodes,
+    edges: nextEdges
+  };
+}
+
+function buildSeerComposer(reading = {}) {
+  const focusMemory = findSeerFocusMemory(reading.memories || []);
+  if (firstDefinedString(reading.status) !== 'active') {
+    return {
+      disabled: true,
+      mode: 'closed',
+      prompt: 'The reading has closed.',
+      suggestions: [],
+      submitLabel: 'Closed'
+    };
+  }
+
+  if (!focusMemory) {
+    return {
+      disabled: true,
+      mode: 'idle',
+      prompt: 'No glimpse is in focus yet.',
+      suggestions: [],
+      submitLabel: 'Await'
+    };
+  }
+
+  const entityLabels = extractSeerEntityLabels(focusMemory).slice(0, 3);
+  const promptsByTier = {
+    0: {
+      mode: 'single_choice',
+      prompt: 'Name the first pressure in this glimpse.',
+      suggestions: [focusMemory.sentiment, 'warning', 'ritual', 'labor'].filter(Boolean)
+    },
+    1: {
+      mode: 'short_text',
+      prompt: `What detail from ${firstDefinedString(focusMemory.card?.title, 'this glimpse')} presses hardest?`,
+      suggestions: [focusMemory.witness, focusMemory.location, focusMemory.timeOfDay].filter(Boolean)
+    },
+    2: {
+      mode: 'tagged_inference',
+      prompt: 'Who or what does this glimpse lean toward?',
+      suggestions: entityLabels
+    },
+    3: {
+      mode: 'short_text',
+      prompt: 'What truth is becoming legible here?',
+      suggestions: [focusMemory.raw?.action_name, focusMemory.raw?.related_through_what].filter(Boolean)
+    },
+    4: {
+      mode: 'short_text',
+      prompt: 'What consequence follows from this glimpse?',
+      suggestions: [focusMemory.raw?.actual_result, focusMemory.raw?.consequences].filter(Boolean)
+    },
+    5: {
+      mode: 'short_text',
+      prompt: 'What thread binds this glimpse to the others?',
+      suggestions: []
+    }
+  };
+
+  const composer = promptsByTier[Number(focusMemory.revealTier)] || promptsByTier[5];
+  return {
+    disabled: false,
+    mode: composer.mode,
+    prompt: composer.prompt,
+    suggestions: composer.suggestions,
+    submitLabel: 'Answer',
+    focusMemoryId: focusMemory.id
+  };
+}
+
 function normalizeSeerReadingPayload(doc) {
   const source = doc && typeof doc.toObject === 'function' ? doc.toObject() : (doc || {});
+  const focusMemory = findSeerFocusMemory(source.memories || []);
   return {
     readingId: firstDefinedString(source.readingId),
     sessionId: firstDefinedString(source.sessionId),
@@ -5133,6 +5370,15 @@ function normalizeSeerReadingPayload(doc) {
     unresolvedThreads: Array.isArray(source.unresolvedThreads) ? source.unresolvedThreads : [],
     worldbuildingOutputs: Array.isArray(source.worldbuildingOutputs) ? source.worldbuildingOutputs : [],
     metadata: source.metadata || {},
+    focus: focusMemory
+      ? {
+        memoryId: focusMemory.id,
+        entityIds: Array.isArray(focusMemory.confirmedEntityIds) ? focusMemory.confirmedEntityIds : []
+      }
+      : null,
+    composer: buildSeerComposer(source),
+    orchestrator: source.metadata?.orchestrator || null,
+    lastTurn: source.metadata?.lastTurn || null,
     version: Number.isFinite(Number(source.version)) ? Number(source.version) : 1,
     createdAt: source.createdAt || null,
     updatedAt: source.updatedAt || null
@@ -8235,6 +8481,75 @@ app.get('/api/seer/readings/:readingId', async (req, res) => {
   } catch (error) {
     console.error('Error in /api/seer/readings/:readingId:', error);
     return res.status(500).json({ message: 'Server error while loading seer reading.' });
+  }
+});
+
+app.post('/api/seer/readings/:readingId/turn', async (req, res) => {
+  try {
+    const readingId = firstDefinedString(req.params?.readingId);
+    const body = req.body || {};
+    const resolvedPlayerId = normalizeOptionalPlayerId(body.playerId);
+    const action = firstDefinedString(body.action, 'answer');
+    const safeMessage = firstDefinedString(body.message);
+    const requestedFocusMemoryId = firstDefinedString(body.focusMemoryId);
+    const requestedEntityId = firstDefinedString(body.entityId);
+
+    if (!readingId) {
+      return res.status(400).json({ message: 'Missing required parameter: readingId.' });
+    }
+
+    const reading = await SeerReading.findOne(
+      applyOptionalPlayerId({ readingId }, resolvedPlayerId)
+    );
+
+    if (!reading) {
+      return res.status(404).json({ message: 'Seer reading not found.' });
+    }
+
+    if (firstDefinedString(reading.status) !== 'active') {
+      return res.status(409).json({ message: 'Seer reading is already closed.' });
+    }
+
+    if (action === 'focus_memory') {
+      if (!requestedFocusMemoryId || !Array.isArray(reading.memories) || !reading.memories.some((memory) => memory.id === requestedFocusMemoryId)) {
+        return res.status(400).json({ message: 'Missing or unknown focusMemoryId for focus_memory action.' });
+      }
+    } else {
+      if (!safeMessage) {
+        return res.status(400).json({ message: 'Missing required parameter: message.' });
+      }
+    }
+
+    const runtimeResult = await runSeerReadingTurn({
+      reading: typeof reading.toObject === 'function' ? reading.toObject() : reading,
+      playerId: resolvedPlayerId,
+      action,
+      message: safeMessage,
+      focusMemoryId: requestedFocusMemoryId,
+      entityId: requestedEntityId
+    });
+    const nextReadingFields = runtimeResult?.nextReadingFields || {};
+
+    reading.memories = Array.isArray(nextReadingFields.memories) ? nextReadingFields.memories : [];
+    reading.entities = Array.isArray(nextReadingFields.entities) ? nextReadingFields.entities : [];
+    reading.spread = nextReadingFields.spread || {};
+    reading.transcript = Array.isArray(nextReadingFields.transcript) ? nextReadingFields.transcript : [];
+    reading.unresolvedThreads = Array.isArray(nextReadingFields.unresolvedThreads) ? nextReadingFields.unresolvedThreads : [];
+    reading.beat = firstDefinedString(nextReadingFields.beat, reading.beat, 'seer_question_pending');
+    reading.version = Number.isFinite(Number(reading.version)) ? Number(reading.version) + 1 : 2;
+    reading.metadata = {
+      ...(reading.metadata || {}),
+      observableMilestone: 'M4',
+      lastTurn: nextReadingFields.lastTurn || null,
+      orchestrator: nextReadingFields.orchestrator || null
+    };
+
+    await reading.save();
+
+    return res.status(200).json(normalizeSeerReadingPayload(reading));
+  } catch (error) {
+    console.error('Error in /api/seer/readings/:readingId/turn:', error);
+    return res.status(500).json({ message: 'Server error while advancing seer reading.' });
   }
 });
 
