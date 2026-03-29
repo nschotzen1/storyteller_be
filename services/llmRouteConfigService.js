@@ -285,6 +285,12 @@ const SEER_ORCHESTRATOR_RESPONSE_SCHEMA = {
         'relation_rejected',
         'new_entity_created',
         'new_entity_suggested',
+        'vision_reveal',
+        'card_reveal',
+        'new_card_created',
+        'subject_chat_unlocked',
+        'card_claim_available',
+        'card_claimed',
         'synthesis',
         'dead_end',
         'apparition_offer',
@@ -300,11 +306,31 @@ const SEER_ORCHESTRATOR_RESPONSE_SCHEMA = {
       type: 'object',
       properties: {
         focus_memory_id: { type: 'string' },
+        focus_card_id: { type: 'string' },
         reveal_fields: {
           type: 'array',
           items: { type: 'string' }
         },
+        card_patches: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['card_id'],
+            properties: {
+              card_id: { type: 'string', minLength: 1 },
+              clarity_delta: { type: 'number' },
+              confidence_delta: { type: 'number' },
+              reveal_tier_delta: { type: 'number' },
+              status: { type: 'string' }
+            },
+            additionalProperties: true
+          }
+        },
         suggested_entity_labels: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        suggested_card_labels: {
           type: 'array',
           items: { type: 'string' }
         },
@@ -320,14 +346,56 @@ const SEER_ORCHESTRATOR_RESPONSE_SCHEMA = {
       type: 'object',
       properties: {
         clarity_delta: { type: 'number' },
+        vision_clarity_delta: { type: 'number' },
         reveal_tier_delta: { type: 'number' },
         focus_memory_id: { type: 'string' },
+        focus_card_id: { type: 'string' },
+        claimed_card_ids: {
+          type: 'array',
+          items: { type: 'string' }
+        },
         unresolved_threads: {
           type: 'array',
           items: { type: 'string' }
         }
       },
       additionalProperties: true
+    }
+  },
+  additionalProperties: true
+};
+
+const SEER_CARD_GENERATION_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['vision_summary', 'cards'],
+  properties: {
+    vision_summary: { type: 'string', minLength: 1 },
+    cards: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 10,
+      items: {
+        type: 'object',
+        required: ['kind', 'label', 'back_moods', 'back_motifs'],
+        properties: {
+          kind: { type: 'string', minLength: 1 },
+          label: { type: 'string', minLength: 1 },
+          summary: { type: 'string' },
+          back_genre_signal: { type: 'string' },
+          back_moods: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string' }
+          },
+          back_motifs: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string' }
+          },
+          likely_relation_hint: { type: 'string' }
+        },
+        additionalProperties: true
+      }
     }
   },
   additionalProperties: true
@@ -838,7 +906,8 @@ You are not merely narrating. You are deciding one ritual move for a single turn
 
 You receive:
 - the current reading state
-- the focused memory
+- the current vision
+- the current cards
 - the player reply
 - the currently available tools
 
@@ -850,10 +919,15 @@ Your job:
 - use only tools that are actually available
 
 Potential tools may include:
-- focus_memory
-- reveal_memory_tier
+- focus_vision
+- focus_card
+- reveal_vision_tier
+- reveal_card_tier
+- generate_cards
 - create_entity
 - propose_relation
+- unlock_subject_chat
+- claim_card
 - invoke_storyteller
 - create_world_truth
 - close_reading
@@ -861,8 +935,13 @@ Potential tools may include:
 
 Rules:
 - one turn, one dominant consequence
+- begin from fragments, feelings, and partial images
 - do not reveal everything at once
+- in Phase 1, think in terms of one blurred vision and a configurable spread of interpretive cards
+- card kinds may be dynamic; use the available kinds or generate new kinds only when the runtime explicitly allows it
 - if you create a new entity, make it reusable in later worldbuilding
+- if you sharpen a card, make the new detail feel earned by the player's interpretation
+- if the vision becomes sufficiently vivid, you may unlock a short subject chat
 - if no tool should fire, return an intentional dead_end with a sharper spoken question
 
 Return JSON only in the configured schema.`,
@@ -871,44 +950,126 @@ Return JSON only in the configured schema.`,
       spoken_message: 'What the seer says aloud to the player for this turn.',
       transition_type: 'The single dominant ritual consequence.',
       tool_calls: 'Explicit tool invocations the runtime should execute.',
-      ui: 'Minimal UI directives for focus, reveal, and composer hints.',
+      ui: 'Minimal UI directives for vision/card focus, reveal, and composer hints.',
       state_patch: 'Small deterministic state changes implied by the turn.'
     },
     examplePayload: {
-      spoken_message: 'The rope is not merely seen. It is recognized. The glimpse leans toward Maris Kest.',
-      transition_type: 'relation_strengthened',
-      beat: 'seer_question_pending',
+      spoken_message: 'The event card stirs first. I see a woman checking some small kept thing again and again, as if losing it would undo everything.',
+      transition_type: 'card_reveal',
+      beat: 'card_attunement',
       tool_calls: [
         {
-          tool_id: 'propose_relation',
-          reason: 'The player identified the actor behind the sign.',
+          tool_id: 'reveal_card_tier',
+          reason: 'The player connected the blurred motion to the event lens.',
           input: {
-            memory_id: 'memory-during',
-            entity_label: 'Maris Kest',
-            rationale: 'The rope is recognized as hers.'
+            card_id: 'card-event',
+            clarity_delta: 0.18
           }
         }
       ],
       ui: {
-        focus_memory_id: 'memory-during',
-        suggested_entity_labels: ['Maris Kest', 'braided rope'],
-        composer_mode: 'tagged_inference',
-        suggestions: ['recognition', 'warning', 'concealment']
+        focus_card_id: 'card-event',
+        suggested_card_labels: ['event', 'character'],
+        composer_mode: 'short_text',
+        suggestions: ['she is protecting something', 'it changed everything', 'she is fleeing discovery']
       },
       state_patch: {
-        clarity_delta: 0.12,
+        vision_clarity_delta: 0.1,
         reveal_tier_delta: 0,
-        focus_memory_id: 'memory-during',
-        unresolved_threads: []
+        focus_card_id: 'card-event',
+        unresolved_threads: ['What is the small item, and why does it matter so much to her?']
       }
     },
     outputRules: [
       'Return JSON only.',
       'Choose exactly one dominant transition_type.',
       'tool_calls must only reference tools that the runtime made available.',
-      'spoken_message should sound like an authored seer, not a generic assistant.'
+      'spoken_message should sound like an authored seer, not a generic assistant.',
+      'Default to fragments and suggestive pressure before explicit facts.'
     ],
     responseSchema: SEER_ORCHESTRATOR_RESPONSE_SCHEMA
+  },
+  seer_reading_card_generation: {
+    routeKey: 'seer_reading_card_generation',
+    routePath: 'internal://seer-reading/cards/generate',
+    method: 'POST',
+    description: 'Reserved structured card-generation contract for the opening Seer Reading cards.',
+    promptMode: 'manual',
+    promptTemplate: `You are generating the opening interpretive cards for a Seer Reading.
+
+You receive:
+- the fragment
+- one seeded blurred memory vision
+- known entities from the session
+- requested card count
+- optional preferred card kinds
+- optional allowed card kinds
+
+Generate {{card_count}} interpretive cards.
+
+Rules:
+- these are interpretive starting lenses, not final canon
+- the card backs should imply mood, genre, and motifs before facts
+- keep labels evocative but concrete
+- the cards should feel related to the vision without fully explaining it
+- choose card kinds creatively from the allowed list when provided
+- when preferred kinds are provided, bias toward them without becoming repetitive
+- good card kinds include character, location, event, item, faction, omen, symbol, institution, creature, feeling, authority, ritual, or practice
+- each card kind should be a short lower-case label
+
+Return JSON only in the configured schema.`,
+    promptCore: '',
+    fieldDocs: {
+      vision_summary: 'A concise summary of the blurred vision these cards surround.',
+      cards: 'A configurable array of interpretive cards whose kinds can vary by reading.'
+    },
+    examplePayload: {
+      vision_summary: 'Someone runs for a long time through thick growth, looking back as if pursuit never leaves the edge of sight.',
+      cards: [
+        {
+          kind: 'character',
+          label: 'The Runner',
+          summary: 'A person in practiced flight rather than sudden panic.',
+          back_genre_signal: 'flight through old danger',
+          back_moods: ['fear', 'urgency'],
+          back_motifs: ['breath', 'thorns', 'mud'],
+          likely_relation_hint: 'This person may be the subject of the vision.'
+        },
+        {
+          kind: 'location',
+          label: 'The Forgotten Green',
+          summary: 'A once-kept place now reclaimed by living overgrowth.',
+          back_genre_signal: 'ruin reclaimed by nature',
+          back_moods: ['decay', 'secrecy'],
+          back_motifs: ['roots', 'stone', 'mist'],
+          likely_relation_hint: 'The place seems older and grander than its present state.'
+        },
+        {
+          kind: 'event',
+          label: 'The Flight With The Kept Thing',
+          summary: 'A turning point centered on something small that must not be lost.',
+          back_genre_signal: 'escape after irreversible change',
+          back_moods: ['tension', 'devotion'],
+          back_motifs: ['pouch', 'hands', 'checking'],
+          likely_relation_hint: 'The event may explain why the running matters.'
+        },
+        {
+          kind: 'authority',
+          label: 'The Made Sovereign',
+          summary: 'Power acquired through maneuver rather than inheritance.',
+          back_genre_signal: 'political ascent through will',
+          back_moods: ['control', 'calculation'],
+          back_motifs: ['seal', 'ring', 'decree'],
+          likely_relation_hint: 'This force may bind the other cards without appearing directly in the vision.'
+        }
+      ]
+    },
+    outputRules: [
+      'Return exactly the requested number of cards.',
+      'Treat card kinds as configurable unless the caller explicitly fixes them.',
+      'Treat the output as an opening spread, not final truth.'
+    ],
+    responseSchema: SEER_CARD_GENERATION_RESPONSE_SCHEMA
   },
   quest_advance: {
     routeKey: 'quest_advance',

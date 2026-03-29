@@ -83,6 +83,12 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/seer/readings/:readingId/turn orchestration prompt',
     settingsKey: 'seer_reading_orchestrator'
   },
+  seer_reading_card_generation: {
+    key: 'seer_reading_card_generation',
+    label: 'Seer Reading Card Generation',
+    description: 'internal://seer-reading/cards/generate opening card-generation prompt',
+    settingsKey: 'seer_reading_card_generation'
+  },
   quest_generation: {
     key: 'quest_generation',
     label: 'Quest generation',

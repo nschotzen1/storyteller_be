@@ -344,6 +344,11 @@ async function buildSeerReadingOrchestratorPromptTemplate() {
   return routeConfig?.promptTemplate || '';
 }
 
+async function buildSeerReadingCardGenerationPromptTemplate() {
+  const routeConfig = await getRouteConfig('seer_reading_card_generation');
+  return routeConfig?.promptTemplate || '';
+}
+
 async function buildStorytellerMissionPromptTemplate() {
   const routeConfig = await getRouteConfig('storyteller_mission');
   return routeConfig?.promptTemplate || '';
@@ -593,6 +598,19 @@ export async function getCurrentTypewriterPromptTemplates() {
         'focused_memory_json',
         'player_reply',
         'available_tools_json'
+      ]
+    },
+    seer_reading_card_generation: {
+      pipelineKey: 'seer_reading_card_generation',
+      promptTemplate: await buildSeerReadingCardGenerationPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:seer_reading_card_generation.promptTemplate',
+      variables: [
+        'fragment_text',
+        'vision_memory_json',
+        'known_entities_json',
+        'card_count',
+        'allowed_card_kinds_json',
+        'preferred_card_kinds_json'
       ]
     },
     quest_generation: {

@@ -4,6 +4,9 @@
 
 This document is the working guide for developers and designers touching `Seer Reading`.
 
+It extends the project-wide defaults in `ENGINEERING_AND_DESIGN_PRINCIPLES.md`.
+If this document and the project charter ever disagree, tighten the implementation to the stricter rule.
+
 It should answer four questions quickly:
 
 - what the feature is trying to be
@@ -15,11 +18,15 @@ It should answer four questions quickly:
 
 `Seer Reading` is not a graph editor with mystical styling.
 
-It is a single-screen ritual where:
+It is now the default experience behind the existing `memory-spread` app route.
+The legacy spread remains available only through an explicit mode override.
+
+Phase 1 is a single-screen ritual where:
 
 - the seer perceives
 - the player character remembers
 - the player interprets
+- one blurred vision is tested through a configurable spread of interpretive cards
 - the spread records what the reading made legible
 
 The graph is not the input surface.
@@ -48,7 +55,8 @@ The backend decides:
 
 - what the seer says
 - what changed this turn
-- which memory is in focus
+- which part of the vision is in focus
+- which card is in focus
 - which fields are now visible
 - which tools were used
 
@@ -65,6 +73,7 @@ Why this scales:
 Each turn should have exactly one dominant outcome:
 
 - reveal memory detail
+- reveal a card
 - form or strengthen a relation
 - reject a relation
 - create or surface an entity
@@ -77,10 +86,14 @@ Why this scales:
 - the chat stays concise
 - QA can verify turn outcomes deterministically
 
-### 4. One Memory Hot At A Time
+### 4. One Primary Lens Hot At A Time
 
-All three glimpses remain visible, but only one is active.
-The others should be present, dimmed, and legible as context.
+Phase 1 should keep one primary interpretive lens active at a time:
+
+- the vision itself
+- one card
+
+The other cards should remain present, dimmed, and legible as context.
 
 Why this scales:
 
@@ -142,7 +155,7 @@ If the runtime can satisfy a turn from existing state, do that first.
 Examples:
 
 - reuse an existing entity
-- synthesize a local entity from memory labels
+- synthesize a local entity from vision or card labels
 - advance a reveal tier without calling an LLM
 
 Use heavier generation only when the reading truly needs new structure.
@@ -161,7 +174,8 @@ Every meaningful turn should be inspectable.
 A developer should be able to see:
 
 - current beat
-- focus memory
+- focus vision
+- focus card
 - transition type
 - available tools
 - tool calls
@@ -196,6 +210,7 @@ Why this scales:
 
 - Spec: `storyteller_be/docs/seer_reading_spec.md`
 - Runtime: `storyteller_be/services/seerReadingRuntimeService.js`
+- Card generation: `storyteller_be/services/seerReadingCardGenerationService.js`
 - Route surface: `storyteller_be/server_new.js`
 - Persistence: `storyteller_be/models/models.js`
 - Story Admin prompt/settings plumbing:
@@ -213,6 +228,7 @@ Why this scales:
 ### Tests
 
 - Backend API coverage: `storyteller_be/seer_readings.api.test.js`
+- Backend card-generation unit coverage: `storyteller_be/seerReadingCardGenerationService.test.js`
 - Frontend shell coverage: `storyteller-vite-tailwind/src/pages/SeerReadingPage.test.jsx`
 
 ## Current Runtime Shape
@@ -226,6 +242,8 @@ That means:
 - tool calls are recorded
 - the route delegates to the runtime
 - turn policy is still deterministic
+- cards are now the primary focus objects for turn prompts and reveal progression
+- memories remain supporting vision evidence and entity context
 
 This is intentional.
 The next step is not a rewrite.
@@ -270,12 +288,22 @@ The next step is swapping deterministic planning for model-driven tool selection
 Use:
 
 - `?view=memory-spread&mode=seer`
+- `?view=memory-spread`
+
+The bare `memory-spread` route should be treated as canonical.
+
+### Legacy Spread View
+
+Use:
+
+- `?view=memory-spread&mode=legacy`
 
 ### Developer Trace View
 
 Use:
 
 - `?view=memory-spread&mode=seer&memoryDebug=1`
+- `?view=memory-spread&memoryDebug=1`
 
 Expected trace information:
 
@@ -310,7 +338,7 @@ Before starting work, ask:
 - is this a ritual behavior change, a UI change, or an orchestration/tooling change?
 - should this logic live in the runtime or only in rendering?
 - does this preserve one-question-one-consequence?
-- does this keep one memory hot at a time?
+- does this keep one primary lens hot at a time?
 - does this respect reveal tiers?
 - does this improve or harm observability?
 - can this be tested without a live model call?

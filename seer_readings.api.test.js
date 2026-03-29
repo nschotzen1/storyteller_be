@@ -90,7 +90,7 @@ afterEach(async () => {
 });
 
 describe('Seer reading API skeleton', () => {
-  it('creates a persisted seer reading from a triad of memories', async () => {
+  it('creates a persisted seer reading with a seeded vision and configurable cards', async () => {
     const sessionId = 'seer-session-1';
     const playerId = 'seer-player-1';
     const batchId = 'seer-batch-1';
@@ -128,7 +128,10 @@ describe('Seer reading API skeleton', () => {
         sessionId,
         playerId,
         text: 'It was almost night as they finally reached the plateau.',
-        batchId
+        batchId,
+        cardCount: 4,
+        preferredCardKinds: ['character', 'location', 'event', 'authority'],
+        allowedCardKinds: ['character', 'location', 'event', 'item', 'authority']
       })
       .expect(201);
 
@@ -136,11 +139,17 @@ describe('Seer reading API skeleton', () => {
     expect(response.body.sessionId).toBe(sessionId);
     expect(response.body.playerId).toBe(playerId);
     expect(response.body.status).toBe('active');
-    expect(response.body.beat).toBe('triad_revealed');
+    expect(response.body.beat).toBe('cards_revealed');
+    expect(response.body.vision?.sourceMemoryId).toBeTruthy();
+    expect(response.body.cards).toHaveLength(4);
+    expect(response.body.cards.map((card) => card.kind)).toEqual(['character', 'location', 'event', 'authority']);
     expect(response.body.memories).toHaveLength(3);
     expect(response.body.transcript).toHaveLength(1);
     expect(response.body.transcript[0].role).toBe('seer');
-    expect(response.body.spread.layoutMode).toBe('seer_triad');
+    expect(response.body.spread.layoutMode).toBe('seer_vision_cards');
+    expect(response.body.spread.cardLayout).toHaveLength(4);
+    expect(response.body.metadata?.cardConfig?.generatedCount).toBe(4);
+    expect(response.body.focus?.cardId).toBeTruthy();
 
     const focused = response.body.memories.filter((memory) => memory.focusState === 'active');
     expect(focused).toHaveLength(1);
@@ -149,6 +158,7 @@ describe('Seer reading API skeleton', () => {
     const stored = await SeerReading.findOne({ readingId: response.body.readingId }).lean();
     expect(stored).toBeTruthy();
     expect(stored.memories).toHaveLength(3);
+    expect(stored.cards).toHaveLength(4);
   });
 
   it('loads an existing seer reading by readingId', async () => {
@@ -158,15 +168,19 @@ describe('Seer reading API skeleton', () => {
       sessionId,
       playerId: 'seer-player-2',
       status: 'active',
-      beat: 'triad_revealed',
+      beat: 'cards_revealed',
       fragment: { text: 'A warning hangs on the rope.', anchorLabel: 'Fragment' },
+      vision: { sourceMemoryId: 'm1', status: 'blurred', clarity: 0.2, revealTier: 1, visibleFields: [], sensoryFragments: [] },
       seer: { personaId: 'default-seer', voice: 'ritual witness' },
       memories: [
         { id: 'm1', temporalSlot: 'during', focusState: 'active', card: { title: 'Rope on Cairn' } }
       ],
+      cards: [
+        { id: 'card-1', kind: 'character', title: 'Ashward Marrow', focusState: 'active', status: 'back_only' }
+      ],
       entities: [],
       apparitions: [],
-      spread: { layoutMode: 'seer_triad', focusMemoryId: 'm1', nodes: [], edges: [] },
+      spread: { layoutMode: 'seer_vision_cards', focusMemoryId: 'm1', focusCardId: 'card-1', nodes: [], edges: [], cardLayout: [] },
       transcript: [],
       unresolvedThreads: [],
       worldbuildingOutputs: [],
@@ -184,7 +198,7 @@ describe('Seer reading API skeleton', () => {
     expect(response.body.composer.prompt).toBeTruthy();
   });
 
-  it('advances a reading turn by revealing the next memory tier', async () => {
+  it('advances a reading turn by revealing the next card tier', async () => {
     const sessionId = 'seer-session-turn-1';
     const playerId = 'seer-player-turn-1';
     const batchId = 'seer-batch-turn-1';
@@ -226,8 +240,8 @@ describe('Seer reading API skeleton', () => {
       })
       .expect(201);
 
-    const focusedBefore = created.body.memories.find((memory) => memory.focusState === 'active');
-    expect(focusedBefore.revealTier).toBe(2);
+    const focusedCardBefore = created.body.cards.find((card) => card.focusState === 'active');
+    expect(focusedCardBefore.revealTier).toBe(0);
 
     const response = await request(app)
       .post(`/api/seer/readings/${created.body.readingId}/turn`)
@@ -237,10 +251,10 @@ describe('Seer reading API skeleton', () => {
       })
       .expect(200);
 
-    const focusedAfter = response.body.memories.find((memory) => memory.focusState === 'active');
-    expect(focusedAfter.revealTier).toBe(3);
-    expect(focusedAfter.clarity).toBeGreaterThan(focusedBefore.clarity);
-    expect(response.body.lastTurn.transitionType).toBe('reveal');
+    const focusedCardAfter = response.body.cards.find((card) => card.focusState === 'active');
+    expect(focusedCardAfter.revealTier).toBe(1);
+    expect(focusedCardAfter.clarity).toBeGreaterThan(focusedCardBefore.clarity);
+    expect(response.body.lastTurn.transitionType).toBe('card_reveal');
     expect(response.body.lastTurn.runtimeId).toBe('seer-agent-runtime-v1');
     expect(Array.isArray(response.body.lastTurn.toolCalls)).toBe(true);
     expect(response.body.orchestrator?.runtimeId).toBe('seer-agent-runtime-v1');
@@ -295,16 +309,24 @@ describe('Seer reading API skeleton', () => {
       .send({ playerId, message: 'The vision sharpens around the act itself.' })
       .expect(200);
 
+    await request(app)
+      .post(`/api/seer/readings/${created.body.readingId}/turn`)
+      .send({ playerId, message: 'The place itself is becoming legible now.' })
+      .expect(200);
+
     const response = await request(app)
       .post(`/api/seer/readings/${created.body.readingId}/turn`)
       .send({ playerId, message: 'It is Ashward Marrow reading the sign in the rope.' })
       .expect(200);
 
     const focusedAfter = response.body.memories.find((memory) => memory.focusState === 'active');
+    const focusedCardAfter = response.body.cards.find((card) => card.focusState === 'active');
     expect(response.body.lastTurn.transitionType).toMatch(/relation|entity/);
     expect(response.body.entities.length).toBeGreaterThan(0);
     expect(Array.isArray(focusedAfter.confirmedEntityIds)).toBe(true);
     expect(focusedAfter.confirmedEntityIds.length).toBeGreaterThan(0);
+    expect(Array.isArray(focusedCardAfter.linkedEntityIds)).toBe(true);
+    expect(focusedCardAfter.linkedEntityIds.length).toBeGreaterThan(0);
     expect(
       response.body.spread.edges.some((edge) => edge.fromId === focusedAfter.id && focusedAfter.confirmedEntityIds.includes(edge.toId))
     ).toBe(true);
@@ -316,13 +338,15 @@ describe('Seer reading API skeleton', () => {
       sessionId: 'seer-session-3',
       playerId: 'seer-player-3',
       status: 'active',
-      beat: 'triad_revealed',
+      beat: 'cards_revealed',
+      vision: { sourceMemoryId: '', status: 'blurred', clarity: 0.1, revealTier: 0, visibleFields: [], sensoryFragments: [] },
       fragment: { text: 'The thread tightens.', anchorLabel: 'Fragment' },
       seer: { personaId: 'default-seer', voice: 'ritual witness' },
       memories: [],
+      cards: [],
       entities: [],
       apparitions: [],
-      spread: { layoutMode: 'seer_triad', focusMemoryId: '', nodes: [], edges: [] },
+      spread: { layoutMode: 'seer_vision_cards', focusMemoryId: '', focusCardId: '', nodes: [], edges: [], cardLayout: [] },
       transcript: [],
       unresolvedThreads: [],
       worldbuildingOutputs: [],

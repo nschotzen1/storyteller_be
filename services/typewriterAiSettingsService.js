@@ -141,6 +141,26 @@ const PIPELINE_DEFINITIONS = {
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_SEER_READING_PROVIDER || DEFAULT_PROVIDER
   },
+  seer_reading_card_generation: {
+    key: 'seer_reading_card_generation',
+    label: 'Seer Reading Card Generation',
+    description: 'internal://seer-reading/cards/generate',
+    modelKind: 'text',
+    defaultUseMock: true,
+    countProperty: 'cardCount',
+    countLabel: 'Default card count',
+    minCount: 1,
+    maxCount: 10,
+    defaultCount: 3,
+    defaultModel: process.env.OPENAI_SEER_CARD_MODEL
+      || process.env.OPENAI_SEER_READING_MODEL
+      || process.env.OPENAI_CHAT_MODEL
+      || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_SEER_CARD_PROVIDER
+      || process.env.OPENAI_SEER_READING_PROVIDER
+      || DEFAULT_PROVIDER
+  },
   quest_generation: {
     key: 'quest_generation',
     label: 'Quest Generation',

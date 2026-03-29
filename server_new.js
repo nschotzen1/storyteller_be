@@ -71,6 +71,7 @@ import {
 import memoriesRouter from './routes/memoriesRoutes.js';
 import { generateTypewriterPrompt } from './ai/openai/promptsUtils.js';
 import {
+  getPipelineSettings,
   getTypewriterAiSettings,
   getPipelineSettingsSnapshot,
   getTypewriterPipelineDefinitions,
@@ -91,7 +92,8 @@ import {
   seedCurrentTypewriterPromptTemplates
 } from './services/typewriterDefaultPromptSeedService.js';
 import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefinitionsService.js';
-import { runSeerReadingTurn } from './services/seerReadingRuntimeService.js';
+import { runSeerReadingTurn, buildSeerComposerPayload } from './services/seerReadingRuntimeService.js';
+import { generateSeerReadingCardDrafts } from './services/seerReadingCardGenerationService.js';
 import { ensureMongoConnection } from './services/mongoConnectionService.js';
 import {
   appendStoredMessengerMessage,
@@ -4927,6 +4929,19 @@ const SEER_TRIAD_POSITIONS = {
   after: { x: 1, y: -0.16 }
 };
 
+const DEFAULT_SEER_CARD_KINDS = Object.freeze([
+  'character',
+  'location',
+  'event',
+  'item',
+  'faction',
+  'omen',
+  'symbol',
+  'authority',
+  'ritual',
+  'feeling'
+]);
+
 function normalizeSeerMemoryStrength(value) {
   const normalized = firstDefinedString(value).toLowerCase();
   if (normalized === 'vivid' || normalized === 'durable' || normalized === 'faint') {
@@ -4964,6 +4979,253 @@ function getSeerVisibleFieldsForTier(revealTier = 0) {
   return [...new Set(fields)];
 }
 
+function normalizeSeerCardCount(value, fallback = 3) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return Math.max(1, Math.min(10, Number(fallback) || 3));
+  }
+  return Math.max(1, Math.min(10, Math.floor(numeric)));
+}
+
+function normalizeSeerStringArray(value) {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [];
+  return [...new Set(values
+    .map((entry) => `${entry || ''}`.trim().toLowerCase())
+    .filter(Boolean))];
+}
+
+function humanizeSeerCardKind(kind = '') {
+  return firstDefinedString(kind)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'Card';
+}
+
+function splitSeerTags(value, fallback = []) {
+  const source = firstDefinedString(value);
+  if (!source) return [...fallback];
+  const entries = source
+    .split(/,|;|\bturning to\b|\band\b|\//i)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return [...new Set(entries.length ? entries : fallback)].slice(0, 4);
+}
+
+function chooseSeerVisionSourceMemory(memories = [], requestedMemoryId = '') {
+  const safeRequestedId = firstDefinedString(requestedMemoryId);
+  if (safeRequestedId) {
+    const requested = memories.find((memory) => String(memory._id || memory.id || '') === safeRequestedId);
+    if (requested) return requested;
+  }
+
+  const duringVivid = memories.find((memory) =>
+    deriveSeerTemporalSlot(memory) === 'during' && normalizeSeerMemoryStrength(memory.memory_strength) === 'vivid'
+  );
+  if (duringVivid) return duringVivid;
+
+  const vivid = memories.find((memory) => normalizeSeerMemoryStrength(memory.memory_strength) === 'vivid');
+  if (vivid) return vivid;
+
+  const during = memories.find((memory) => deriveSeerTemporalSlot(memory) === 'during');
+  if (during) return during;
+
+  return memories[0] || null;
+}
+
+function collectSeerHeuristicCardKinds(memory = {}) {
+  const kinds = [];
+  if (firstDefinedString(memory.whose_eyes) || Array.isArray(memory.entities_in_memory)) {
+    kinds.push('character');
+  }
+  if (firstDefinedString(memory.location, memory.geographical_relevance)) {
+    kinds.push('location');
+  }
+  if (firstDefinedString(memory.action_name, memory.actual_result, memory.dramatic_definition, memory.short_title)) {
+    kinds.push('event');
+  }
+  if (firstDefinedString(memory.what_is_being_watched, memory.related_through_what)) {
+    kinds.push('item');
+  }
+  if (firstDefinedString(memory.organizational_affiliation).toLowerCase() && firstDefinedString(memory.organizational_affiliation).toLowerCase() !== 'none') {
+    kinds.push('faction');
+  }
+  if (firstDefinedString(memory.emotional_sentiment)) {
+    kinds.push('feeling');
+  }
+  return [...new Set(kinds)];
+}
+
+function resolveSeerCardKinds({
+  cardCount = 3,
+  explicitKinds = [],
+  preferredKinds = [],
+  allowedKinds = [],
+  visionMemory = {}
+}) {
+  const safeCount = normalizeSeerCardCount(cardCount, 3);
+  const normalizedAllowed = normalizeSeerStringArray(allowedKinds);
+  const normalizedExplicit = normalizeSeerStringArray(explicitKinds);
+  const normalizedPreferred = normalizeSeerStringArray(preferredKinds);
+  const heuristics = collectSeerHeuristicCardKinds(visionMemory);
+
+  const allowedPool = normalizedAllowed.length
+    ? normalizedAllowed
+    : DEFAULT_SEER_CARD_KINDS;
+
+  const ordered = [];
+  const addKinds = (entries = []) => {
+    entries.forEach((kind) => {
+      if (!kind) return;
+      if (normalizedAllowed.length && !allowedPool.includes(kind)) return;
+      if (ordered.includes(kind)) return;
+      ordered.push(kind);
+    });
+  };
+
+  addKinds(normalizedExplicit);
+  addKinds(normalizedPreferred);
+  addKinds(heuristics);
+  addKinds(allowedPool);
+  addKinds(DEFAULT_SEER_CARD_KINDS);
+
+  while (ordered.length < safeCount) {
+    ordered.push(`thread-${ordered.length + 1}`);
+  }
+
+  return ordered.slice(0, safeCount);
+}
+
+function buildSeerVision(memory = {}) {
+  const strength = normalizeSeerMemoryStrength(memory.memory_strength);
+  const profile = SEER_MEMORY_STRENGTH_PROFILES[strength] || SEER_MEMORY_STRENGTH_PROFILES.durable;
+  const revealTier = Math.max(0, profile.revealTier - 1);
+  return {
+    sourceMemoryId: String(memory._id || memory.id || ''),
+    status: 'blurred',
+    clarity: Math.max(0.08, Math.min(0.42, profile.clarity * 0.65)),
+    revealTier,
+    visibleFields: getSeerVisibleFieldsForTier(revealTier),
+    sensoryFragments: [
+      firstDefinedString(memory.what_is_being_watched),
+      firstDefinedString(memory.location),
+      firstDefinedString(memory.time_of_day),
+      firstDefinedString(memory.emotional_sentiment)
+    ].filter(Boolean),
+    currentSubjectLabel: firstDefinedString(memory.whose_eyes, Array.isArray(memory.entities_in_memory) ? memory.entities_in_memory[0] : '')
+  };
+}
+
+function buildSeerCardTitle(memory = {}, kind = '', index = 0) {
+  const humanizedKind = humanizeSeerCardKind(kind);
+  switch (kind) {
+    case 'character':
+      return firstDefinedString(memory.whose_eyes, Array.isArray(memory.entities_in_memory) ? memory.entities_in_memory[0] : '', humanizedKind);
+    case 'location':
+      return firstDefinedString(memory.location, memory.geographical_relevance, humanizedKind);
+    case 'event':
+      return firstDefinedString(memory.action_name, memory.short_title, humanizedKind);
+    case 'item':
+      return firstDefinedString(memory.related_through_what, memory.what_is_being_watched, `The ${humanizedKind}`);
+    case 'faction':
+      return firstDefinedString(memory.organizational_affiliation, `The ${humanizedKind}`);
+    case 'feeling':
+      return firstDefinedString(memory.emotional_sentiment, humanizedKind);
+    case 'authority':
+      return firstDefinedString(
+        Array.isArray(memory.entities_in_memory) ? memory.entities_in_memory.find((entry) => /lord|lady|king|queen|captain|magistrate|master|brother/i.test(`${entry || ''}`)) : '',
+        `The ${humanizedKind}`
+      );
+    default:
+      return firstDefinedString(memory.short_title, memory.action_name, `${humanizedKind} ${index + 1}`);
+  }
+}
+
+function buildSeerCardSummary(memory = {}, kind = '') {
+  switch (kind) {
+    case 'character':
+      return firstDefinedString(memory.dramatic_definition, `A presence glimpsed through ${firstDefinedString(memory.whose_eyes, 'borrowed eyes')}.`);
+    case 'location':
+      return firstDefinedString(memory.geographical_relevance, memory.location, 'A place that seems to remember more than it shows.');
+    case 'event':
+      return firstDefinedString(memory.actual_result, memory.action_name, 'Something happened here that changed the path afterward.');
+    case 'item':
+      return firstDefinedString(memory.related_through_what, memory.what_is_being_watched, 'A small thing carries more meaning than its price would suggest.');
+    case 'faction':
+      return firstDefinedString(memory.organizational_affiliation, 'A collective force presses at the edge of the vision.');
+    case 'feeling':
+      return firstDefinedString(memory.emotional_sentiment, 'Emotion arrives before explanation.');
+    default:
+      return firstDefinedString(memory.dramatic_definition, 'A thread in the reading waits to be made legible.');
+  }
+}
+
+function buildSeerReadingCard(memory = {}, kind = '', index = 0, isFocused = false) {
+  const moods = splitSeerTags(memory.emotional_sentiment, ['unease']);
+  const motifs = [
+    firstDefinedString(memory.related_through_what),
+    firstDefinedString(memory.what_is_being_watched),
+    firstDefinedString(memory.time_of_day),
+    firstDefinedString(memory.location)
+  ].filter(Boolean).slice(0, 4);
+  const title = buildSeerCardTitle(memory, kind, index);
+  return {
+    id: `seer-card-${randomUUID()}`,
+    kind: firstDefinedString(kind, `thread-${index + 1}`),
+    title,
+    status: 'back_only',
+    focusState: isFocused ? 'active' : 'idle',
+    clarity: isFocused ? 0.18 : 0.08,
+    confidence: isFocused ? 0.24 : 0.12,
+    revealTier: 0,
+    back: {
+      imageUrl: firstDefinedString(memory.back_image_url, memory.back?.imageUrl),
+      texturePrompt: firstDefinedString(memory.back?.prompt),
+      mood: moods,
+      motifs: motifs.length ? motifs : [humanizeSeerCardKind(kind)],
+      genreSignal: firstDefinedString(memory.dramatic_definition, memory.action_level, humanizeSeerCardKind(kind))
+    },
+    front: {
+      imageUrl: firstDefinedString(memory.front_image_url, memory.front?.imageUrl),
+      summary: buildSeerCardSummary(memory, kind),
+      facts: []
+    },
+    likelyRelationHint: firstDefinedString(memory.related_through_what, memory.dramatic_definition),
+    linkedEntityIds: []
+  };
+}
+
+function buildSeerReadingCardFromDraft(memory = {}, draft = {}, index = 0, isFocused = false) {
+  const fallback = buildSeerReadingCard(memory, firstDefinedString(draft.kind), index, isFocused);
+  const draftMoods = normalizeSeerStringArray(draft.back_moods);
+  const draftMotifs = normalizeSeerStringArray(draft.back_motifs);
+  const draftFacts = Array.isArray(draft.facts)
+    ? draft.facts.map((entry) => firstDefinedString(entry)).filter(Boolean).slice(0, 4)
+    : [];
+  return {
+    ...fallback,
+    kind: firstDefinedString(draft.kind, fallback.kind),
+    title: firstDefinedString(draft.label, draft.title, fallback.title),
+    back: {
+      ...fallback.back,
+      texturePrompt: firstDefinedString(draft.texture_prompt, fallback.back?.texturePrompt),
+      mood: draftMoods.length ? draftMoods : (fallback.back?.mood || []),
+      motifs: draftMotifs.length ? draftMotifs : (fallback.back?.motifs || []),
+      genreSignal: firstDefinedString(draft.back_genre_signal, fallback.back?.genreSignal)
+    },
+    front: {
+      ...fallback.front,
+      summary: firstDefinedString(draft.summary, fallback.front?.summary),
+      facts: draftFacts.length ? draftFacts : (fallback.front?.facts || [])
+    },
+    likelyRelationHint: firstDefinedString(draft.likely_relation_hint, fallback.likelyRelationHint)
+  };
+}
+
 function selectTriadMemories(memories = []) {
   const buckets = {
     before: [],
@@ -4997,6 +5259,17 @@ function selectTriadMemories(memories = []) {
   }
 
   return selected.slice(0, 3);
+}
+
+function selectSeerRuntimeMemories(memories = [], visionSourceMemory = null) {
+  const selected = selectTriadMemories(memories);
+  if (selected.length) {
+    return selected;
+  }
+  if (visionSourceMemory) {
+    return [{ slot: deriveSeerTemporalSlot(visionSourceMemory), memory: visionSourceMemory }];
+  }
+  return memories.slice(0, 3).map((memory) => ({ slot: deriveSeerTemporalSlot(memory), memory }));
 }
 
 async function resolveSeerReadingMemories(sessionId, playerId = '', batchId = '') {
@@ -5075,7 +5348,23 @@ function buildSeerReadingApparition(storyteller = {}) {
   };
 }
 
-function buildSeerReadingSpread(fragmentText, memories = [], focusMemoryId = '') {
+function buildSeerCardLayout(cards = []) {
+  const total = Math.max(1, cards.length);
+  return cards.map((card, index) => {
+    const angle = (-Math.PI / 2) + (Math.PI * 2 * index / total);
+    return {
+      id: card.id,
+      kind: card.kind,
+      label: card.title,
+      x: Number((Math.cos(angle) * 1.18).toFixed(4)),
+      y: Number((Math.sin(angle) * 0.62).toFixed(4)),
+      focusState: card.focusState,
+      status: card.status
+    };
+  });
+}
+
+function buildSeerReadingSpread(fragmentText, memories = [], focusMemoryId = '', cards = [], focusCardId = '') {
   const fragmentNodeId = 'fragment-anchor';
   const nodes = [
     {
@@ -5109,10 +5398,12 @@ function buildSeerReadingSpread(fragmentText, memories = [], focusMemoryId = '')
   }));
 
   return {
-    layoutMode: 'seer_triad',
+    layoutMode: cards.length ? 'seer_vision_cards' : 'seer_triad',
     focusMemoryId,
+    focusCardId,
     nodes,
-    edges
+    edges,
+    cardLayout: buildSeerCardLayout(cards)
   };
 }
 
@@ -5284,76 +5575,14 @@ function upsertSeerSpreadRelation(spread = {}, focusMemory = {}, entity = {}, op
   };
 }
 
-function buildSeerComposer(reading = {}) {
-  const focusMemory = findSeerFocusMemory(reading.memories || []);
-  if (firstDefinedString(reading.status) !== 'active') {
-    return {
-      disabled: true,
-      mode: 'closed',
-      prompt: 'The reading has closed.',
-      suggestions: [],
-      submitLabel: 'Closed'
-    };
-  }
-
-  if (!focusMemory) {
-    return {
-      disabled: true,
-      mode: 'idle',
-      prompt: 'No glimpse is in focus yet.',
-      suggestions: [],
-      submitLabel: 'Await'
-    };
-  }
-
-  const entityLabels = extractSeerEntityLabels(focusMemory).slice(0, 3);
-  const promptsByTier = {
-    0: {
-      mode: 'single_choice',
-      prompt: 'Name the first pressure in this glimpse.',
-      suggestions: [focusMemory.sentiment, 'warning', 'ritual', 'labor'].filter(Boolean)
-    },
-    1: {
-      mode: 'short_text',
-      prompt: `What detail from ${firstDefinedString(focusMemory.card?.title, 'this glimpse')} presses hardest?`,
-      suggestions: [focusMemory.witness, focusMemory.location, focusMemory.timeOfDay].filter(Boolean)
-    },
-    2: {
-      mode: 'tagged_inference',
-      prompt: 'Who or what does this glimpse lean toward?',
-      suggestions: entityLabels
-    },
-    3: {
-      mode: 'short_text',
-      prompt: 'What truth is becoming legible here?',
-      suggestions: [focusMemory.raw?.action_name, focusMemory.raw?.related_through_what].filter(Boolean)
-    },
-    4: {
-      mode: 'short_text',
-      prompt: 'What consequence follows from this glimpse?',
-      suggestions: [focusMemory.raw?.actual_result, focusMemory.raw?.consequences].filter(Boolean)
-    },
-    5: {
-      mode: 'short_text',
-      prompt: 'What thread binds this glimpse to the others?',
-      suggestions: []
-    }
-  };
-
-  const composer = promptsByTier[Number(focusMemory.revealTier)] || promptsByTier[5];
-  return {
-    disabled: false,
-    mode: composer.mode,
-    prompt: composer.prompt,
-    suggestions: composer.suggestions,
-    submitLabel: 'Answer',
-    focusMemoryId: focusMemory.id
-  };
-}
-
 function normalizeSeerReadingPayload(doc) {
   const source = doc && typeof doc.toObject === 'function' ? doc.toObject() : (doc || {});
   const focusMemory = findSeerFocusMemory(source.memories || []);
+  const focusCard = (Array.isArray(source.cards) ? source.cards : []).find((card) => card.focusState === 'active')
+    || (Array.isArray(source.cards) ? source.cards[0] : null);
+  const focusEntityIds = focusMemory
+    ? (Array.isArray(focusMemory.confirmedEntityIds) ? focusMemory.confirmedEntityIds : [])
+    : (Array.isArray(focusCard?.linkedEntityIds) ? focusCard.linkedEntityIds : []);
   return {
     readingId: firstDefinedString(source.readingId),
     sessionId: firstDefinedString(source.sessionId),
@@ -5361,22 +5590,27 @@ function normalizeSeerReadingPayload(doc) {
     status: firstDefinedString(source.status),
     beat: firstDefinedString(source.beat),
     fragment: source.fragment || {},
+    vision: source.vision || {},
     seer: source.seer || {},
     memories: Array.isArray(source.memories) ? source.memories : [],
+    cards: Array.isArray(source.cards) ? source.cards : [],
     entities: Array.isArray(source.entities) ? source.entities : [],
     apparitions: Array.isArray(source.apparitions) ? source.apparitions : [],
     spread: source.spread || {},
     transcript: Array.isArray(source.transcript) ? source.transcript : [],
+    subjectDialog: Array.isArray(source.subjectDialog) ? source.subjectDialog : [],
+    claimedCards: Array.isArray(source.claimedCards) ? source.claimedCards : [],
     unresolvedThreads: Array.isArray(source.unresolvedThreads) ? source.unresolvedThreads : [],
     worldbuildingOutputs: Array.isArray(source.worldbuildingOutputs) ? source.worldbuildingOutputs : [],
     metadata: source.metadata || {},
-    focus: focusMemory
+    focus: (focusMemory || focusCard)
       ? {
-        memoryId: focusMemory.id,
-        entityIds: Array.isArray(focusMemory.confirmedEntityIds) ? focusMemory.confirmedEntityIds : []
+        memoryId: focusMemory?.id || '',
+        cardId: firstDefinedString(focusCard?.id),
+        entityIds: focusEntityIds
       }
       : null,
-    composer: buildSeerComposer(source),
+    composer: buildSeerComposerPayload(source),
     orchestrator: source.metadata?.orchestrator || null,
     lastTurn: source.metadata?.lastTurn || null,
     version: Number.isFinite(Number(source.version)) ? Number(source.version) : 1,
@@ -8383,16 +8617,18 @@ app.post('/api/seer/readings', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameters: sessionId or text.' });
     }
 
-    const triadSourceMemories = selectTriadMemories(await resolveSeerReadingMemories(sessionId, resolvedPlayerId, batchId));
-    if (triadSourceMemories.length < 3) {
+    const sourceMemories = await resolveSeerReadingMemories(sessionId, resolvedPlayerId, batchId);
+    if (!sourceMemories.length) {
       return res.status(409).json({
-        message: 'Seer readings require at least 3 memories in the selected session or batch.'
+        message: 'Seer readings require at least 1 memory in the selected session or batch.'
       });
     }
 
-    const triadMemories = triadSourceMemories.map(({ slot, memory }) => buildSeerReadingMemory(memory, slot, false));
-    const focusMemoryId = chooseInitialSeerFocusMemoryId(triadMemories);
-    const hydratedMemories = triadMemories.map((memory) => ({
+    const visionSourceMemory = chooseSeerVisionSourceMemory(sourceMemories, req.body?.visionMemoryId);
+    const runtimeSourceMemories = selectSeerRuntimeMemories(sourceMemories, visionSourceMemory);
+    const runtimeMemories = runtimeSourceMemories.map(({ slot, memory }) => buildSeerReadingMemory(memory, slot, false));
+    const focusMemoryId = chooseInitialSeerFocusMemoryId(runtimeMemories);
+    const hydratedMemories = runtimeMemories.map((memory) => ({
       ...memory,
       focusState: memory.id === focusMemoryId ? 'active' : 'idle'
     }));
@@ -8405,10 +8641,40 @@ app.post('/api/seer/readings', async (req, res) => {
       .lean())
       .map(buildSeerReadingEntity);
 
+    const cardPipeline = await getPipelineSettings('seer_reading_card_generation');
+    const shouldMockCards = resolveMockMode(body, cardPipeline?.useMock);
+    const requestedCardCount = normalizeSeerCardCount(req.body?.cardCount, cardPipeline?.cardCount || 3);
+    const explicitCardKinds = normalizeSeerStringArray(req.body?.cardKinds);
+    const preferredCardKinds = normalizeSeerStringArray(req.body?.preferredCardKinds);
+    const allowedCardKinds = normalizeSeerStringArray(req.body?.allowedCardKinds);
+    const resolvedCardKinds = resolveSeerCardKinds({
+      cardCount: requestedCardCount,
+      explicitKinds: explicitCardKinds,
+      preferredKinds: preferredCardKinds,
+      allowedKinds: allowedCardKinds,
+      visionMemory: visionSourceMemory || {}
+    });
+    const cardGeneration = await generateSeerReadingCardDrafts({
+      fragmentText,
+      visionMemory: visionSourceMemory || {},
+      knownEntities: seedEntities,
+      cardCount: requestedCardCount,
+      cardKinds: resolvedCardKinds,
+      preferredCardKinds,
+      allowedCardKinds,
+      forceMock: shouldMockCards
+    });
+    const cards = (Array.isArray(cardGeneration?.cards) ? cardGeneration.cards : []).map((draft, index) =>
+      buildSeerReadingCardFromDraft(visionSourceMemory || {}, draft, index, index === 0)
+    );
+    const focusCardId = cards.find((card) => card.focusState === 'active')?.id || cards[0]?.id || '';
+
     const apparitions = (await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId))
       .map(buildSeerReadingApparition);
 
-    const openingMessage = 'The thread tightens. Three glimpses gather around the fragment. One presses nearest the wound in time.';
+    const openingMessage = cards.length === 1
+      ? 'The thread blurs, then gathers. A single card answers the vision.'
+      : `The thread blurs, then gathers. ${cards.length} cards answer the vision.`;
     const transcript = [
       {
         id: randomUUID(),
@@ -8424,26 +8690,50 @@ app.post('/api/seer/readings', async (req, res) => {
       sessionId,
       playerId: resolvedPlayerId,
       status: 'active',
-      beat: 'triad_revealed',
+      beat: 'cards_revealed',
       fragment: {
         text: fragmentText,
         anchorLabel: 'Fragment'
+      },
+      vision: {
+        ...buildSeerVision(visionSourceMemory || {}),
+        summary: firstDefinedString(cardGeneration?.visionSummary)
       },
       seer: {
         personaId: 'default-seer',
         voice: 'ritual witness'
       },
       memories: hydratedMemories,
+      cards,
       entities: seedEntities,
       apparitions,
-      spread: buildSeerReadingSpread(fragmentText, hydratedMemories, focusMemoryId),
+      spread: buildSeerReadingSpread(fragmentText, hydratedMemories, focusMemoryId, cards, focusCardId),
       transcript,
       unresolvedThreads: [],
       worldbuildingOutputs: [],
       metadata: {
         specVersion: 'seer-reading-v1-alpha',
         batchId,
-        observableMilestone: 'M1'
+        observableMilestone: 'M1',
+        visionMemoryId: String(visionSourceMemory?._id || visionSourceMemory?.id || ''),
+        cardConfig: {
+          requestedCount: requestedCardCount,
+          generatedCount: cards.length,
+          explicitKinds: explicitCardKinds,
+          preferredKinds: preferredCardKinds,
+          allowedKinds: allowedCardKinds,
+          generatedKinds: cards.map((card) => card.kind),
+          generationMode: firstDefinedString(cardGeneration?.generationMode, 'deterministic_seed'),
+          usedFallback: Boolean(cardGeneration?.usedFallback),
+          errorMessage: firstDefinedString(cardGeneration?.errorMessage),
+          promptText: firstDefinedString(cardGeneration?.promptText),
+          pipeline: cardGeneration?.runtime || {
+            key: 'seer_reading_card_generation',
+            provider: firstDefinedString(cardPipeline?.provider, 'openai'),
+            model: firstDefinedString(cardPipeline?.model),
+            useMock: Boolean(shouldMockCards)
+          }
+        }
       }
     };
 
@@ -8492,6 +8782,7 @@ app.post('/api/seer/readings/:readingId/turn', async (req, res) => {
     const action = firstDefinedString(body.action, 'answer');
     const safeMessage = firstDefinedString(body.message);
     const requestedFocusMemoryId = firstDefinedString(body.focusMemoryId);
+    const requestedFocusCardId = firstDefinedString(body.focusCardId);
     const requestedEntityId = firstDefinedString(body.entityId);
 
     if (!readingId) {
@@ -8510,7 +8801,11 @@ app.post('/api/seer/readings/:readingId/turn', async (req, res) => {
       return res.status(409).json({ message: 'Seer reading is already closed.' });
     }
 
-    if (action === 'focus_memory') {
+    if (action === 'focus_card') {
+      if (!requestedFocusCardId || !Array.isArray(reading.cards) || !reading.cards.some((card) => card.id === requestedFocusCardId)) {
+        return res.status(400).json({ message: 'Missing or unknown focusCardId for focus_card action.' });
+      }
+    } else if (action === 'focus_memory') {
       if (!requestedFocusMemoryId || !Array.isArray(reading.memories) || !reading.memories.some((memory) => memory.id === requestedFocusMemoryId)) {
         return res.status(400).json({ message: 'Missing or unknown focusMemoryId for focus_memory action.' });
       }
@@ -8526,11 +8821,13 @@ app.post('/api/seer/readings/:readingId/turn', async (req, res) => {
       action,
       message: safeMessage,
       focusMemoryId: requestedFocusMemoryId,
+      focusCardId: requestedFocusCardId,
       entityId: requestedEntityId
     });
     const nextReadingFields = runtimeResult?.nextReadingFields || {};
 
     reading.memories = Array.isArray(nextReadingFields.memories) ? nextReadingFields.memories : [];
+    reading.cards = Array.isArray(nextReadingFields.cards) ? nextReadingFields.cards : [];
     reading.entities = Array.isArray(nextReadingFields.entities) ? nextReadingFields.entities : [];
     reading.spread = nextReadingFields.spread || {};
     reading.transcript = Array.isArray(nextReadingFields.transcript) ? nextReadingFields.transcript : [];
