@@ -313,6 +313,37 @@ Expected trace information:
 - last tool calls
 - transition type
 
+### Seeded Reading URLs
+
+Use query params on the real route to shape the opening spread without introducing a separate fixture-only UI.
+
+- `seerFixture=triad|authority|omens`
+- `seerCardCount=<n>`
+- `seerCardKinds=a,b,c`
+- `seerPreferredCardKinds=a,b,c`
+- `seerAllowedCardKinds=a,b,c`
+- `seerBatchId=<batchId>`
+- `seerVisionMemoryId=<memoryId>`
+
+Example:
+
+- `?view=memory-spread&memoryDebug=1&seerFixture=authority`
+- `?view=memory-spread&seerCardCount=4&seerPreferredCardKinds=character,location,event,authority`
+
+These only affect the create request. Once a reading exists, `readingId` remains the stable way to reload it.
+
+### Hands-On Checkpoint
+
+The first worthwhile manual playtest should include:
+
+- reading creation
+- at least one card reveal
+- at least one relation or entity binding
+- one `claimable -> claimed` card transition
+- developer trace visibility
+
+Do not block first playtesting on subject chat, dice, apparition depth, or multiplayer behavior.
+
 ## Test Workflow
 
 ### Backend

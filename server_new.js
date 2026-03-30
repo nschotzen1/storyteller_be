@@ -92,7 +92,11 @@ import {
   seedCurrentTypewriterPromptTemplates
 } from './services/typewriterDefaultPromptSeedService.js';
 import { getTypewriterPromptDefinitions } from './services/typewriterPromptDefinitionsService.js';
-import { runSeerReadingTurn, buildSeerComposerPayload } from './services/seerReadingRuntimeService.js';
+import {
+  runSeerReadingTurn,
+  buildSeerComposerPayload,
+  buildSeerOrchestratorEnvelope
+} from './services/seerReadingRuntimeService.js';
 import { generateSeerReadingCardDrafts } from './services/seerReadingCardGenerationService.js';
 import { ensureMongoConnection } from './services/mongoConnectionService.js';
 import {
@@ -5364,6 +5368,30 @@ function buildSeerCardLayout(cards = []) {
   });
 }
 
+function findSeerFocusCard(cards = []) {
+  return cards.find((card) => card.focusState === 'active') || cards[0] || null;
+}
+
+function findNextSeerClaimFocusCard(cards = [], currentCardId = '') {
+  const unresolved = cards.filter((card) => card.id !== currentCardId && firstDefinedString(card.status) !== 'claimed');
+  if (!unresolved.length) return null;
+  const sharpening = unresolved.find((card) => Number(card.revealTier) < 3 || firstDefinedString(card.status) !== 'claimable');
+  return sharpening || unresolved[0];
+}
+
+function buildClaimedSeerCardRecord(card = {}, claimedAt = new Date().toISOString()) {
+  return {
+    cardId: firstDefinedString(card.id),
+    kind: firstDefinedString(card.kind),
+    title: firstDefinedString(card.title),
+    claimedAt,
+    linkedEntityIds: Array.isArray(card.linkedEntityIds) ? [...new Set(card.linkedEntityIds)] : [],
+    summary: firstDefinedString(card?.front?.summary),
+    back: card?.back ? { ...card.back } : {},
+    front: card?.front ? { ...card.front } : {}
+  };
+}
+
 function buildSeerReadingSpread(fragmentText, memories = [], focusMemoryId = '', cards = [], focusCardId = '') {
   const fragmentNodeId = 'fragment-anchor';
   const nodes = [
@@ -8847,6 +8875,146 @@ app.post('/api/seer/readings/:readingId/turn', async (req, res) => {
   } catch (error) {
     console.error('Error in /api/seer/readings/:readingId/turn:', error);
     return res.status(500).json({ message: 'Server error while advancing seer reading.' });
+  }
+});
+
+app.post('/api/seer/readings/:readingId/cards/:cardId/claim', async (req, res) => {
+  try {
+    const readingId = firstDefinedString(req.params?.readingId);
+    const cardId = firstDefinedString(req.params?.cardId);
+    const body = req.body || {};
+    const resolvedPlayerId = normalizeOptionalPlayerId(body.playerId);
+
+    if (!readingId || !cardId) {
+      return res.status(400).json({ message: 'Missing required parameters: readingId or cardId.' });
+    }
+
+    const reading = await SeerReading.findOne(
+      applyOptionalPlayerId({ readingId }, resolvedPlayerId)
+    );
+
+    if (!reading) {
+      return res.status(404).json({ message: 'Seer reading not found.' });
+    }
+
+    if (firstDefinedString(reading.status) !== 'active') {
+      return res.status(409).json({ message: 'Seer reading is already closed.' });
+    }
+
+    const cards = Array.isArray(reading.cards) ? reading.cards.map((card) => ({ ...card })) : [];
+    const cardIndex = cards.findIndex((card) => card.id === cardId);
+    if (cardIndex < 0) {
+      return res.status(404).json({ message: 'Claimable card not found in this reading.' });
+    }
+
+    const targetCard = cards[cardIndex];
+    if (firstDefinedString(targetCard.status) !== 'claimable') {
+      return res.status(409).json({ message: 'This card is not claimable yet.' });
+    }
+
+    const claimedAt = new Date().toISOString();
+    const claimedCard = {
+      ...targetCard,
+      status: 'claimed',
+      focusState: 'resolved',
+      clarity: 1,
+      confidence: Math.max(0.86, Number(targetCard.confidence) || 0)
+    };
+    cards[cardIndex] = claimedCard;
+
+    const nextFocus = findNextSeerClaimFocusCard(cards, cardId);
+    const nextCards = cards.map((card) => {
+      if (card.id === cardId) {
+        return {
+          ...card,
+          status: 'claimed',
+          focusState: 'resolved',
+          clarity: 1,
+          confidence: Math.max(0.86, Number(card.confidence) || 0)
+        };
+      }
+      if (nextFocus && card.id === nextFocus.id) {
+        return { ...card, focusState: 'active' };
+      }
+      return {
+        ...card,
+        focusState: card.focusState === 'resolved' || firstDefinedString(card.status) === 'claimed' ? 'resolved' : 'idle'
+      };
+    });
+
+    const spokenMessage = nextFocus
+      ? `${firstDefinedString(targetCard.title, 'The card')} is yours now. Keep it, and turn next to ${firstDefinedString(nextFocus.title, 'the next thread')}.`
+      : `${firstDefinedString(targetCard.title, 'The card')} is yours now. The spread stands ready for synthesis.`;
+
+    const playerEntry = createSeerTranscriptEntry('player', `I claim ${firstDefinedString(targetCard.title, 'this card')}.`, {
+      kind: 'claim_card',
+      playerId: resolvedPlayerId
+    });
+    const seerEntry = createSeerTranscriptEntry('seer', spokenMessage, {
+      kind: 'card_claimed',
+      focusCardId: nextFocus?.id || '',
+      focusMemoryId: firstDefinedString(reading?.spread?.focusMemoryId)
+    });
+
+    const nextClaimedCards = Array.isArray(reading.claimedCards) ? [...reading.claimedCards] : [];
+    nextClaimedCards.push(buildClaimedSeerCardRecord(claimedCard, claimedAt));
+
+    reading.cards = nextCards;
+    reading.claimedCards = nextClaimedCards;
+    reading.transcript = [
+      ...(Array.isArray(reading.transcript) ? reading.transcript : []),
+      playerEntry,
+      seerEntry
+    ];
+    reading.spread = {
+      ...(reading.spread || {}),
+      focusCardId: nextFocus?.id || '',
+      cardLayout: buildSeerCardLayout(nextCards)
+    };
+    reading.beat = nextFocus ? 'card_attunement' : 'cross_memory_synthesis';
+    reading.version = Number.isFinite(Number(reading.version)) ? Number(reading.version) + 1 : 2;
+
+    const orchestrator = await buildSeerOrchestratorEnvelope({
+      ...(typeof reading.toObject === 'function' ? reading.toObject() : reading),
+      cards: nextCards,
+      claimedCards: nextClaimedCards,
+      spread: reading.spread,
+      transcript: reading.transcript,
+      beat: reading.beat
+    });
+    const lastTurn = {
+      transitionType: 'card_claimed',
+      spokenMessage,
+      focusMemoryId: firstDefinedString(reading?.spread?.focusMemoryId),
+      focusCardId: nextFocus?.id || '',
+      claimedCardIds: [cardId],
+      toolCalls: [
+        {
+          tool_id: 'claim_card',
+          input: { card_id: cardId },
+          reason: 'Player sealed a fully revealed card into the reading.'
+        }
+      ],
+      availableToolIds: orchestrator.availableTools.map((tool) => tool.id),
+      runtimeId: orchestrator.runtimeId,
+      personaId: orchestrator.persona.id,
+      createdEntityPromptText: '',
+      createdEntityMocked: false
+    };
+
+    reading.metadata = {
+      ...(reading.metadata || {}),
+      observableMilestone: 'M5',
+      lastTurn,
+      orchestrator
+    };
+
+    await reading.save();
+
+    return res.status(200).json(normalizeSeerReadingPayload(reading));
+  } catch (error) {
+    console.error('Error in /api/seer/readings/:readingId/cards/:cardId/claim:', error);
+    return res.status(500).json({ message: 'Server error while claiming seer card.' });
   }
 });
 

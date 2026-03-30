@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-03-25T18:30:19.350Z",
-  "updatedBy": "story-admin-control-overview",
+  "updatedAt": "2026-03-30T08:10:44.723Z",
+  "updatedBy": "story-admin-ui",
   "pipelines": {
     "story_continuation": {
       "key": "story_continuation",
@@ -76,6 +76,23 @@
       "useMock": false,
       "model": "claude-opus-4-6",
       "provider": "anthropic"
+    },
+    "seer_reading_orchestrator": {
+      "key": "seer_reading_orchestrator",
+      "label": "Seer Reading Orchestrator",
+      "modelKind": "text",
+      "useMock": true,
+      "model": "gpt-5-mini",
+      "provider": "openai"
+    },
+    "seer_reading_card_generation": {
+      "key": "seer_reading_card_generation",
+      "label": "Seer Reading Card Generation",
+      "modelKind": "text",
+      "useMock": true,
+      "model": "gpt-5-mini",
+      "provider": "openai",
+      "cardCount": 3
     },
     "quest_generation": {
       "key": "quest_generation",

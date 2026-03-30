@@ -370,4 +370,89 @@ describe('Seer reading API skeleton', () => {
     expect(stored.status).toBe('closed');
     expect(stored.beat).toBe('reading_closed');
   });
+
+  it('claims a claimable card and persists it into the reading result set', async () => {
+    await SeerReading.create({
+      readingId: 'reading-claim-1',
+      sessionId: 'seer-session-claim-1',
+      playerId: 'seer-player-claim-1',
+      status: 'active',
+      beat: 'card_claim_available',
+      vision: { sourceMemoryId: 'm1', status: 'blurred', clarity: 0.24, revealTier: 1, visibleFields: [], sensoryFragments: [] },
+      fragment: { text: 'The rope hangs from the cairn.', anchorLabel: 'Fragment' },
+      seer: { personaId: 'default-seer', voice: 'ritual witness' },
+      memories: [
+        {
+          id: 'm1',
+          temporalSlot: 'during',
+          focusState: 'active',
+          clarity: 0.62,
+          revealTier: 2,
+          card: { title: 'Rope on Cairn' },
+          confirmedEntityIds: ['entity-1']
+        }
+      ],
+      cards: [
+        {
+          id: 'card-location',
+          kind: 'location',
+          title: 'North-Facing Cairn',
+          status: 'claimable',
+          focusState: 'active',
+          clarity: 0.84,
+          confidence: 0.72,
+          revealTier: 3,
+          linkedEntityIds: ['entity-1'],
+          back: { mood: ['warning'], motifs: ['stone'] },
+          front: { summary: 'A high place that sees too far.', facts: [] }
+        },
+        {
+          id: 'card-event',
+          kind: 'event',
+          title: 'The Sign Is Read',
+          status: 'front_revealed',
+          focusState: 'idle',
+          clarity: 0.58,
+          confidence: 0.44,
+          revealTier: 2,
+          linkedEntityIds: [],
+          back: { mood: ['urgency'], motifs: ['rope'] },
+          front: { summary: 'Recognition arrives before certainty.', facts: [] }
+        }
+      ],
+      entities: [{ id: 'entity-1', name: 'Ashward Marrow' }],
+      apparitions: [],
+      spread: {
+        layoutMode: 'seer_vision_cards',
+        focusMemoryId: 'm1',
+        focusCardId: 'card-location',
+        nodes: [],
+        edges: [],
+        cardLayout: []
+      },
+      transcript: [],
+      claimedCards: [],
+      unresolvedThreads: [],
+      worldbuildingOutputs: [],
+      metadata: {}
+    });
+
+    const response = await request(app)
+      .post('/api/seer/readings/reading-claim-1/cards/card-location/claim')
+      .send({
+        playerId: 'seer-player-claim-1'
+      })
+      .expect(200);
+
+    expect(response.body.claimedCards).toHaveLength(1);
+    expect(response.body.claimedCards[0].cardId).toBe('card-location');
+    expect(response.body.cards.find((card) => card.id === 'card-location').status).toBe('claimed');
+    expect(response.body.cards.find((card) => card.id === 'card-event').focusState).toBe('active');
+    expect(response.body.lastTurn.transitionType).toBe('card_claimed');
+    expect(response.body.lastTurn.toolCalls[0].tool_id).toBe('claim_card');
+
+    const stored = await SeerReading.findOne({ readingId: 'reading-claim-1' }).lean();
+    expect(stored.claimedCards).toHaveLength(1);
+    expect(stored.cards.find((card) => card.id === 'card-location').status).toBe('claimed');
+  });
 });

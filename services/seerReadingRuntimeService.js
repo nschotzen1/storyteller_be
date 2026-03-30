@@ -409,6 +409,14 @@ function buildAvailableTools(reading = {}, focusMemory = null, focusCard = null)
     });
   }
 
+  if (focusCard && firstDefinedString(focusCard.status) === 'claimable') {
+    tools.push({
+      id: 'claim_card',
+      label: 'Claim Card',
+      description: 'Seal a fully revealed card into the reading result set.'
+    });
+  }
+
   if (focusCard && (!Array.isArray(focusCard.linkedEntityIds) || focusCard.linkedEntityIds.length === 0)) {
     tools.push({
       id: 'create_entity',
@@ -709,7 +717,7 @@ function cloneReadingState(reading = {}) {
   };
 }
 
-async function buildOrchestratorEnvelope(reading = {}) {
+export async function buildSeerOrchestratorEnvelope(reading = {}) {
   const pipeline = await getPipelineSettings('seer_reading_orchestrator');
   const prompt = await getLatestPromptTemplate('seer_reading_orchestrator');
   const focusMemory = findSeerFocusMemory(reading.memories || []);
@@ -750,7 +758,7 @@ export async function runSeerReadingTurn({
   focusCardId = '',
   entityId = ''
 }) {
-  const orchestrator = await buildOrchestratorEnvelope(reading);
+  const orchestrator = await buildSeerOrchestratorEnvelope(reading);
   const registry = createToolRegistry();
   const state = cloneReadingState(reading);
   const result = {
