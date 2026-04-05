@@ -39,6 +39,7 @@ Route config keys currently available:
 
 - `worlds_create`
 - `worlds_elements`
+- `text_to_entity`
 - `text_to_storyteller`
 - `storyteller_mission`
 - `fragment_to_memories`
@@ -94,6 +95,7 @@ Request body:
   "sessionId": "demo-1",
   "playerId": "player-1",
   "text": "A wind-scoured pass with a rusted watchtower and a lone courier arriving at dusk.",
+  "desiredEntityCategories": ["LOCATION", "ITEM", "NPC", "FLORA", "FAUNA", "EVENT", "FACTION"],
   "includeCards": true,
   "includeFront": true,
   "includeBack": true,
@@ -104,6 +106,8 @@ Request body:
 
 Notes:
 - Use `text` for the input narrative.
+- `desiredEntityCategories` is optional. Default categories are `LOCATION`, `ITEM`, `NPC`, `FLORA`, `FAUNA`, `EVENT`, and `FACTION`.
+- You may provide additional categories and they will be injected into the entity-generation prompt as preferred categories.
 - `includeCards` defaults to `false`.
 - `includeFront` and `includeBack` default to `true` when cards are requested.
 - `debug`, `mock`, or `mocked_api_calls` returns mock entities/cards without external API calls.
@@ -112,6 +116,7 @@ Response (cards included):
 ```json
 {
   "sessionId": "demo-1",
+  "desiredEntityCategories": ["LOCATION", "ITEM", "NPC", "FLORA", "FAUNA", "EVENT", "FACTION"],
   "entities": [
     {
       "id": "abc123",

@@ -401,6 +401,56 @@ const SEER_CARD_GENERATION_RESPONSE_SCHEMA = {
   additionalProperties: true
 };
 
+const TEXT_TO_ENTITY_ENTITY_SCHEMA = {
+  type: 'object',
+  required: ['name', 'ner_type', 'description', 'relevance'],
+  properties: {
+    familiarity_level: { type: 'number' },
+    reusability_level: {
+      anyOf: [
+        { type: 'string' },
+        { type: 'number' }
+      ]
+    },
+    ner_type: { type: 'string', minLength: 1 },
+    ner_subtype: { type: 'string' },
+    description: { type: 'string', minLength: 1 },
+    name: { type: 'string', minLength: 1 },
+    relevance: { type: 'string', minLength: 1 },
+    impact: { type: 'string' },
+    skills_and_rolls: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    development_cost: { type: 'string' },
+    storytelling_points_cost: { type: 'number' },
+    urgency: { type: 'string' },
+    connections: {
+      anyOf: [
+        { type: 'array', items: { type: 'string' } },
+        { type: 'string' }
+      ]
+    },
+    tile_distance: { type: 'number' },
+    evolution_state: { type: 'string' },
+    evolution_notes: { type: 'string' }
+  },
+  additionalProperties: true
+};
+
+const TEXT_TO_ENTITY_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['entities'],
+  properties: {
+    entities: {
+      type: 'array',
+      minItems: 1,
+      items: TEXT_TO_ENTITY_ENTITY_SCHEMA
+    }
+  },
+  additionalProperties: true
+};
+
 const ROUTE_KEY_ALIASES = Object.freeze({
   immersive_rpg_turn: Object.freeze(['immersive_rpg_chat'])
 });
@@ -478,6 +528,71 @@ name, description, tags (array), traits (array), hooks (array).`,
       },
       additionalProperties: true
     }
+  },
+  text_to_entity: {
+    routeKey: 'text_to_entity',
+    routePath: '/api/textToEntity',
+    method: 'POST',
+    description: 'Generate reusable narrative entities from a fragment.',
+    promptMode: 'manual',
+    promptTemplate: `You are generating reusable narrative entities for a storytelling universe.
+
+Narrative fragment:
+"""
+{{fragmentText}}
+"""
+
+Existing entities:
+{{existingEntities}}
+
+Requested maximum entities: {{maxEntities}}
+Preferred entity categories: {{desiredEntityCategories}}
+
+Rules:
+- Bias strongly toward the preferred entity categories when the fragment supports them.
+- Default categories are LOCATION, ITEM, NPC, FLORA, FAUNA, EVENT, and FACTION.
+- If the preferred list includes extra categories, treat them as valid additions.
+- Do not recreate existing entities unless they are clearly returning in a more developed form.
+- Each entity should feel reusable beyond this one fragment.
+- For typing, map NPC to PERSON and FACTION to ORGANIZATION unless another ner_type is more precise.
+
+Return JSON only with key "entities".`,
+    promptCore: '',
+    fieldDocs: {
+      entities: 'Generated entity list.',
+      'entities[].name': 'Concrete, evocative entity name.',
+      'entities[].ner_type': 'Broad NER-aligned type such as PERSON, LOCATION, ITEM, ORGANIZATION, EVENT, FLORA, or FAUNA.',
+      'entities[].relevance': 'Why this entity matters to the fragment and the wider world.',
+      'entities[].storytelling_points_cost': 'Approximate storytelling cost for acquiring or activating the entity.'
+    },
+    examplePayload: {
+      entities: [
+        {
+          familiarity_level: 3,
+          reusability_level: 'broad dark fantasy',
+          ner_type: 'LOCATION',
+          ner_subtype: 'Monastery',
+          description: 'A weather-cut riverside monastery whose lower stones hold old flood lines.',
+          name: 'Flood Court of Saint Vey',
+          relevance: 'The fragment points to it as the place where memory, ritual, and weather all meet.',
+          impact: 'Can anchor later scenes, NPC ties, and ritual discoveries.',
+          skills_and_rolls: ['Lore', 'Observation'],
+          development_cost: '5, 10, 15, 20',
+          storytelling_points_cost: 12,
+          urgency: 'Immediate',
+          connections: ['Saint Vey', 'storm rites'],
+          tile_distance: 0,
+          evolution_state: 'New',
+          evolution_notes: 'Introduced as a durable location thread.'
+        }
+      ]
+    },
+    outputRules: [
+      'Return JSON only.',
+      'Output must be an object with key "entities".',
+      'Each entity should be specific, sensory-rich, and reusable in later worldbuilding.'
+    ],
+    responseSchema: TEXT_TO_ENTITY_RESPONSE_SCHEMA
   },
   text_to_storyteller: {
     routeKey: 'text_to_storyteller',

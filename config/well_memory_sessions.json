@@ -727,5 +727,161 @@
     ],
     "bundle": [],
     "completedAt": null
+  },
+  "well-preview-1775044071174-0977a8::": {
+    "session_id": "well-preview-1775044071174-0977a8",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "4940513c-8ca0-439f-871e-948c9aa15513",
+      "type": "textual",
+      "bankId": "txt_3",
+      "surface": {
+        "text": "Elionda was observing herself in the golden embroidered mirror"
+      },
+      "surfacedAt": "2026-04-01T13:21:48.608Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_8",
+      "txt_9",
+      "txt_4",
+      "txt_10",
+      "txt_6",
+      "txt_2",
+      "txt_3",
+      "txt_7",
+      "txt_1",
+      "txt_5"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1775052805106-b61260::": {
+    "session_id": "well-preview-1775052805106-b61260",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "d2167776-0ef4-4032-8e87-b81b76808929",
+      "type": "textual",
+      "bankId": "txt_4",
+      "surface": {
+        "text": "The house remembered every vow spoken under rain"
+      },
+      "surfacedAt": "2026-04-01T14:16:31.733Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_8",
+      "txt_7",
+      "txt_9",
+      "txt_2",
+      "txt_5",
+      "txt_10",
+      "txt_1",
+      "txt_3",
+      "txt_4"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1775056172490-f284b9::": {
+    "session_id": "well-preview-1775056172490-f284b9",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "195f07f9-7b88-427d-88b6-06f2764b3c01",
+      "type": "textual",
+      "bankId": "txt_2",
+      "surface": {
+        "text": "Nothing could prepare them for such weather"
+      },
+      "surfacedAt": "2026-04-01T15:39:41.842Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_3",
+      "txt_10",
+      "txt_2"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1775060499915-7f264d::": {
+    "session_id": "well-preview-1775060499915-7f264d",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "cfa91297-0f8f-408e-8558-828dc0e5d793",
+      "type": "textual",
+      "bankId": "txt_8",
+      "surface": {
+        "text": "By dawn the map had changed its mind again"
+      },
+      "surfacedAt": "2026-04-01T20:10:41.421Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_10",
+      "txt_9",
+      "txt_8"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1775334648733-e4638c::": {
+    "session_id": "well-preview-1775334648733-e4638c",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "e50585bf-10d8-4380-841d-7820fed1d59a",
+      "type": "textual",
+      "bankId": "txt_8",
+      "surface": {
+        "text": "By dawn the map had changed its mind again"
+      },
+      "surfacedAt": "2026-04-04T21:58:25.948Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_8"
+    ],
+    "bundle": [],
+    "completedAt": null
   }
 }

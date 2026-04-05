@@ -107,6 +107,8 @@ const SeerReadingSchema = new mongoose.Schema({
   readingId: { type: String, required: true, index: true, unique: true },
   sessionId: { type: String, required: true, index: true },
   playerId: { type: String, index: true },
+  worldId: { type: String, index: true, default: '' },
+  universeId: { type: String, index: true, default: '' },
   status: { type: String, enum: ['active', 'closed'], default: 'active', index: true },
   beat: {
     type: String,
@@ -141,6 +143,7 @@ const SeerReadingSchema = new mongoose.Schema({
   transcript: { type: [mongoose.Schema.Types.Mixed], default: [] },
   subjectDialog: { type: [mongoose.Schema.Types.Mixed], default: [] },
   claimedCards: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  claimedEntityLinks: { type: [mongoose.Schema.Types.Mixed], default: [] },
   unresolvedThreads: { type: [String], default: [] },
   worldbuildingOutputs: { type: [mongoose.Schema.Types.Mixed], default: [] },
   metadata: { type: mongoose.Schema.Types.Mixed, default: {} },

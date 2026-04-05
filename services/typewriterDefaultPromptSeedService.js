@@ -51,9 +51,17 @@ async function buildMemoryCreationPromptTemplate() {
   return routeConfig?.promptTemplate || '';
 }
 
-function buildEntityCreationPromptTemplate() {
-  const prompt = generate_entities_by_fragment('{{fragmentText}}', DEFAULT_MAX_ENTITIES)?.[0]?.content || '';
-  return prompt.replace('and these existing entities []', 'and these existing entities {{existingEntities}}');
+async function buildEntityCreationPromptTemplate() {
+  const routeConfig = await getRouteConfig('text_to_entity');
+  if (routeConfig?.promptTemplate) {
+    return routeConfig.promptTemplate;
+  }
+  return generate_entities_by_fragment(
+    '{{fragmentText}}',
+    DEFAULT_MAX_ENTITIES,
+    '{{existingEntities}}',
+    '{{desiredEntityCategories}}'
+  )?.[0]?.content || '';
 }
 
 function buildTextureCreationPromptTemplate() {
@@ -520,9 +528,9 @@ export async function getCurrentTypewriterPromptTemplates() {
     },
     entity_creation: {
       pipelineKey: 'entity_creation',
-      promptTemplate: buildEntityCreationPromptTemplate(),
-      source: 'ai/openai/promptsUtils.js:generate_entities_by_fragment',
-      variables: ['fragmentText', 'maxEntities', 'existingEntities']
+      promptTemplate: await buildEntityCreationPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:text_to_entity.promptTemplate',
+      variables: ['fragmentText', 'maxEntities', 'existingEntities', 'desiredEntityCategories', 'desiredEntityCategoriesJson', 'desiredEntityCategoriesBullets']
     },
     entity_card_front: {
       pipelineKey: 'entity_card_front',

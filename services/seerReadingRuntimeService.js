@@ -352,10 +352,13 @@ function normalizeGeneratedEntity(entity = {}) {
   };
 }
 
-async function createEntityFromService({ reading, focusMemory, focusCard, playerId, playerReply }) {
+async function createEntityFromService({ reading, focusMemory, focusCard, playerId, playerReply, forceMock = null }) {
   const entityPipeline = await getPipelineSettings('entity_creation');
   const entityPrompt = await getLatestPromptTemplate('entity_creation');
   const promptText = buildGeneratedEntityPrompt({ reading, focusMemory, focusCard, playerReply });
+  const effectiveMock = typeof forceMock === 'boolean'
+    ? forceMock
+    : Boolean(entityPipeline?.useMock);
   const result = await textToEntityFromText({
     sessionId: firstDefinedString(reading.sessionId),
     playerId,
@@ -364,7 +367,7 @@ async function createEntityFromService({ reading, focusMemory, focusCard, player
     includeCards: false,
     includeFront: false,
     includeBack: false,
-    debug: Boolean(entityPipeline?.useMock),
+    debug: effectiveMock,
     llmModel: firstDefinedString(entityPipeline?.model),
     llmProvider: firstDefinedString(entityPipeline?.provider, 'openai'),
     entityPromptTemplate: firstDefinedString(entityPrompt?.promptTemplate)
@@ -373,7 +376,7 @@ async function createEntityFromService({ reading, focusMemory, focusCard, player
   return {
     entity: rawEntity ? normalizeGeneratedEntity(rawEntity) : null,
     promptText,
-    mocked: Boolean(result?.mocked || entityPipeline?.useMock)
+    mocked: Boolean(result?.mocked || effectiveMock)
   };
 }
 
@@ -595,7 +598,8 @@ function createToolRegistry() {
           focusMemory,
           focusCard,
           playerId: ctx.playerId,
-          playerReply: ctx.playerReply
+          playerReply: ctx.playerReply,
+          forceMock: ctx.mockMode
         });
 
         if (created.entity) {
@@ -723,6 +727,9 @@ export async function buildSeerOrchestratorEnvelope(reading = {}) {
   const focusMemory = findSeerFocusMemory(reading.memories || []);
   const focusCard = findSeerFocusCard(reading.cards || []);
   const availableTools = buildAvailableTools(reading, focusMemory, focusCard);
+  const runtimeMockMode = typeof reading?.metadata?.demoMockMode === 'boolean'
+    ? reading.metadata.demoMockMode
+    : Boolean(pipeline?.useMock);
   return {
     runtimeId: 'seer-agent-runtime-v1',
     persona: DEFAULT_SEER_PERSONA,
@@ -730,7 +737,7 @@ export async function buildSeerOrchestratorEnvelope(reading = {}) {
       key: 'seer_reading_orchestrator',
       provider: firstDefinedString(pipeline?.provider, 'openai'),
       model: firstDefinedString(pipeline?.model),
-      useMock: Boolean(pipeline?.useMock)
+      useMock: runtimeMockMode
     },
     prompt: {
       key: 'seer_reading_orchestrator',
@@ -756,7 +763,8 @@ export async function runSeerReadingTurn({
   message = '',
   focusMemoryId = '',
   focusCardId = '',
-  entityId = ''
+  entityId = '',
+  mock = null
 }) {
   const orchestrator = await buildSeerOrchestratorEnvelope(reading);
   const registry = createToolRegistry();
@@ -771,6 +779,7 @@ export async function runSeerReadingTurn({
     reading,
     playerId: firstDefinedString(playerId),
     playerReply: firstDefinedString(message),
+    mockMode: typeof mock === 'boolean' ? mock : null,
     state,
     result,
     runtime: {

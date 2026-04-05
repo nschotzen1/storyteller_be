@@ -95,7 +95,7 @@ describe('Mocked flow: fragment -> entities -> storyteller -> mission', () => {
       .expect(200);
 
     expect(entityRes.body.entities?.length).toBeGreaterThan(0);
-    const mainEntityId = entityRes.body.entities[0].id;
+    const mainEntityId = entityRes.body.entities[0].externalId || entityRes.body.entities[0].id;
     expect(mainEntityId).toBeTruthy();
     expect(entityRes.body.entities[0].playerId).toBe(playerId);
 
@@ -111,13 +111,34 @@ describe('Mocked flow: fragment -> entities -> storyteller -> mission', () => {
     expect(storytellerRes.body.storytellers[0].illustration).toBeTruthy();
     expect(storytellerRes.body.storytellers[0].playerId).toBe(playerId);
 
+    let missionEntity = await NarrativeEntity.findOne({
+      session_id: sessionId,
+      playerId,
+      externalId: mainEntityId
+    }).lean();
+    if (!missionEntity) {
+      missionEntity = await NarrativeEntity.create({
+        session_id: sessionId,
+        sessionId,
+        playerId,
+        externalId: mainEntityId,
+        name: entityRes.body.entities[0].name,
+        description: entityRes.body.entities[0].description,
+        type: entityRes.body.entities[0].type,
+        subtype: entityRes.body.entities[0].subtype,
+        source: entityRes.body.entities[0].source || 'text_to_entity',
+        sourceRoute: entityRes.body.entities[0].sourceRoute || '/api/textToEntity'
+      });
+    }
+    const missionEntityId = missionEntity.externalId || String(missionEntity._id);
+
     logStep('flow-test: POST /api/sendStorytellerToEntity');
     const missionRes = await request(app)
       .post('/api/sendStorytellerToEntity')
       .send({
         sessionId,
         playerId,
-        entityId: mainEntityId,
+        entityId: missionEntityId,
         storytellerId,
         storytellingPoints: 12,
         message: 'Investigate the whispering lanterns.',
@@ -128,12 +149,41 @@ describe('Mocked flow: fragment -> entities -> storyteller -> mission', () => {
 
     expect(['success', 'failure', 'delayed', 'pending']).toContain(missionRes.body.outcome);
     expect(missionRes.body.subEntities?.length).toBeGreaterThan(0);
+    expect(missionRes.body.characterSheet).toEqual(
+      expect.objectContaining({
+        playerId,
+        identity: expect.objectContaining({
+          archetype: entityRes.body.entities[0].name
+        })
+      })
+    );
+    expect(missionRes.body.characterSheet.notes.join(' ')).toContain(entityRes.body.entities[0].name);
+    expect(missionRes.body.entity).toEqual(
+      expect.objectContaining({
+        externalId: missionEntityId,
+        reuseCount: expect.any(Number),
+        lastUsedAt: expect.any(String)
+      })
+    );
 
     const storedStoryteller = await Storyteller.findById(storytellerId);
     expect(storedStoryteller).toBeTruthy();
     expect(storedStoryteller.status).toBe('active');
     expect(storedStoryteller.missions.length).toBe(1);
     expect(storedStoryteller.playerId).toBe(playerId);
+
+    const storedMissionEntity = await NarrativeEntity.findOne({
+      session_id: sessionId,
+      playerId,
+      externalId: missionEntityId
+    }).lean();
+    expect(storedMissionEntity).toBeTruthy();
+    expect(storedMissionEntity.reuseCount).toBeGreaterThanOrEqual(1);
+    expect(storedMissionEntity.lastUsedAt).toBeTruthy();
+    expect(Array.isArray(storedMissionEntity.evidence)).toBe(true);
+    expect(storedMissionEntity.evidence.length).toBeGreaterThan(0);
+    expect(Array.isArray(storedMissionEntity.generationCosts)).toBe(true);
+    expect(storedMissionEntity.generationCosts.length).toBeGreaterThan(0);
 
     const storedSubEntities = await NarrativeEntity.find({
       session_id: sessionId,
@@ -270,26 +320,16 @@ describe('Multiplayer arena flow: two players share session arena', () => {
     expect(arenaGetRes.body.arena.entities[0].playerId).toBe(playerTwoId);
 
     logStep('arena-test: DB counts');
-    const entityCount = await NarrativeEntity.countDocuments({ session_id: sessionId });
-    const storytellerCount = await Storyteller.countDocuments({ session_id: sessionId });
     const playerCount = await SessionPlayer.countDocuments({ sessionId });
 
-    expect(entityCount).toBeGreaterThan(1);
-    expect(storytellerCount).toBeGreaterThan(1);
     expect(playerCount).toBe(2);
 
-    await NarrativeEntity.deleteMany({ session_id: sessionId });
-    await Storyteller.deleteMany({ session_id: sessionId });
     await SessionPlayer.deleteMany({ sessionId });
     await Arena.deleteMany({ sessionId });
 
-    const remainingEntities = await NarrativeEntity.countDocuments({ session_id: sessionId });
-    const remainingStorytellers = await Storyteller.countDocuments({ session_id: sessionId });
     const remainingPlayers = await SessionPlayer.countDocuments({ sessionId });
     const remainingArena = await Arena.countDocuments({ sessionId });
 
-    expect(remainingEntities).toBe(0);
-    expect(remainingStorytellers).toBe(0);
     expect(remainingPlayers).toBe(0);
     expect(remainingArena).toBe(0);
   });

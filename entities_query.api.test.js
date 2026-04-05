@@ -61,11 +61,13 @@ describe('GET /api/entities', () => {
         sessionId,
         text: 'The watchman traced a dim line over the sea and named nothing yet.',
         debug: true,
-        count: 2
+        count: 2,
+        desiredEntityCategories: ['LOCATION', 'ITEM', 'FACTION']
       })
       .expect(200);
 
     expect(entityResponse.body.count).toBe(2);
+    expect(entityResponse.body.desiredEntityCategories).toEqual(['LOCATION', 'ITEM', 'FACTION']);
 
     const textEntitiesResponse = await request(app)
       .get('/api/entities')
@@ -139,5 +141,83 @@ describe('GET /api/entities', () => {
         externalId: expect.any(String)
       })
     ]);
+
+    await NarrativeEntity.insertMany([
+      {
+        session_id: sessionId,
+        sessionId,
+        playerId: '',
+        name: 'North-Facing Cairn',
+        description: 'A high place that sees too far.',
+        type: 'LOCATION',
+        subtype: 'Cairn',
+        tags: ['stone', 'warning'],
+        externalId: 'bank-entity-1',
+        source: 'seer_claim',
+        sourceRoute: '/api/seer/readings/:readingId/cards/:cardId/claim',
+        worldId: 'world-entities-1',
+        universeId: 'world-entities-1',
+        canonicalStatus: 'candidate',
+        sourceReadingIds: ['reading-entities-1'],
+        claimedFromCardIds: ['card-location'],
+        reuseCount: 3,
+        lastUsedAt: new Date('2026-04-05T10:00:00.000Z')
+      },
+      {
+        session_id: sessionId,
+        sessionId,
+        playerId: '',
+        name: 'Ashward Monastery',
+        description: 'A weather-cut structure of ritual stone.',
+        type: 'LOCATION',
+        subtype: 'Monastery',
+        tags: ['stone', 'ritual'],
+        externalId: 'bank-entity-2',
+        source: 'seer_claim',
+        sourceRoute: '/api/seer/readings/:readingId/cards/:cardId/claim',
+        worldId: 'world-entities-1',
+        universeId: 'world-entities-1',
+        canonicalStatus: 'canonical',
+        sourceReadingIds: ['reading-entities-2'],
+        claimedFromCardIds: ['card-monastery'],
+        reuseCount: 1,
+        lastUsedAt: new Date('2026-04-04T10:00:00.000Z')
+      }
+    ]);
+
+    const bankSearchResponse = await request(app)
+      .get('/api/entities')
+      .query({
+        sessionId,
+        worldId: 'world-entities-1',
+        universeId: 'world-entities-1',
+        name: 'cairn',
+        tag: 'stone',
+        canonicalStatus: 'candidate',
+        linkedReadingId: 'reading-entities-1'
+      })
+      .expect(200);
+
+    expect(bankSearchResponse.body.count).toBe(1);
+    expect(bankSearchResponse.body.entities).toEqual([
+      expect.objectContaining({
+        externalId: 'bank-entity-1',
+        worldId: 'world-entities-1',
+        universeId: 'world-entities-1',
+        canonicalStatus: 'candidate'
+      })
+    ]);
+
+    const sortedByReuseResponse = await request(app)
+      .get('/api/entities')
+      .query({
+        sessionId,
+        worldId: 'world-entities-1',
+        sort: 'reuse',
+        limit: 2
+      })
+      .expect(200);
+
+    expect(sortedByReuseResponse.body.entities[0].externalId).toBe('bank-entity-1');
   });
 });

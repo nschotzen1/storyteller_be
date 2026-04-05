@@ -332,6 +332,17 @@ Example:
 
 These only affect the create request. Once a reading exists, `readingId` remains the stable way to reload it.
 
+### Story Admin Handoff
+
+The preferred manual bootstrap flow is:
+
+- open `Story Admin`
+- expand `Session Bootstrap`
+- enter or adjust the fragment text
+- click `Open in Seer Reading`
+
+That generates a session when needed, stores the `sessionId`, and opens the Seer route with a debug-friendly query state.
+
 ### Hands-On Checkpoint
 
 The first worthwhile manual playtest should include:

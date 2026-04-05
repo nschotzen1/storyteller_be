@@ -1254,23 +1254,33 @@ if(storytellerSession)
     return [{ role: "system", content: prompt }];
 }
 
-export function generate_entities_by_fragment(fragment, maxNumberOfEntities=10, existingEntities=[]){
+export function generate_entities_by_fragment(fragment, maxNumberOfEntities=10, existingEntities = [], desiredEntityCategories = []){
+    const existingEntitiesValue = typeof existingEntities === 'string'
+      ? existingEntities
+      : JSON.stringify(existingEntities || []);
+    const desiredCategoriesValue = Array.isArray(desiredEntityCategories)
+      ? desiredEntityCategories.join(', ')
+      : `${desiredEntityCategories || ''}`.trim();
     let prompt = `### Standalone Prompt for Entity Creation
 
 **Prompt:**
 
 "Given the narrative fragment: "${fragment}"
-and these existing entities []
+and these existing entities ${existingEntitiesValue}
 Create 3-8 entities that exist both within and beyond this narrative moment. These entities emerge from a growing storytelling universe, reflecting its core principles:
 
 - Entities are glimpses into a larger world.
 - Each story fragment is a 'tile' that reveals part of this world.
 - Entities are independent, meaningful, and scalable beyond the fragment.
+- Preferred entity categories for this request: ${desiredCategoriesValue || 'LOCATION, ITEM, NPC, FLORA, FAUNA, EVENT, FACTION'}.
 
 Additionally:
 
 - The number of entities (2-6) should reflect the richness and complexity of the narrative fragment.
 - The existing entities provided should not be recreated: However, if previously introduced entities were expanded upon in the ongoing narrative, they should resurface and develop further.
+- Bias strongly toward the preferred categories when the fragment supports them.
+- If the preferred list contains categories beyond the default set, treat them as valid additions.
+- For output typing, map NPC to PERSON and FACTION to ORGANIZATION unless another ner_type is more precise.
 
 
 

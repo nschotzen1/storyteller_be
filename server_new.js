@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
+import mongoose from 'mongoose';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
@@ -39,7 +40,10 @@ import {
   markTypewriterKeyPressed,
   upsertTypewriterKey
 } from './services/typewriterKeyService.js';
-import { textToEntityFromText } from './services/textToEntityService.js';
+import {
+  textToEntityFromText,
+  normalizeDesiredEntityCategories
+} from './services/textToEntityService.js';
 import {
   normalizePredicate,
   getExistingEdgesForEntities,
@@ -2632,6 +2636,232 @@ async function ensureImmersiveRpgCharacterSheet({
   return doc;
 }
 
+function deriveSkillFieldFromSeerCardKind(kind = '') {
+  const normalizedKind = firstDefinedString(kind).toLowerCase();
+  if (['location', 'event', 'omen', 'symbol', 'structure', 'geographical_feature'].includes(normalizedKind)) {
+    return 'awareness';
+  }
+  if (['character', 'person', 'npc', 'authority', 'faction'].includes(normalizedKind)) {
+    return 'persuade';
+  }
+  if (['skill', 'lore', 'book', 'ritual', 'spell'].includes(normalizedKind)) {
+    return 'occult';
+  }
+  return 'libraryUse';
+}
+
+function buildSeerClaimCharacterSheetPatch(existingSheet = {}, card = {}, entity = {}) {
+  const existing = existingSheet && typeof existingSheet === 'object' ? existingSheet : {};
+  const existingSkills = existing?.skills && typeof existing.skills === 'object' ? existing.skills : {};
+  const noteSummary = firstDefinedString(card?.front?.summary, entity?.description);
+  const noteLine = [firstDefinedString(card?.kind, 'entity'), firstDefinedString(card?.title, entity?.name)]
+    .filter(Boolean)
+    .join(': ');
+  const noteText = noteSummary ? `${noteLine} - ${noteSummary}` : noteLine;
+  const notes = Array.from(new Set([...(Array.isArray(existing?.notes) ? existing.notes : []), noteText].filter(Boolean))).slice(-20);
+  const inventoryKinds = new Set(['item', 'book', 'map', 'relic']);
+  const inventory = inventoryKinds.has(firstDefinedString(card?.kind).toLowerCase())
+    ? Array.from(new Set([...(Array.isArray(existing?.inventory) ? existing.inventory : []), firstDefinedString(card?.title, entity?.name)].filter(Boolean))).slice(-20)
+    : (Array.isArray(existing?.inventory) ? existing.inventory : []);
+  const skillField = deriveSkillFieldFromSeerCardKind(card?.kind);
+  const currentSkillValue = Number(existingSkills?.[skillField]);
+  const nextSkillValue = Number.isFinite(currentSkillValue)
+    ? Math.min(99, Math.max(currentSkillValue, 10) + 5)
+    : 20;
+
+  return {
+    identity: {
+      archetype: firstDefinedString(existing?.identity?.archetype, card?.title, entity?.name),
+      residence: firstDefinedString(existing?.identity?.residence)
+    },
+    coreTraits: {
+      edge: firstDefinedString(existing?.coreTraits?.edge, noteSummary),
+      drive: firstDefinedString(existing?.coreTraits?.drive, firstDefinedString(card?.back?.mood?.[0]))
+    },
+    skills: {
+      ...existingSkills,
+      [skillField]: nextSkillValue
+    },
+    inventory,
+    notes
+  };
+}
+
+async function synthesizeCharacterSheetFromSeerClaim({ reading, playerId, claimedEntity, card }) {
+  const safeSessionId = firstDefinedString(reading?.sessionId);
+  if (!safeSessionId) return null;
+
+  const effectivePlayerId = normalizeOptionalPlayerId(playerId) || DEFAULT_IMMERSIVE_RPG_PLAYER_ID;
+  const existingSheet = await ImmersiveRpgCharacterSheet.findOne({ sessionId: safeSessionId, playerId: effectivePlayerId }).lean();
+  const patch = buildSeerClaimCharacterSheetPatch(existingSheet || {}, card, claimedEntity);
+
+  return ensureImmersiveRpgCharacterSheet({
+    sessionId: safeSessionId,
+    playerId: effectivePlayerId,
+    playerName: firstDefinedString(existingSheet?.playerName, claimedEntity?.name, DEFAULT_IMMERSIVE_RPG_PLAYER_NAME),
+    sourceSceneBrief: existingSheet?.sourceSceneBrief || null,
+    patch
+  });
+}
+
+function buildStorytellerMissionEntityRecords({
+  entity = {},
+  storyteller = {},
+  outcome = '',
+  userText = '',
+  gmNote = '',
+  subEntitySeed = '',
+  subEntities = [],
+  storytellingPoints = 0,
+  durationDays = null,
+  message = ''
+} = {}) {
+  const timestamp = new Date().toISOString();
+  const subEntityExternalIds = Array.from(new Set(
+    (Array.isArray(subEntities) ? subEntities : [])
+      .map((subEntity) => firstDefinedString(subEntity?.externalId, subEntity?.id))
+      .filter(Boolean)
+  ));
+  const storytellerName = firstDefinedString(storyteller?.name);
+  const entityName = firstDefinedString(entity?.name, 'Unknown entity');
+
+  return {
+    timestamp,
+    evidence: {
+      kind: 'storyteller_mission',
+      entityExternalId: firstDefinedString(entity?.externalId, entity?._id ? String(entity._id) : ''),
+      storytellerId: firstDefinedString(storyteller?._id ? String(storyteller._id) : ''),
+      storytellerName,
+      storytellingPoints,
+      durationDays,
+      outcome: firstDefinedString(outcome, 'pending'),
+      message: firstDefinedString(message),
+      userText: firstDefinedString(userText),
+      gmNote: firstDefinedString(gmNote),
+      subEntitySeed: firstDefinedString(subEntitySeed),
+      subEntityExternalIds,
+      createdAt: timestamp
+    },
+    generationCost: {
+      kind: 'storyteller_mission',
+      entityExternalId: firstDefinedString(entity?.externalId, entity?._id ? String(entity._id) : ''),
+      storytellerId: firstDefinedString(storyteller?._id ? String(storyteller._id) : ''),
+      storytellerName,
+      storytellingPoints,
+      durationDays,
+      estimatedDollarCost: null,
+      createdAt: timestamp
+    },
+    summaryLine: `${entityName} deepened by ${storytellerName || 'a storyteller'}`
+  };
+}
+
+function buildStorytellerMissionCharacterSheetPatch({
+  existingSheet = {},
+  entity = {},
+  storyteller = {},
+  outcome = '',
+  userText = '',
+  gmNote = '',
+  subEntities = [],
+  storytellingPoints = 0
+} = {}) {
+  const existing = existingSheet && typeof existingSheet === 'object' ? existingSheet : {};
+  const existingSkills = existing?.skills && typeof existing.skills === 'object' ? existing.skills : {};
+  const entityName = firstDefinedString(entity?.name, 'the entity');
+  const storytellerName = firstDefinedString(storyteller?.name, 'the storyteller');
+  const description = firstDefinedString(entity?.description, entity?.lore, '');
+  const subEntityNames = Array.from(new Set(
+    (Array.isArray(subEntities) ? subEntities : [])
+      .map((subEntity) => firstDefinedString(subEntity?.name, subEntity?.title))
+      .filter(Boolean)
+  ));
+  const noteLines = [
+    `mission: ${entityName} studied through ${storytellerName}`,
+    `outcome: ${firstDefinedString(outcome, 'pending')}`,
+    firstDefinedString(gmNote),
+    firstDefinedString(userText),
+    subEntityNames.length ? `sub-entities: ${subEntityNames.join(', ')}` : '',
+    storytellingPoints ? `storytelling points spent: ${storytellingPoints}` : ''
+  ].filter(Boolean);
+  const notes = Array.from(new Set([
+    ...(Array.isArray(existing?.notes) ? existing.notes : []),
+    ...noteLines
+  ])).slice(-20);
+
+  const skillField = deriveSkillFieldFromSeerCardKind(entity?.type || entity?.subtype || entity?.category || '');
+  const currentSkillValue = Number(existingSkills?.[skillField]);
+  const nextSkillValue = Number.isFinite(currentSkillValue)
+    ? Math.min(99, Math.max(currentSkillValue, 10) + 3)
+    : 16;
+
+  return {
+    identity: {
+      archetype: firstDefinedString(existing?.identity?.archetype, entityName)
+    },
+    coreTraits: {
+      drive: firstDefinedString(existing?.coreTraits?.drive, userText, description),
+      edge: firstDefinedString(existing?.coreTraits?.edge, gmNote, description)
+    },
+    skills: {
+      ...existingSkills,
+      [skillField]: nextSkillValue
+    },
+    notes
+  };
+}
+
+async function updateNarrativeEntityAfterStorytellerMission({
+  entity,
+  storyteller,
+  outcome,
+  userText,
+  gmNote,
+  subEntitySeed,
+  subEntities,
+  storytellingPoints,
+  durationDays,
+  message
+} = {}) {
+  const entityId = firstDefinedString(entity?._id ? String(entity._id) : '', entity?.externalId);
+  if (!entityId) return null;
+
+  const { evidence, generationCost } = buildStorytellerMissionEntityRecords({
+    entity,
+    storyteller,
+    outcome,
+    userText,
+    gmNote,
+    subEntitySeed,
+    subEntities,
+    storytellingPoints,
+    durationDays,
+    message
+  });
+
+  return NarrativeEntity.findOneAndUpdate(
+    {
+      _id: entity._id || entityId
+    },
+    {
+      $set: {
+        lastUsedAt: new Date(evidence.createdAt),
+        canonicalStatus: firstDefinedString(entity?.canonicalStatus, 'candidate')
+      },
+      $inc: {
+        reuseCount: 1
+      },
+      $push: {
+        evidence,
+        generationCosts: generationCost
+      }
+    },
+    {
+      new: true
+    }
+  );
+}
+
 async function createOrLoadImmersiveRpgScene({
   sessionId,
   playerId,
@@ -4113,6 +4343,37 @@ function firstDefinedString(...values) {
   return '';
 }
 
+function escapeRegexPattern(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function resolveWorldContextForSession(sessionId, playerId = '', requestedWorldId = '', requestedUniverseId = '') {
+  const explicitWorldId = firstDefinedString(requestedWorldId);
+  const explicitUniverseId = firstDefinedString(requestedUniverseId);
+  if (explicitWorldId || explicitUniverseId) {
+    return {
+      worldId: explicitWorldId || explicitUniverseId,
+      universeId: explicitUniverseId || explicitWorldId
+    };
+  }
+
+  if (!sessionId) {
+    return { worldId: '', universeId: '' };
+  }
+
+  const latestWorld = await World.findOne(
+    applyOptionalPlayerId({ sessionId }, playerId)
+  )
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const derivedWorldId = firstDefinedString(latestWorld?.worldId);
+  return {
+    worldId: derivedWorldId,
+    universeId: derivedWorldId
+  };
+}
+
 function getTypewriterStorytellerThreshold(activeCount = 0) {
   if (!Number.isInteger(activeCount) || activeCount < 0) {
     return null;
@@ -4298,6 +4559,14 @@ function buildTypewriterSessionEntityItem(entity) {
     subtype: firstDefinedString(source?.subtype),
     tags: normalizeLooseStringArray(source?.tags),
     externalId: firstDefinedString(source?.externalId),
+    worldId: firstDefinedString(source?.worldId),
+    universeId: firstDefinedString(source?.universeId),
+    canonicalStatus: firstDefinedString(source?.canonicalStatus),
+    sourceReadingIds: Array.isArray(source?.sourceReadingIds) ? [...source.sourceReadingIds] : [],
+    claimedFromCardIds: Array.isArray(source?.claimedFromCardIds) ? [...source.claimedFromCardIds] : [],
+    reuseCount: Number.isFinite(Number(source?.reuseCount)) ? Number(source.reuseCount) : 0,
+    lastUsedAt: source?.lastUsedAt || null,
+    mediaAssets: Array.isArray(source?.mediaAssets) ? [...source.mediaAssets] : [],
     source: firstDefinedString(source?.source, 'unknown'),
     sourceRoute: firstDefinedString(source?.sourceRoute),
     typewriterKeyText: firstDefinedString(source?.typewriterKeyText),
@@ -5392,6 +5661,105 @@ function buildClaimedSeerCardRecord(card = {}, claimedAt = new Date().toISOStrin
   };
 }
 
+function buildSeerClaimMediaAssets(card = {}, claimedAt = new Date().toISOString()) {
+  const assets = [];
+  const cardId = firstDefinedString(card.id);
+  if (card?.back?.imageUrl || card?.back?.texturePrompt) {
+    assets.push({
+      assetKind: 'seer_card_back',
+      cardId,
+      imageUrl: firstDefinedString(card?.back?.imageUrl),
+      prompt: firstDefinedString(card?.back?.texturePrompt),
+      createdAt: claimedAt
+    });
+  }
+  if (card?.front?.imageUrl || card?.front?.summary) {
+    assets.push({
+      assetKind: 'seer_card_front',
+      cardId,
+      imageUrl: firstDefinedString(card?.front?.imageUrl),
+      prompt: firstDefinedString(card?.front?.prompt),
+      summary: firstDefinedString(card?.front?.summary),
+      createdAt: claimedAt
+    });
+  }
+  return assets;
+}
+
+function mergeSeerMediaAssets(existingAssets = [], nextAssets = []) {
+  const merged = [];
+  const seen = new Set();
+  [...existingAssets, ...nextAssets].forEach((asset) => {
+    if (!asset || typeof asset !== 'object') return;
+    const key = [
+      firstDefinedString(asset.assetKind),
+      firstDefinedString(asset.cardId),
+      firstDefinedString(asset.imageUrl),
+      firstDefinedString(asset.prompt)
+    ].join('|');
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push({ ...asset });
+  });
+  return merged;
+}
+
+function collectSeerClaimEntityCandidateIds(reading = {}, card = {}) {
+  const ids = [];
+  const linkedIds = Array.isArray(card?.linkedEntityIds) ? card.linkedEntityIds : [];
+  linkedIds.forEach((value) => {
+    const safeValue = firstDefinedString(value);
+    if (safeValue) ids.push(safeValue);
+  });
+
+  const readingEntities = Array.isArray(reading?.entities) ? reading.entities : [];
+  readingEntities.forEach((entity) => {
+    const entityId = firstDefinedString(entity?.id);
+    if (!entityId || !linkedIds.includes(entityId)) return;
+    [
+      entity?.id,
+      entity?.externalId,
+      entity?.sourceEntityId
+    ].forEach((value) => {
+      const safeValue = firstDefinedString(value);
+      if (safeValue) ids.push(safeValue);
+    });
+  });
+
+  return Array.from(new Set(ids));
+}
+
+function findSeerReadingEntityByCard(reading = {}, card = {}) {
+  const candidateIds = new Set(collectSeerClaimEntityCandidateIds(reading, card));
+  const readingEntities = Array.isArray(reading?.entities) ? reading.entities : [];
+  return readingEntities.find((entity) => (
+    candidateIds.has(firstDefinedString(entity?.id))
+    || candidateIds.has(firstDefinedString(entity?.externalId))
+    || candidateIds.has(firstDefinedString(entity?.sourceEntityId))
+  )) || null;
+}
+
+async function resolveCanonicalEntityForClaim(reading = {}, playerId = '', card = {}) {
+  const candidateIds = collectSeerClaimEntityCandidateIds(reading, card);
+  for (const candidateId of candidateIds) {
+    const entity = await findEntityById(firstDefinedString(reading?.sessionId), playerId, candidateId);
+    if (entity) return entity;
+  }
+  return null;
+}
+
+function buildClaimedEntityLink(entityDoc = {}, card = {}, reading = {}, claimedAt = new Date().toISOString()) {
+  const source = entityDoc && typeof entityDoc.toObject === 'function' ? entityDoc.toObject() : entityDoc || {};
+  return {
+    cardId: firstDefinedString(card?.id),
+    entityId: firstDefinedString(source?._id ? String(source._id) : ''),
+    entityExternalId: firstDefinedString(source?.externalId),
+    title: firstDefinedString(card?.title),
+    readingId: firstDefinedString(reading?.readingId),
+    claimedAt
+  };
+}
+
 function buildSeerReadingSpread(fragmentText, memories = [], focusMemoryId = '', cards = [], focusCardId = '') {
   const fragmentNodeId = 'fragment-anchor';
   const nodes = [
@@ -5615,6 +5983,8 @@ function normalizeSeerReadingPayload(doc) {
     readingId: firstDefinedString(source.readingId),
     sessionId: firstDefinedString(source.sessionId),
     playerId: firstDefinedString(source.playerId),
+    worldId: firstDefinedString(source.worldId),
+    universeId: firstDefinedString(source.universeId),
     status: firstDefinedString(source.status),
     beat: firstDefinedString(source.beat),
     fragment: source.fragment || {},
@@ -5628,6 +5998,7 @@ function normalizeSeerReadingPayload(doc) {
     transcript: Array.isArray(source.transcript) ? source.transcript : [],
     subjectDialog: Array.isArray(source.subjectDialog) ? source.subjectDialog : [],
     claimedCards: Array.isArray(source.claimedCards) ? source.claimedCards : [],
+    claimedEntityLinks: Array.isArray(source.claimedEntityLinks) ? source.claimedEntityLinks : [],
     unresolvedThreads: Array.isArray(source.unresolvedThreads) ? source.unresolvedThreads : [],
     worldbuildingOutputs: Array.isArray(source.worldbuildingOutputs) ? source.worldbuildingOutputs : [],
     metadata: source.metadata || {},
@@ -7717,11 +8088,13 @@ async function findEntityById(sessionId, playerId, entityId) {
     return null;
   }
 
+  const safeEntityId = String(entityId);
+
   const byExternalId = await NarrativeEntity.findOne(
     applyOptionalPlayerId(
       {
         session_id: sessionId,
-        externalId: String(entityId)
+        externalId: safeEntityId
       },
       playerId
     )
@@ -7730,15 +8103,116 @@ async function findEntityById(sessionId, playerId, entityId) {
     return byExternalId;
   }
 
+  if (!mongoose.isValidObjectId(safeEntityId)) {
+    return null;
+  }
+
   return NarrativeEntity.findOne(
     applyOptionalPlayerId(
       {
-        _id: entityId,
+        _id: safeEntityId,
         session_id: sessionId
       },
       playerId
     )
   );
+}
+
+async function upsertNarrativeEntityFromSeerClaim({
+  reading,
+  playerId,
+  card,
+  claimedAt,
+  linkedReadingEntity,
+  existingEntity
+}) {
+  const sessionId = firstDefinedString(reading?.sessionId);
+  const worldId = firstDefinedString(reading?.worldId);
+  const universeId = firstDefinedString(reading?.universeId, worldId);
+  const focusMemory = Array.isArray(reading?.memories)
+    ? reading.memories.find((memory) => memory.id === firstDefinedString(reading?.spread?.focusMemoryId))
+    : null;
+  const safePlayerId = normalizeOptionalPlayerId(playerId);
+  const externalId = firstDefinedString(
+    existingEntity?.externalId,
+    linkedReadingEntity?.externalId,
+    linkedReadingEntity?.sourceEntityId,
+    linkedReadingEntity?.id,
+    `seer-claim-${randomUUID()}`
+  );
+  const existingAssets = Array.isArray(existingEntity?.mediaAssets) ? existingEntity.mediaAssets : [];
+  const nextAssets = buildSeerClaimMediaAssets(card, claimedAt);
+  const existingEvidence = Array.isArray(existingEntity?.evidence) ? existingEntity.evidence : [];
+  const claimEvidence = {
+    kind: 'seer_card_claim',
+    readingId: firstDefinedString(reading?.readingId),
+    memoryId: firstDefinedString(focusMemory?.id, reading?.spread?.focusMemoryId),
+    cardId: firstDefinedString(card?.id),
+    title: firstDefinedString(card?.title),
+    summary: firstDefinedString(card?.front?.summary),
+    facts: Array.isArray(card?.front?.facts) ? card.front.facts.filter(Boolean).slice(0, 6) : [],
+    claimedAt
+  };
+
+  const updatedEntity = await upsertNarrativeEntity(
+    {
+      session_id: sessionId,
+      sessionId,
+      playerId: safePlayerId,
+      externalId,
+      name: firstDefinedString(existingEntity?.name, card?.title, linkedReadingEntity?.name, 'Claimed entity'),
+      description: firstDefinedString(existingEntity?.description, card?.front?.summary, linkedReadingEntity?.description),
+      lore: firstDefinedString(existingEntity?.lore, linkedReadingEntity?.lore),
+      type: firstDefinedString(existingEntity?.type, linkedReadingEntity?.type, String(card?.kind || '').toUpperCase()),
+      subtype: firstDefinedString(existingEntity?.subtype, linkedReadingEntity?.subtype),
+      tags: Array.from(new Set([
+        ...(Array.isArray(existingEntity?.tags) ? existingEntity.tags : []),
+        ...(Array.isArray(linkedReadingEntity?.tags) ? linkedReadingEntity.tags : []),
+        firstDefinedString(card?.kind)
+      ].filter(Boolean))),
+      worldId,
+      universeId,
+      canonicalStatus: firstDefinedString(existingEntity?.canonicalStatus, 'candidate'),
+      source: firstDefinedString(existingEntity?.source, 'seer_claim'),
+      sourceRoute: firstDefinedString(existingEntity?.sourceRoute, '/api/seer/readings/:readingId/cards/:cardId/claim'),
+      sourceReadingIds: Array.from(new Set([
+        ...(Array.isArray(existingEntity?.sourceReadingIds) ? existingEntity.sourceReadingIds : []),
+        firstDefinedString(reading?.readingId)
+      ].filter(Boolean))),
+      claimedFromCardIds: Array.from(new Set([
+        ...(Array.isArray(existingEntity?.claimedFromCardIds) ? existingEntity.claimedFromCardIds : []),
+        firstDefinedString(card?.id)
+      ].filter(Boolean))),
+      discoveredByPlayerIds: Array.from(new Set([
+        ...(Array.isArray(existingEntity?.discoveredByPlayerIds) ? existingEntity.discoveredByPlayerIds : []),
+        safePlayerId
+      ].filter(Boolean))),
+      bankSource: {
+        readingId: firstDefinedString(reading?.readingId),
+        memoryId: firstDefinedString(focusMemory?.id, reading?.spread?.focusMemoryId),
+        cardId: firstDefinedString(card?.id),
+        sourceType: 'seer_claim'
+      },
+      mediaAssets: mergeSeerMediaAssets(existingAssets, nextAssets),
+      evidence: [...existingEvidence, claimEvidence],
+      generationCosts: Array.isArray(existingEntity?.generationCosts) ? existingEntity.generationCosts : [],
+      reuseCount: Math.max(1, Number(existingEntity?.reuseCount || 0) + 1),
+      lastUsedAt: claimedAt
+    },
+    {
+      sessionId,
+      playerId: safePlayerId,
+      worldId,
+      universeId,
+      source: 'seer_claim',
+      sourceRoute: '/api/seer/readings/:readingId/cards/:cardId/claim',
+      lookup: existingEntity
+        ? applyOptionalPlayerId({ _id: existingEntity._id, session_id: sessionId }, safePlayerId)
+        : applyOptionalPlayerId({ session_id: sessionId, externalId }, safePlayerId)
+    }
+  );
+
+  return updatedEntity;
 }
 
 app.post('/api/well/session/start', async (req, res) => {
@@ -8640,6 +9114,12 @@ app.post('/api/seer/readings', async (req, res) => {
     const readingId = firstDefinedString(body.readingId) || randomUUID();
     const batchId = firstDefinedString(body.batchId);
     const fragmentText = await resolveFragmentText(body);
+    const { worldId, universeId } = await resolveWorldContextForSession(
+      sessionId,
+      resolvedPlayerId,
+      body.worldId,
+      body.universeId
+    );
 
     if (!sessionId || !fragmentText) {
       return res.status(400).json({ message: 'Missing required parameters: sessionId or text.' });
@@ -8717,6 +9197,8 @@ app.post('/api/seer/readings', async (req, res) => {
       readingId,
       sessionId,
       playerId: resolvedPlayerId,
+      worldId,
+      universeId,
       status: 'active',
       beat: 'cards_revealed',
       fragment: {
@@ -8737,12 +9219,15 @@ app.post('/api/seer/readings', async (req, res) => {
       apparitions,
       spread: buildSeerReadingSpread(fragmentText, hydratedMemories, focusMemoryId, cards, focusCardId),
       transcript,
+      claimedCards: [],
+      claimedEntityLinks: [],
       unresolvedThreads: [],
       worldbuildingOutputs: [],
       metadata: {
         specVersion: 'seer-reading-v1-alpha',
         batchId,
         observableMilestone: 'M1',
+        demoMockMode: Boolean(shouldMockCards),
         visionMemoryId: String(visionSourceMemory?._id || visionSourceMemory?.id || ''),
         cardConfig: {
           requestedCount: requestedCardCount,
@@ -8843,6 +9328,8 @@ app.post('/api/seer/readings/:readingId/turn', async (req, res) => {
       }
     }
 
+    const effectiveMockMode = resolveMockMode(body, Boolean(reading?.metadata?.demoMockMode));
+
     const runtimeResult = await runSeerReadingTurn({
       reading: typeof reading.toObject === 'function' ? reading.toObject() : reading,
       playerId: resolvedPlayerId,
@@ -8850,7 +9337,8 @@ app.post('/api/seer/readings/:readingId/turn', async (req, res) => {
       message: safeMessage,
       focusMemoryId: requestedFocusMemoryId,
       focusCardId: requestedFocusCardId,
-      entityId: requestedEntityId
+      entityId: requestedEntityId,
+      mock: effectiveMockMode
     });
     const nextReadingFields = runtimeResult?.nextReadingFields || {};
 
@@ -8865,6 +9353,7 @@ app.post('/api/seer/readings/:readingId/turn', async (req, res) => {
     reading.metadata = {
       ...(reading.metadata || {}),
       observableMilestone: 'M4',
+      demoMockMode: Boolean(effectiveMockMode),
       lastTurn: nextReadingFields.lastTurn || null,
       orchestrator: nextReadingFields.orchestrator || null
     };
@@ -8913,12 +9402,29 @@ app.post('/api/seer/readings/:readingId/cards/:cardId/claim', async (req, res) =
     }
 
     const claimedAt = new Date().toISOString();
+    const readingSnapshot = typeof reading.toObject === 'function' ? reading.toObject() : reading;
+    const linkedReadingEntity = findSeerReadingEntityByCard(readingSnapshot, targetCard);
+    const existingEntity = await resolveCanonicalEntityForClaim(readingSnapshot, resolvedPlayerId, targetCard);
+    const claimedEntity = await upsertNarrativeEntityFromSeerClaim({
+      reading: readingSnapshot,
+      playerId: resolvedPlayerId,
+      card: targetCard,
+      claimedAt,
+      linkedReadingEntity,
+      existingEntity
+    });
+    const claimedEntityLink = buildClaimedEntityLink(claimedEntity, targetCard, readingSnapshot, claimedAt);
+    const canonicalEntityId = firstDefinedString(claimedEntityLink.entityId);
+    const canonicalEntityExternalId = firstDefinedString(claimedEntityLink.entityExternalId);
     const claimedCard = {
       ...targetCard,
       status: 'claimed',
       focusState: 'resolved',
       clarity: 1,
-      confidence: Math.max(0.86, Number(targetCard.confidence) || 0)
+      confidence: Math.max(0.86, Number(targetCard.confidence) || 0),
+      linkedEntityIds: Array.from(new Set([...(Array.isArray(targetCard.linkedEntityIds) ? targetCard.linkedEntityIds : []), canonicalEntityExternalId].filter(Boolean))),
+      canonicalEntityId,
+      canonicalEntityExternalId
     };
     cards[cardIndex] = claimedCard;
 
@@ -8930,7 +9436,10 @@ app.post('/api/seer/readings/:readingId/cards/:cardId/claim', async (req, res) =
           status: 'claimed',
           focusState: 'resolved',
           clarity: 1,
-          confidence: Math.max(0.86, Number(card.confidence) || 0)
+          confidence: Math.max(0.86, Number(card.confidence) || 0),
+          linkedEntityIds: Array.from(new Set([...(Array.isArray(card.linkedEntityIds) ? card.linkedEntityIds : []), canonicalEntityExternalId].filter(Boolean))),
+          canonicalEntityId,
+          canonicalEntityExternalId
         };
       }
       if (nextFocus && card.id === nextFocus.id) {
@@ -8957,10 +9466,36 @@ app.post('/api/seer/readings/:readingId/cards/:cardId/claim', async (req, res) =
     });
 
     const nextClaimedCards = Array.isArray(reading.claimedCards) ? [...reading.claimedCards] : [];
-    nextClaimedCards.push(buildClaimedSeerCardRecord(claimedCard, claimedAt));
+    nextClaimedCards.push({
+      ...buildClaimedSeerCardRecord(claimedCard, claimedAt),
+      entityId: canonicalEntityId,
+      entityExternalId: canonicalEntityExternalId
+    });
+    const nextClaimedEntityLinks = Array.isArray(reading.claimedEntityLinks) ? [...reading.claimedEntityLinks] : [];
+    if (!nextClaimedEntityLinks.some((link) => link.cardId === claimedEntityLink.cardId && link.entityExternalId === claimedEntityLink.entityExternalId)) {
+      nextClaimedEntityLinks.push(claimedEntityLink);
+    }
+    const canonicalEntityProjection = buildSeerReadingEntity(claimedEntity);
+    const nextReadingEntities = Array.isArray(reading.entities) ? [...reading.entities] : [];
+    const projectionIndex = nextReadingEntities.findIndex((entity) => (
+      firstDefinedString(entity?.id) === firstDefinedString(linkedReadingEntity?.id)
+      || firstDefinedString(entity?.externalId) === canonicalEntityExternalId
+      || firstDefinedString(entity?.id) === canonicalEntityId
+      || firstDefinedString(entity?.sourceEntityId) === canonicalEntityExternalId
+    ));
+    if (projectionIndex >= 0) {
+      nextReadingEntities[projectionIndex] = {
+        ...nextReadingEntities[projectionIndex],
+        ...canonicalEntityProjection
+      };
+    } else {
+      nextReadingEntities.push(canonicalEntityProjection);
+    }
 
     reading.cards = nextCards;
     reading.claimedCards = nextClaimedCards;
+    reading.claimedEntityLinks = nextClaimedEntityLinks;
+    reading.entities = nextReadingEntities;
     reading.transcript = [
       ...(Array.isArray(reading.transcript) ? reading.transcript : []),
       playerEntry,
@@ -8978,6 +9513,8 @@ app.post('/api/seer/readings/:readingId/cards/:cardId/claim', async (req, res) =
       ...(typeof reading.toObject === 'function' ? reading.toObject() : reading),
       cards: nextCards,
       claimedCards: nextClaimedCards,
+      claimedEntityLinks: nextClaimedEntityLinks,
+      entities: nextReadingEntities,
       spread: reading.spread,
       transcript: reading.transcript,
       beat: reading.beat
@@ -8988,10 +9525,14 @@ app.post('/api/seer/readings/:readingId/cards/:cardId/claim', async (req, res) =
       focusMemoryId: firstDefinedString(reading?.spread?.focusMemoryId),
       focusCardId: nextFocus?.id || '',
       claimedCardIds: [cardId],
+      claimedEntityLinks: [claimedEntityLink],
       toolCalls: [
         {
           tool_id: 'claim_card',
-          input: { card_id: cardId },
+          input: {
+            card_id: cardId,
+            entity_external_id: canonicalEntityExternalId
+          },
           reason: 'Player sealed a fully revealed card into the reading.'
         }
       ],
@@ -9010,8 +9551,18 @@ app.post('/api/seer/readings/:readingId/cards/:cardId/claim', async (req, res) =
     };
 
     await reading.save();
+    const characterSheetDoc = await synthesizeCharacterSheetFromSeerClaim({
+      reading: typeof reading.toObject === 'function' ? reading.toObject() : reading,
+      playerId: resolvedPlayerId,
+      claimedEntity,
+      card: claimedCard
+    });
+    const responsePayload = normalizeSeerReadingPayload(reading);
+    if (characterSheetDoc) {
+      responsePayload.characterSheet = toImmersiveRpgCharacterSheetPayload(characterSheetDoc);
+    }
 
-    return res.status(200).json(normalizeSeerReadingPayload(reading));
+    return res.status(200).json(responsePayload);
   } catch (error) {
     console.error('Error in /api/seer/readings/:readingId/cards/:cardId/claim:', error);
     return res.status(500).json({ message: 'Server error while claiming seer card.' });
@@ -9429,9 +9980,16 @@ app.get('/api/entities', async (req, res) => {
       type,
       subtype,
       externalId,
+      worldId,
+      universeId,
+      name,
+      tag,
+      canonicalStatus,
+      linkedReadingId,
       introducedByStorytellerId,
       activeInTypewriter,
       typewriterKeyText,
+      sort,
       limit
     } = req.query;
     if (!sessionId) {
@@ -9450,18 +10008,32 @@ app.get('/api/entities', async (req, res) => {
     if (type) query.type = String(type);
     if (subtype) query.subtype = String(subtype);
     if (externalId) query.externalId = String(externalId);
+    if (worldId) query.worldId = String(worldId);
+    if (universeId) query.universeId = String(universeId);
+    if (canonicalStatus) query.canonicalStatus = String(canonicalStatus);
+    if (linkedReadingId) query.sourceReadingIds = String(linkedReadingId);
     if (introducedByStorytellerId) query.introducedByStorytellerId = String(introducedByStorytellerId);
     const parsedActiveInTypewriter = parseOptionalBooleanQuery(activeInTypewriter);
     if (parsedActiveInTypewriter !== undefined) {
       query.activeInTypewriter = parsedActiveInTypewriter;
     }
     if (typewriterKeyText) query.typewriterKeyText = String(typewriterKeyText);
+    if (name) {
+      query.name = { $regex: escapeRegexPattern(String(name)), $options: 'i' };
+    }
+    if (tag) {
+      query.tags = { $regex: escapeRegexPattern(String(tag)), $options: 'i' };
+    }
 
     const safeLimit = Number.isFinite(Number(limit))
       ? Math.max(1, Math.min(200, Math.floor(Number(limit))))
       : 0;
+    const normalizedSort = firstDefinedString(sort).toLowerCase();
+    const sortSpec = normalizedSort === 'reuse'
+      ? { reuseCount: -1, lastUsedAt: -1, createdAt: -1 }
+      : { createdAt: -1 };
 
-    let entitiesQuery = NarrativeEntity.find(query).sort({ createdAt: 1 });
+    let entitiesQuery = NarrativeEntity.find(query).sort(sortSpec);
     if (safeLimit) {
       entitiesQuery = entitiesQuery.limit(safeLimit);
     }
@@ -9559,6 +10131,7 @@ app.post('/api/textToEntity', async (req, res) => {
       playerId,
       count,
       numberOfEntities,
+      desiredEntityCategories,
       includeCards,
       includeFront,
       includeBack,
@@ -9588,6 +10161,7 @@ app.post('/api/textToEntity', async (req, res) => {
       count ?? numberOfEntities,
       normalizeEntityCount(entityPipeline.entityCount, 8)
     );
+    const normalizedDesiredEntityCategories = normalizeDesiredEntityCategories(desiredEntityCategories);
     const shouldMockEntities = resolveMockMode(body, entityPipeline.useMock);
     const shouldMockTextures = resolveImageMockMode(body, texturePipeline.useMock, [
       'mockImage',
@@ -9598,6 +10172,7 @@ app.post('/api/textToEntity', async (req, res) => {
       playerId: resolvedPlayerId,
       text: fragmentText,
       entityCount,
+      desiredEntityCategories: normalizedDesiredEntityCategories,
       includeCards: includeCards === undefined ? false : Boolean(includeCards),
       includeFront: includeFront === undefined ? true : Boolean(includeFront),
       includeBack: includeBack === undefined ? true : Boolean(includeBack),
@@ -9612,11 +10187,13 @@ app.post('/api/textToEntity', async (req, res) => {
     };
 
     const result = await textToEntityFromText(options);
+    await validatePayloadForRoute('text_to_entity', { entities: result.entities || [] });
 
     const response = {
       sessionId,
       count: result.entities?.length || 0,
       requestedCount: entityCount,
+      desiredEntityCategories: result.desiredEntityCategories || normalizedDesiredEntityCategories,
       entities: result.entities,
       mocked: result.mocked,
       mockedEntities: result.mockedEntities,
@@ -9997,6 +10574,7 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       sessionId,
       playerId: resolvedPlayerId,
       text: subEntitySeed,
+      entityCount: 3,
       includeCards: false,
       debug: shouldMockSubEntities,
       llmModel: entityPipeline.model,
@@ -10023,6 +10601,18 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
         )
       )
       : [];
+    const updatedMissionEntity = await updateNarrativeEntityAfterStorytellerMission({
+      entity,
+      storyteller,
+      outcome: outcome || 'pending',
+      userText,
+      gmNote,
+      subEntitySeed,
+      subEntities: savedSubEntities,
+      storytellingPoints,
+      durationDays,
+      message
+    });
     const missionRecord = {
       entityId: entity._id,
       entityExternalId: entity.externalId || String(entity._id),
@@ -10052,8 +10642,25 @@ app.post('/api/sendStorytellerToEntity', async (req, res) => {
       outcome: missionRecord.outcome,
       userText: userText || undefined,
       gmNote: gmNote || undefined,
-      entity,
+      entity: updatedMissionEntity || entity,
       subEntities: savedSubEntities,
+      characterSheet: toImmersiveRpgCharacterSheetPayload(
+        await ensureImmersiveRpgCharacterSheet({
+          sessionId,
+          playerId: resolvedPlayerId,
+          playerName: '',
+          sourceSceneBrief: null,
+          patch: buildStorytellerMissionCharacterSheetPatch({
+            entity: updatedMissionEntity || entity,
+            storyteller,
+            outcome: missionRecord.outcome,
+            userText: userText || '',
+            gmNote: gmNote || '',
+            subEntities: savedSubEntities,
+            storytellingPoints
+          })
+        })
+      ),
       runtime: {
         mission: {
           pipeline: 'storyteller_mission',

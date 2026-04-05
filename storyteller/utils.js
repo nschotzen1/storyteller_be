@@ -67,6 +67,19 @@ function normalizeEntityMixed(value, fallback = null) {
   return value === undefined ? fallback : value;
 }
 
+function normalizeEntityObjectArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+    .map((entry) => ({ ...entry }));
+}
+
+function normalizeEntityDate(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function normalizeEntityReusabilityLevel(value) {
   if (typeof value === 'string' && value.trim()) return value.trim();
   const numeric = normalizeEntityNumber(value);
@@ -160,6 +173,32 @@ export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
       sourceEntity.introducedByStorytellerName || options.introducedByStorytellerName,
       ''
     ),
+    worldId: normalizeEntityString(sourceEntity.worldId || options.worldId, ''),
+    universeId: normalizeEntityString(sourceEntity.universeId || options.universeId, ''),
+    canonicalStatus: normalizeEntityString(sourceEntity.canonicalStatus || options.canonicalStatus, ''),
+    sourceReadingIds: Array.from(
+      new Set([
+        ...normalizeEntityStringArray(sourceEntity.sourceReadingIds),
+        ...normalizeEntityStringArray(options.sourceReadingIds)
+      ])
+    ),
+    claimedFromCardIds: Array.from(
+      new Set([
+        ...normalizeEntityStringArray(sourceEntity.claimedFromCardIds),
+        ...normalizeEntityStringArray(options.claimedFromCardIds)
+      ])
+    ),
+    discoveredByPlayerIds: Array.from(
+      new Set([
+        ...normalizeEntityStringArray(sourceEntity.discoveredByPlayerIds),
+        ...normalizeEntityStringArray(options.discoveredByPlayerIds),
+        ...normalizeEntityStringArray([playerId])
+      ])
+    ),
+    bankSource: normalizeEntityMixed(sourceEntity.bankSource || options.bankSource, null),
+    mediaAssets: normalizeEntityObjectArray(sourceEntity.mediaAssets || options.mediaAssets),
+    evidence: normalizeEntityObjectArray(sourceEntity.evidence || options.evidence),
+    generationCosts: normalizeEntityObjectArray(sourceEntity.generationCosts || options.generationCosts),
     sourceStorytellerKeySlot: Number.isInteger(sourceEntity.sourceStorytellerKeySlot)
       ? sourceEntity.sourceStorytellerKeySlot
       : Number.isInteger(options.sourceStorytellerKeySlot)
@@ -185,6 +224,10 @@ export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
     sourceEntity.storytellingPointsCost || sourceEntity.storytelling_points_cost
   );
   if (storytellingPointsCost !== null) normalized.storytellingPointsCost = storytellingPointsCost;
+  const reuseCount = normalizeEntityNumber(sourceEntity.reuseCount ?? options.reuseCount);
+  if (reuseCount !== null) normalized.reuseCount = reuseCount;
+  const lastUsedAt = normalizeEntityDate(sourceEntity.lastUsedAt || options.lastUsedAt);
+  if (lastUsedAt) normalized.lastUsedAt = lastUsedAt;
 
   return normalized;
 }
@@ -245,6 +288,18 @@ const entitySchemaDefinition = {
   skillsAndRolls: { type: mongoose.Schema.Types.Mixed },
   evolutionState: { type: String },
   evolutionNotes: { type: String },
+  worldId: { type: String, index: true },
+  universeId: { type: String, index: true },
+  canonicalStatus: { type: String, index: true },
+  sourceReadingIds: { type: [String], default: [] },
+  claimedFromCardIds: { type: [String], default: [] },
+  discoveredByPlayerIds: { type: [String], default: [] },
+  bankSource: { type: mongoose.Schema.Types.Mixed, default: null },
+  mediaAssets: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  evidence: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  generationCosts: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  reuseCount: { type: Number, default: 0 },
+  lastUsedAt: { type: Date, default: null },
   typewriterKeyText: { type: String, index: true },
   typewriterSource: { type: String },
   introducedByStorytellerId: { type: String, index: true },
@@ -261,6 +316,8 @@ const entitySchema = new mongoose.Schema(entitySchemaDefinition, {
 entitySchema.index({ session_id: 1, playerId: 1, externalId: 1 });
 entitySchema.index({ session_id: 1, playerId: 1, source: 1, createdAt: -1 });
 entitySchema.index({ session_id: 1, playerId: 1, type: 1, subtype: 1 });
+entitySchema.index({ session_id: 1, playerId: 1, worldId: 1, canonicalStatus: 1 });
+entitySchema.index({ session_id: 1, playerId: 1, universeId: 1, canonicalStatus: 1 });
 
 for (const field of NARRATIVE_ENTITY_REQUIRED_FIELDS) {
   if (!entitySchemaDefinition[field]) {
@@ -1103,6 +1160,14 @@ export async function generateEntitiesFromFragment(sessionId, fragmentText, turn
   const entityPromptTemplate = typeof options.entityPromptTemplate === 'string'
     ? options.entityPromptTemplate.trim()
     : '';
+  const desiredEntityCategories = Array.isArray(options.desiredEntityCategories)
+    ? options.desiredEntityCategories
+        .map((entry) => (typeof entry === 'string' ? entry.trim().toUpperCase() : ''))
+        .filter(Boolean)
+    : [];
+  const desiredEntityCategoriesCsv = desiredEntityCategories.join(', ');
+  const desiredEntityCategoriesBullets = desiredEntityCategories.map((entry) => `- ${entry}`).join('\n');
+  const desiredEntityCategoriesJson = JSON.stringify(desiredEntityCategories);
   if(process.env["MOCK_ENTIITIES"] == 'true')
     commonEntities = [{"id":"ru6k9uuw","turn":4,"familiarity_level":4,"reusability_level":"High fantasy setting","ner_type":"LOCATION","ner_subtype":"Volcanic Crater","description":"An immense volcanic crater shrouded in dense fog, with glimpses of a lush jungle within its depths.","name":"Fogbound Crater","relevance":"The crater is the central location of the narrative fragment, representing both a destination and a mystery.","impact":"Potentially hiding ancient secrets or dangers, it presents exploration opportunities and environmental challenges.","skills_and_rolls":["Survival","Perception","Nature Lore"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":18,"urgency":"Immediate","connections":["Kimia","Elivirio","Ancient stone markers"],"tile_distance":0,"evolution_state":"New","evolution_notes":"Introduced as a major narrative location."},{"id":"t00uky8x","turn":4,"familiarity_level":3,"reusability_level":"Jungle exploration","ner_type":"FLORA","ner_subtype":"Exotic Jungle","description":"A lush jungle teeming with vibrant plant life, hidden within the crater.","name":"Crater Jungle","relevance":"The jungle is a potential source of resources or clues within the crater.","impact":"Offers opportunities for foraging and discovery, but may also hide dangers.","skills_and_rolls":["Botany","Stealth","Tracking"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":15,"urgency":"Near Future","connections":["Fogbound Crater"],"tile_distance":1,"evolution_state":"New","evolution_notes":"Revealed as part of the crater's interior."},{"id":"myxshov9","turn":4,"familiarity_level":5,"reusability_level":"Fantasy characters","ner_type":"PERSON","ner_subtype":"Guide","description":"A character with long black braided hair, knowledgeable about the crater's secrets.","name":"Elivirio","relevance":"Elivirio is a guide and key figure in navigating the crater, holding knowledge about its hidden paths.","impact":"His knowledge is crucial for progress, potentially unlocking new paths or lore.","skills_and_rolls":["Navigation","Lore","Persuasion"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":8,"urgency":"Immediate","connections":["Kimia","Fogbound Crater"],"tile_distance":0,"evolution_state":"Expanded","evolution_notes":"Further developed as a knowledgeable guide character."},{"id":"310xnsfn","turn":4,"familiarity_level":4,"reusability_level":"Archaeological sites","ner_type":"ITEM","ner_subtype":"Ancient Marker","description":"Half-buried stone markers with worn symbols, hinting at ancient civilizations.","name":"Volcanic Markers","relevance":"These markers potentially reveal the history of the crater and guide adventurers.","impact":"Could lead to new discoveries or unlock hidden areas within the crater.","skills_and_rolls":["Archaeology","History","Decipher Script"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":12,"urgency":"Near Future","connections":["Fogbound Crater","Elivirio"],"tile_distance":1,"evolution_state":"New","evolution_notes":"Introduced as elements of historical significance."},{"id":"1k4jsfkh","turn":4,"familiarity_level":3,"reusability_level":"Geological features","ner_type":"CONCEPT","ner_subtype":"Natural Phenomenon","description":"Thick fog that blankets the crater, obscuring visibility and adding mystery.","name":"Fog Blanket","relevance":"The fog adds an element of mystery and challenge to the exploration of the crater.","impact":"Limits visibility, creating navigation challenges and atmospheric tension.","skills_and_rolls":["Survival","Navigation","Perception"],"development_cost":"5, 10, 15, 20","storytelling_points_cost":10,"urgency":"Immediate","connections":["Fogbound Crater","Crater Jungle"],"tile_distance":0,"evolution_state":"New","evolution_notes":"Introduced as an environmental condition affecting exploration."}]
   else {
@@ -1112,10 +1177,18 @@ export async function generateEntitiesFromFragment(sessionId, fragmentText, turn
         content: renderPromptTemplateString(entityPromptTemplate, {
           fragmentText,
           maxEntities,
-          existingEntities: JSON.stringify(existinEntities || [])
+          existingEntities: JSON.stringify(existinEntities || []),
+          desiredEntityCategories: desiredEntityCategoriesCsv,
+          desired_entity_categories: desiredEntityCategoriesCsv,
+          desiredEntityCategoriesCsv: desiredEntityCategoriesCsv,
+          desired_entity_categories_csv: desiredEntityCategoriesCsv,
+          desiredEntityCategoriesBullets: desiredEntityCategoriesBullets,
+          desired_entity_categories_bullets: desiredEntityCategoriesBullets,
+          desiredEntityCategoriesJson: desiredEntityCategoriesJson,
+          desired_entity_categories_json: desiredEntityCategoriesJson
         })
       }]
-      : generate_entities_by_fragment(fragmentText, maxEntities);
+      : generate_entities_by_fragment(fragmentText, maxEntities, existinEntities || [], desiredEntityCategories);
     if(! existinEntities)
       existinEntities = []
     const response = await callJsonLlm({
