@@ -602,9 +602,12 @@ export async function getCurrentTypewriterPromptTemplates() {
       promptTemplate: await buildSeerReadingOrchestratorPromptTemplate(),
       source: 'services/llmRouteConfigService.js:seer_reading_orchestrator.promptTemplate',
       variables: [
+        'player_action',
         'reading_state_json',
         'focused_memory_json',
+        'focused_card_json',
         'player_reply',
+        'player_requested_entity_id',
         'available_tools_json'
       ]
     },

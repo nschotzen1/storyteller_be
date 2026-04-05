@@ -883,5 +883,50 @@
     ],
     "bundle": [],
     "completedAt": null
+  },
+  "well-preview-1775374866934-349c09::": {
+    "session_id": "well-preview-1775374866934-349c09",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1775378363149-ba1bd3::": {
+    "session_id": "well-preview-1775378363149-ba1bd3",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "4ea66ef5-cce9-4805-b821-c7689d2ecb7c",
+      "type": "textual",
+      "bankId": "txt_10",
+      "surface": {
+        "text": "The sea withdrew only long enough to listen"
+      },
+      "surfacedAt": "2026-04-05T10:40:27.210Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_8",
+      "txt_6",
+      "txt_10"
+    ],
+    "bundle": [],
+    "completedAt": null
   }
 }

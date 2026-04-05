@@ -365,6 +365,31 @@ const SEER_ORCHESTRATOR_RESPONSE_SCHEMA = {
   additionalProperties: true
 };
 
+const SEER_TOOL_REGISTRY_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['tools'],
+  properties: {
+    tools: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['id', 'label', 'description', 'inputHints'],
+        properties: {
+          id: { type: 'string', minLength: 1 },
+          label: { type: 'string', minLength: 1 },
+          description: { type: 'string', minLength: 1 },
+          inputHints: {
+            type: 'array',
+            items: { type: 'string' }
+          }
+        },
+        additionalProperties: true
+      }
+    }
+  },
+  additionalProperties: true
+};
+
 const SEER_CARD_GENERATION_RESPONSE_SCHEMA = {
   type: 'object',
   required: ['vision_summary', 'cards'],
@@ -1013,7 +1038,7 @@ Rules:
     routeKey: 'seer_reading_orchestrator',
     routePath: '/api/seer/readings/:readingId/turn',
     method: 'POST',
-    description: 'Reserved tool-using orchestrator contract for Seer Reading turns.',
+    description: 'Prompt-driven tool orchestrator contract for Seer Reading turns.',
     promptMode: 'manual',
     promptTemplate: `You are the Seer Reading Orchestrator.
 
@@ -1021,8 +1046,8 @@ You are not merely narrating. You are deciding one ritual move for a single turn
 
 You receive:
 - the current reading state
-- the current vision
-- the current cards
+- the focused memory
+- the focused card
 - the player reply
 - the currently available tools
 
@@ -1058,6 +1083,27 @@ Rules:
 - if you sharpen a card, make the new detail feel earned by the player's interpretation
 - if the vision becomes sufficiently vivid, you may unlock a short subject chat
 - if no tool should fire, return an intentional dead_end with a sharper spoken question
+
+Player action:
+{{player_action}}
+
+Player reply:
+{{player_reply}}
+
+Requested entity id:
+{{player_requested_entity_id}}
+
+Focused memory JSON:
+{{focused_memory_json}}
+
+Focused card JSON:
+{{focused_card_json}}
+
+Current reading JSON:
+{{reading_state_json}}
+
+Available tools JSON:
+{{available_tools_json}}
 
 Return JSON only in the configured schema.`,
     promptCore: '',
@@ -1103,6 +1149,54 @@ Return JSON only in the configured schema.`,
       'Default to fragments and suggestive pressure before explicit facts.'
     ],
     responseSchema: SEER_ORCHESTRATOR_RESPONSE_SCHEMA
+  },
+  seer_reading_tool_registry: {
+    routeKey: 'seer_reading_tool_registry',
+    routePath: 'internal://seer-reading/tools',
+    method: 'GET',
+    description: 'Read-only registry of executable tools the Seer orchestrator may use during a turn.',
+    promptMode: 'manual',
+    promptTemplate: '',
+    promptCore: '',
+    fieldDocs: {
+      id: 'Stable tool id returned to and from the orchestrator.',
+      label: 'Human-readable tool label shown in admin and debug views.',
+      description: 'What the runtime will actually do if this tool is executed.',
+      inputHints: 'Expected input keys the orchestrator may send with the tool call.'
+    },
+    examplePayload: {
+      tools: [
+        {
+          id: 'retrieve_entity',
+          label: 'Retrieve Entity',
+          description: 'Search the entity bank before minting a new entity.',
+          inputHints: ['entityId', 'searchLabel']
+        },
+        {
+          id: 'create_entity',
+          label: 'Create Entity',
+          description: 'Create a reusable entity from the current thread.',
+          inputHints: ['entityId']
+        },
+        {
+          id: 'propose_relation',
+          label: 'Propose Relation',
+          description: 'Bind the focused card and memory to the chosen entity.',
+          inputHints: ['entityId']
+        },
+        {
+          id: 'invoke_storyteller',
+          label: 'Invoke Storyteller',
+          description: 'Offer an apparition as the next interpretive force.',
+          inputHints: ['storytellerId']
+        }
+      ]
+    },
+    outputRules: [
+      'This registry is descriptive; it should stay aligned with the runtime implementation.',
+      'Do not list speculative tools that the runtime cannot execute.'
+    ],
+    responseSchema: SEER_TOOL_REGISTRY_RESPONSE_SCHEMA
   },
   seer_reading_card_generation: {
     routeKey: 'seer_reading_card_generation',

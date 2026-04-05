@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto';
+import { callJsonLlm } from '../ai/openai/apiService.js';
+import { NarrativeEntity } from '../storyteller/utils.js';
+import { getRouteConfig, validatePayloadForRoute } from './llmRouteConfigService.js';
 import { getPipelineSettings } from './typewriterAiSettingsService.js';
-import { getLatestPromptTemplate } from './typewriterPromptConfigService.js';
+import { getLatestPromptTemplate, renderPromptTemplateString } from './typewriterPromptConfigService.js';
 import { textToEntityFromText } from './textToEntityService.js';
 
 const SEER_FIELD_TIERS = Object.freeze({
@@ -34,6 +37,85 @@ const DEFAULT_SEER_PERSONA = Object.freeze({
   ]
 });
 
+const SEER_ORCHESTRATOR_TOOL_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    id: 'focus_card',
+    label: 'Focus Card',
+    description: 'Shift ritual attention to a different card.',
+    inputHints: Object.freeze(['focusCardId'])
+  }),
+  Object.freeze({
+    id: 'focus_memory',
+    label: 'Focus Memory',
+    description: 'Shift ritual attention to a different memory glimpse.',
+    inputHints: Object.freeze(['focusMemoryId'])
+  }),
+  Object.freeze({
+    id: 'reveal_card_tier',
+    label: 'Reveal Card Tier',
+    description: 'Advance the focused card by one reveal tier.',
+    inputHints: Object.freeze(['delta', 'clarityDelta', 'confidenceDelta'])
+  }),
+  Object.freeze({
+    id: 'reveal_memory_tier',
+    label: 'Reveal Memory Tier',
+    description: 'Advance the focused memory by one reveal tier.',
+    inputHints: Object.freeze(['delta', 'clarityDelta'])
+  }),
+  Object.freeze({
+    id: 'retrieve_entity',
+    label: 'Retrieve Entity',
+    description: 'Search the existing entity bank before minting a new entity.',
+    inputHints: Object.freeze(['entityId', 'searchLabel'])
+  }),
+  Object.freeze({
+    id: 'create_entity',
+    label: 'Create Entity',
+    description: 'Create a reusable entity from the current card, memory, and player clarification.',
+    inputHints: Object.freeze(['entityId'])
+  }),
+  Object.freeze({
+    id: 'propose_relation',
+    label: 'Propose Relation',
+    description: 'Bind the focused card and memory thread to a retrieved or created entity.',
+    inputHints: Object.freeze(['entityId'])
+  }),
+  Object.freeze({
+    id: 'invoke_storyteller',
+    label: 'Invoke Storyteller',
+    description: 'Offer a current apparition as the next interpretive force in the reading.',
+    inputHints: Object.freeze(['storytellerId'])
+  }),
+  Object.freeze({
+    id: 'claim_card',
+    label: 'Claim Card',
+    description: 'Mark that a fully revealed card is ready to be sealed by the player.',
+    inputHints: Object.freeze(['cardId'])
+  }),
+  Object.freeze({
+    id: 'synthesize',
+    label: 'Synthesize',
+    description: 'Pull multiple revealed threads into one stronger interpretation.',
+    inputHints: Object.freeze([])
+  }),
+  Object.freeze({
+    id: 'advance_focus',
+    label: 'Advance Focus',
+    description: 'Move the ritual attention to the next unresolved card.',
+    inputHints: Object.freeze([])
+  }),
+  Object.freeze({
+    id: 'roll_dice',
+    label: 'Roll Dice',
+    description: 'Resolve a formal omen or risk through dice if the reading enables it.',
+    inputHints: Object.freeze([])
+  })
+]);
+
+const SEER_ORCHESTRATOR_TOOL_MAP = Object.freeze(
+  Object.fromEntries(SEER_ORCHESTRATOR_TOOL_DEFINITIONS.map((tool) => [tool.id, tool]))
+);
+
 function firstDefinedString(...values) {
   for (const value of values) {
     if (typeof value === 'string' && value.trim()) {
@@ -41,6 +123,27 @@ function firstDefinedString(...values) {
     }
   }
   return '';
+}
+
+function escapeRegexPattern(value = '') {
+  return `${value || ''}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function asSeerJsonText(value) {
+  return JSON.stringify(value, null, 2);
+}
+
+function cloneToolDefinition(tool = {}) {
+  return {
+    id: firstDefinedString(tool.id),
+    label: firstDefinedString(tool.label),
+    description: firstDefinedString(tool.description),
+    inputHints: Array.isArray(tool.inputHints) ? [...tool.inputHints] : []
+  };
+}
+
+export function listSeerOrchestratorToolDefinitions() {
+  return SEER_ORCHESTRATOR_TOOL_DEFINITIONS.map(cloneToolDefinition);
 }
 
 function clampSeerClarity(value) {
@@ -380,6 +483,70 @@ async function createEntityFromService({ reading, focusMemory, focusCard, player
   };
 }
 
+function collectEntitySearchLabels({ reading = {}, focusMemory = {}, focusCard = {}, playerReply = '', explicitLabel = '' } = {}) {
+  const labels = [
+    firstDefinedString(explicitLabel),
+    firstDefinedString(playerReply),
+    firstDefinedString(focusCard?.title),
+    firstDefinedString(focusMemory?.witness),
+    firstDefinedString(focusMemory?.location),
+    ...(Array.isArray(reading?.entities) ? reading.entities.map((entity) => firstDefinedString(entity?.name)) : []),
+    ...extractSeerEntityLabels(focusMemory)
+  ]
+    .map((value) => firstDefinedString(value))
+    .filter(Boolean);
+
+  return Array.from(new Set(labels))
+    .sort((left, right) => right.length - left.length)
+    .slice(0, 8);
+}
+
+async function retrieveEntityFromBank({ reading = {}, playerId = '', focusMemory = {}, focusCard = {}, playerReply = '', explicitLabel = '' } = {}) {
+  const sessionId = firstDefinedString(reading?.sessionId);
+  if (!sessionId) return null;
+
+  const searchLabels = collectEntitySearchLabels({
+    reading,
+    focusMemory,
+    focusCard,
+    playerReply,
+    explicitLabel
+  });
+
+  if (!searchLabels.length) return null;
+
+  const query = {
+    session_id: sessionId
+  };
+
+  const worldId = firstDefinedString(reading?.worldId);
+  if (worldId) {
+    query.worldId = worldId;
+  }
+
+  const normalizedPlayerId = firstDefinedString(playerId);
+  if (normalizedPlayerId) {
+    query.playerId = normalizedPlayerId;
+  }
+
+  const candidateDocs = await NarrativeEntity.find(query)
+    .sort({ reuseCount: -1, lastUsedAt: -1, createdAt: -1 })
+    .limit(50)
+    .lean();
+
+  const normalizedLabels = searchLabels.map((label) => label.toLowerCase());
+  const exact = candidateDocs.find((entity) =>
+    normalizedLabels.includes(firstDefinedString(entity?.name).toLowerCase())
+  );
+  if (exact) {
+    return normalizeGeneratedEntity(exact);
+  }
+
+  const fuzzyRegex = new RegExp(searchLabels.map((label) => escapeRegexPattern(label)).join('|'), 'i');
+  const fuzzy = candidateDocs.find((entity) => fuzzyRegex.test(firstDefinedString(entity?.name, entity?.description)));
+  return fuzzy ? normalizeGeneratedEntity(fuzzy) : null;
+}
+
 function findEntityInReading(entities = [], requestedEntityId = '', replyText = '', focusMemory = {}) {
   const safeRequestedEntityId = firstDefinedString(requestedEntityId);
   const normalizedReply = firstDefinedString(replyText).toLowerCase();
@@ -401,60 +568,37 @@ function findEntityInReading(entities = [], requestedEntityId = '', replyText = 
   return entity || null;
 }
 
+function describeAvailableSeerTool(toolId = '') {
+  return cloneToolDefinition(SEER_ORCHESTRATOR_TOOL_MAP[toolId] || { id: toolId });
+}
+
 function buildAvailableTools(reading = {}, focusMemory = null, focusCard = null) {
   const tools = [];
 
   if (focusCard && Number(focusCard.revealTier) < 3) {
-    tools.push({
-      id: 'reveal_card_tier',
-      label: 'Reveal Card Tier',
-      description: 'Advance the focused card to its next reveal tier.'
-    });
+    tools.push(describeAvailableSeerTool('reveal_card_tier'));
   }
 
   if (focusCard && firstDefinedString(focusCard.status) === 'claimable') {
-    tools.push({
-      id: 'claim_card',
-      label: 'Claim Card',
-      description: 'Seal a fully revealed card into the reading result set.'
-    });
+    tools.push(describeAvailableSeerTool('claim_card'));
   }
 
   if (focusCard && (!Array.isArray(focusCard.linkedEntityIds) || focusCard.linkedEntityIds.length === 0)) {
-    tools.push({
-      id: 'create_entity',
-      label: 'Create Entity',
-      description: 'Create a reusable entity from the focused card and player clarification.'
-    });
-    tools.push({
-      id: 'propose_relation',
-      label: 'Propose Relation',
-      description: 'Bind the focused card to an existing or newly created entity.'
-    });
+    tools.push(describeAvailableSeerTool('retrieve_entity'));
+    tools.push(describeAvailableSeerTool('create_entity'));
+    tools.push(describeAvailableSeerTool('propose_relation'));
   }
 
   if (Array.isArray(reading.apparitions) && reading.apparitions.length) {
-    tools.push({
-      id: 'invoke_storyteller',
-      label: 'Invoke Storyteller',
-      description: 'Offer or invoke an apparition as an interpretive force.'
-    });
+    tools.push(describeAvailableSeerTool('invoke_storyteller'));
   }
 
   if ((reading.cards || []).length > 1) {
-    tools.push({
-      id: 'focus_card',
-      label: 'Focus Card',
-      description: 'Shift the ritual attention to a different card.'
-    });
+    tools.push(describeAvailableSeerTool('focus_card'));
   }
 
   if ((reading.memories || []).length > 1) {
-    tools.push({
-      id: 'focus_memory',
-      label: 'Focus Memory',
-      description: 'Shift the ritual attention to a different glimpse.'
-    });
+    tools.push(describeAvailableSeerTool('focus_memory'));
   }
 
   const unresolved = Array.isArray(reading.unresolvedThreads) ? reading.unresolvedThreads.length : 0;
@@ -463,22 +607,20 @@ function buildAvailableTools(reading = {}, focusMemory = null, focusCard = null)
     || (reading.cards || []).every((card) => Number(card.revealTier) >= 3)
     || (reading.memories || []).every((memory) => Number(memory.revealTier) >= 5)
   ) {
-    tools.push({
-      id: 'synthesize',
-      label: 'Synthesize',
-      description: 'Ask for or produce the thread binding the triad.'
-    });
+    tools.push(describeAvailableSeerTool('synthesize'));
   }
 
   if (reading?.metadata?.enableDice === true) {
-    tools.push({
-      id: 'roll_dice',
-      label: 'Roll Dice',
-      description: 'Resolve a formal risk or omen through dice.'
-    });
+    tools.push(describeAvailableSeerTool('roll_dice'));
   }
 
-  return tools;
+  if (focusCard) {
+    tools.push(describeAvailableSeerTool('advance_focus'));
+  }
+
+  return Array.from(
+    new Map(tools.map((tool) => [tool.id, tool])).values()
+  );
 }
 
 function createToolRegistry() {
@@ -567,6 +709,33 @@ function createToolRegistry() {
           : `The glimpse sharpens. ${firstDefinedString(updated.card?.title, 'This vision')} yields another layer.`;
       }
     },
+    retrieve_entity: {
+      id: 'retrieve_entity',
+      description: 'Search the persistent bank for an entity that already fits this thread.',
+      run: async (ctx, input) => {
+        const focusCard = findSeerFocusCard(ctx.state.cards);
+        const focusMemory = findSeerFocusMemory(ctx.state.memories);
+        const retrieved = await retrieveEntityFromBank({
+          reading: ctx.reading,
+          playerId: ctx.playerId,
+          focusMemory,
+          focusCard,
+          playerReply: ctx.playerReply,
+          explicitLabel: firstDefinedString(input?.searchLabel, input?.entityLabel)
+        });
+        if (!retrieved) {
+          ctx.runtime.entityRetrievalMiss = true;
+          ctx.runtime.executionNotes.push('retrieve_entity:miss');
+          return;
+        }
+        if (!ctx.state.entities.some((entity) => entity.id === retrieved.id)) {
+          ctx.state.entities.push(retrieved);
+        }
+        ctx.runtime.createdEntity = retrieved;
+        ctx.runtime.createdEntityWasNew = false;
+        ctx.runtime.executionNotes.push(`retrieve_entity:hit:${retrieved.name}`);
+      }
+    },
     create_entity: {
       id: 'create_entity',
       description: 'Create a reusable entity from the player clarification.',
@@ -574,10 +743,12 @@ function createToolRegistry() {
         const focusCard = findSeerFocusCard(ctx.state.cards);
         const focusMemory = findSeerFocusMemory(ctx.state.memories);
         if (!focusMemory && !focusCard) return;
-        const existing = findEntityInReading(ctx.state.entities, input?.entityId, ctx.playerReply, focusMemory);
+        const existing = ctx.runtime.createdEntity
+          || findEntityInReading(ctx.state.entities, input?.entityId, ctx.playerReply, focusMemory);
         if (existing) {
           ctx.runtime.createdEntity = existing;
           ctx.runtime.createdEntityWasNew = false;
+          ctx.runtime.executionNotes.push(`create_entity:reuse:${existing.name}`);
           return;
         }
 
@@ -590,6 +761,7 @@ function createToolRegistry() {
           ctx.state.entities.push(localEntity);
           ctx.runtime.createdEntity = localEntity;
           ctx.runtime.createdEntityWasNew = true;
+          ctx.runtime.executionNotes.push(`create_entity:local:${localEntity.name}`);
           return;
         }
 
@@ -608,6 +780,7 @@ function createToolRegistry() {
           ctx.runtime.createdEntityWasNew = true;
           ctx.runtime.createdEntityPromptText = created.promptText;
           ctx.runtime.createdEntityMocked = created.mocked;
+          ctx.runtime.executionNotes.push(`create_entity:service:${created.entity.name}`);
         }
       }
     },
@@ -673,6 +846,55 @@ function createToolRegistry() {
           : `${firstDefinedString(focusCard?.title, updatedMemory?.card?.title, 'The thread')} now pulls clearly toward ${firstDefinedString(entity.name, 'that presence')}.`;
       }
     },
+    invoke_storyteller: {
+      id: 'invoke_storyteller',
+      description: 'Offer an apparition as the next interpretive force.',
+      run: async (ctx, input) => {
+        const apparitions = Array.isArray(ctx.reading?.apparitions) ? ctx.reading.apparitions : [];
+        const selected = apparitions.find((apparition) => apparition.id === firstDefinedString(input?.storytellerId))
+          || apparitions[0]
+          || null;
+        if (!selected) return;
+        ctx.runtime.offeredApparition = selected;
+        ctx.runtime.executionNotes.push(`invoke_storyteller:${selected.name}`);
+        ctx.result.transitionType = 'apparition_offer';
+        ctx.result.beat = 'apparition_offer';
+        ctx.result.spokenMessage = `${firstDefinedString(selected.name, 'An apparition')} presses at the margin of the reading and asks to be let nearer.`;
+      }
+    },
+    claim_card: {
+      id: 'claim_card',
+      description: 'Mark that the current card is ready to be sealed by the player.',
+      run: async (ctx) => {
+        const focusCard = findSeerFocusCard(ctx.state.cards);
+        if (!focusCard) return;
+        ctx.runtime.executionNotes.push(`claim_card:ready:${focusCard.id}`);
+        ctx.result.transitionType = 'card_claim_available';
+        ctx.result.beat = 'card_claim_available';
+        ctx.result.spokenMessage = `${firstDefinedString(focusCard.title, 'This card')} stands ready. If the truth holds, the player may seal it now.`;
+      }
+    },
+    synthesize: {
+      id: 'synthesize',
+      description: 'Pull the current revealed threads into one stronger reading statement.',
+      run: async (ctx) => {
+        const activeCards = (ctx.state.cards || [])
+          .filter((card) => Number(card.revealTier) >= 2)
+          .map((card) => firstDefinedString(card.title))
+          .filter(Boolean)
+          .slice(0, 3);
+        if (activeCards.length) {
+          ctx.state.unresolvedThreads = Array.from(new Set([
+            ...(ctx.state.unresolvedThreads || []),
+            `The thread binding ${activeCards.join(', ')} still asks to be named.`
+          ]));
+        }
+        ctx.runtime.executionNotes.push('synthesize');
+        ctx.result.transitionType = 'synthesis';
+        ctx.result.beat = 'cross_memory_synthesis';
+        ctx.result.spokenMessage = 'The spread tightens into one stronger thread. Name what all of these pressures are becoming together.';
+      }
+    },
     advance_focus: {
       id: 'advance_focus',
       description: 'Move to the next unresolved card or into synthesis.',
@@ -706,6 +928,16 @@ function createToolRegistry() {
         ctx.result.beat = 'cross_memory_synthesis';
         ctx.result.spokenMessage = 'The spread now stands in view. Name the thread that runs between the cards.';
       }
+    },
+    roll_dice: {
+      id: 'roll_dice',
+      description: 'Record that the reading wants formal chance resolution.',
+      run: async (ctx) => {
+        ctx.runtime.executionNotes.push('roll_dice');
+        ctx.result.transitionType = 'dead_end';
+        ctx.result.beat = 'seer_question_pending';
+        ctx.result.spokenMessage = 'The reading brushes against risk, but the omen has not yet been cast into numbers.';
+      }
     }
   };
 }
@@ -721,6 +953,443 @@ function cloneReadingState(reading = {}) {
   };
 }
 
+function summarizeReadingForOrchestrator(reading = {}) {
+  return {
+    readingId: firstDefinedString(reading?.readingId),
+    sessionId: firstDefinedString(reading?.sessionId),
+    worldId: firstDefinedString(reading?.worldId),
+    universeId: firstDefinedString(reading?.universeId),
+    status: firstDefinedString(reading?.status),
+    beat: firstDefinedString(reading?.beat),
+    fragment: reading?.fragment || {},
+    vision: reading?.vision || {},
+    focus: {
+      memoryId: findSeerFocusMemory(reading?.memories || [])?.id || '',
+      cardId: findSeerFocusCard(reading?.cards || [])?.id || ''
+    },
+    memories: Array.isArray(reading?.memories) ? reading.memories : [],
+    cards: Array.isArray(reading?.cards) ? reading.cards : [],
+    entities: Array.isArray(reading?.entities) ? reading.entities : [],
+    apparitions: Array.isArray(reading?.apparitions) ? reading.apparitions : [],
+    unresolvedThreads: Array.isArray(reading?.unresolvedThreads) ? reading.unresolvedThreads : []
+  };
+}
+
+function buildSeerOrchestratorPromptPayload({
+  reading = {},
+  action = 'answer',
+  playerReply = '',
+  entityId = '',
+  availableTools = []
+} = {}) {
+  const focusMemory = findSeerFocusMemory(reading?.memories || []);
+  const focusCard = findSeerFocusCard(reading?.cards || []);
+  return {
+    player_action: firstDefinedString(action, 'answer'),
+    player_reply: firstDefinedString(playerReply),
+    player_requested_entity_id: firstDefinedString(entityId),
+    reading_state_json: asSeerJsonText(summarizeReadingForOrchestrator(reading)),
+    focused_memory_json: asSeerJsonText(focusMemory || {}),
+    focused_card_json: asSeerJsonText(focusCard || {}),
+    available_tools_json: asSeerJsonText(
+      availableTools.map((tool) => ({
+        id: tool.id,
+        label: tool.label,
+        description: tool.description,
+        inputHints: Array.isArray(tool.inputHints) ? tool.inputHints : []
+      }))
+    )
+  };
+}
+
+function compileSeerOrchestratorPromptText(template = '', payload = {}) {
+  const rendered = renderPromptTemplateString(template || '', payload).trim();
+  const sections = [
+    ['Player action', payload.player_action],
+    ['Player reply', payload.player_reply],
+    ['Requested entity id', payload.player_requested_entity_id],
+    ['Focused memory JSON', payload.focused_memory_json],
+    ['Focused card JSON', payload.focused_card_json],
+    ['Current reading JSON', payload.reading_state_json],
+    ['Available tools JSON', payload.available_tools_json]
+  ]
+    .filter(([, value]) => firstDefinedString(value))
+    .map(([label, value]) => `${label}:\n${value}`);
+
+  let promptText = rendered;
+  sections.forEach((section) => {
+    if (!promptText.includes(section)) {
+      promptText = `${promptText}\n\n${section}`.trim();
+    }
+  });
+
+  return promptText.trim();
+}
+
+function normalizeSeerToolInput(input = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const normalized = {
+    ...source,
+    focusCardId: firstDefinedString(source.focusCardId, source.focus_card_id, source.cardId, source.card_id),
+    focusMemoryId: firstDefinedString(source.focusMemoryId, source.focus_memory_id, source.memoryId, source.memory_id),
+    entityId: firstDefinedString(source.entityId, source.entity_id),
+    searchLabel: firstDefinedString(source.searchLabel, source.search_label, source.entityLabel, source.entity_label),
+    storytellerId: firstDefinedString(source.storytellerId, source.storyteller_id),
+    cardId: firstDefinedString(source.cardId, source.card_id)
+  };
+
+  const delta = Number(source.delta ?? source.reveal_tier_delta);
+  if (Number.isFinite(delta)) normalized.delta = delta;
+  const clarityDelta = Number(source.clarityDelta ?? source.clarity_delta);
+  if (Number.isFinite(clarityDelta)) normalized.clarityDelta = clarityDelta;
+  const confidenceDelta = Number(source.confidenceDelta ?? source.confidence_delta);
+  if (Number.isFinite(confidenceDelta)) normalized.confidenceDelta = confidenceDelta;
+  return normalized;
+}
+
+function applySeerOrchestratorStatePatch(ctx, decision = {}) {
+  const ui = decision?.ui && typeof decision.ui === 'object' ? decision.ui : {};
+  const statePatch = decision?.state_patch && typeof decision.state_patch === 'object' ? decision.state_patch : {};
+  const focusCardId = firstDefinedString(ui.focus_card_id, statePatch.focus_card_id);
+  const focusMemoryId = firstDefinedString(ui.focus_memory_id, statePatch.focus_memory_id);
+
+  if (focusCardId && ctx.state.cards.some((card) => card.id === focusCardId)) {
+    ctx.state.cards = setSeerFocusedCard(ctx.state.cards, focusCardId);
+    ctx.state.spread = {
+      ...ctx.state.spread,
+      focusCardId,
+      cardLayout: syncSeerCardLayout(ctx.state.cards, ctx.state.spread)
+    };
+  }
+
+  if (focusMemoryId && ctx.state.memories.some((memory) => memory.id === focusMemoryId)) {
+    ctx.state.memories = setSeerFocusedMemory(ctx.state.memories, focusMemoryId);
+    ctx.state.spread = {
+      ...ctx.state.spread,
+      focusMemoryId
+    };
+  }
+
+  const cardPatches = Array.isArray(ui.card_patches) ? ui.card_patches : [];
+  if (cardPatches.length) {
+    ctx.state.cards = ctx.state.cards.map((card) => {
+      const patch = cardPatches.find((entry) => firstDefinedString(entry?.card_id) === card.id);
+      if (!patch) return card;
+      const revealTierDelta = Number(patch.reveal_tier_delta);
+      const nextCard = {
+        ...card,
+        clarity: clampSeerClarity((card.clarity || 0) + Number(patch.clarity_delta || 0)),
+        confidence: clampSeerClarity((card.confidence || 0) + Number(patch.confidence_delta || 0)),
+        revealTier: Number.isFinite(revealTierDelta)
+          ? Math.max(0, Math.min(3, Number(card.revealTier || 0) + revealTierDelta))
+          : card.revealTier
+      };
+      if (firstDefinedString(patch.status)) {
+        nextCard.status = firstDefinedString(patch.status);
+      } else {
+        nextCard.status = computeCardStatus(nextCard);
+      }
+      return nextCard;
+    });
+    ctx.state.spread = {
+      ...ctx.state.spread,
+      cardLayout: syncSeerCardLayout(ctx.state.cards, ctx.state.spread)
+    };
+  }
+
+  const unresolvedThreads = Array.isArray(statePatch.unresolved_threads)
+    ? statePatch.unresolved_threads.map((entry) => firstDefinedString(entry)).filter(Boolean)
+    : [];
+  if (unresolvedThreads.length) {
+    ctx.state.unresolvedThreads = Array.from(new Set([
+      ...(ctx.state.unresolvedThreads || []),
+      ...unresolvedThreads
+    ]));
+  }
+}
+
+function buildSeerToolCallResponse(toolCalls = [], fallbackReason = '') {
+  return toolCalls.map((toolCall) => ({
+    tool_id: firstDefinedString(toolCall?.tool_id),
+    input: normalizeSeerToolInput(toolCall?.input),
+    reason: firstDefinedString(toolCall?.reason, fallbackReason)
+  }));
+}
+
+function hasMeaningfulSeerDecisionPatch(decision = {}) {
+  const ui = decision?.ui && typeof decision.ui === 'object' ? decision.ui : {};
+  const statePatch = decision?.state_patch && typeof decision.state_patch === 'object' ? decision.state_patch : {};
+  return Boolean(
+    firstDefinedString(ui.focus_card_id, ui.focus_memory_id, statePatch.focus_card_id, statePatch.focus_memory_id)
+    || (Array.isArray(ui.card_patches) && ui.card_patches.length)
+    || (Array.isArray(statePatch.unresolved_threads) && statePatch.unresolved_threads.length)
+  );
+}
+
+function buildFallbackSeerOrchestratorDecision({ reading = {}, playerReply = '', entityId = '' } = {}) {
+  const focusCard = findSeerFocusCard(reading?.cards || []);
+  const focusMemory = findSeerFocusMemory(reading?.memories || []);
+
+  if (!focusCard && !focusMemory) {
+    return {
+      spoken_message: 'No active thread answers the ritual yet.',
+      transition_type: 'dead_end',
+      beat: 'seer_question_pending',
+      tool_calls: [],
+      ui: {},
+      state_patch: {}
+    };
+  }
+
+  if (focusCard && firstDefinedString(focusCard.status) === 'claimable') {
+    return {
+      spoken_message: `${firstDefinedString(focusCard.title, 'This card')} stands ready. If the truth holds, the player may seal it now.`,
+      transition_type: 'card_claim_available',
+      beat: 'card_claim_available',
+      tool_calls: [
+        {
+          tool_id: 'claim_card',
+          reason: 'The focused card is already fully revealed and linked.',
+          input: {
+            card_id: focusCard.id
+          }
+        }
+      ],
+      ui: {
+        focus_card_id: focusCard.id
+      },
+      state_patch: {
+        focus_card_id: focusCard.id
+      }
+    };
+  }
+
+  if (focusCard && Number(focusCard.revealTier) < 2) {
+    return {
+      spoken_message: `${firstDefinedString(focusCard.title, 'The card')} sharpens. Another edge of it comes into view.`,
+      transition_type: 'card_reveal',
+      beat: 'card_attunement',
+      tool_calls: [
+        {
+          tool_id: 'reveal_card_tier',
+          reason: 'The focused card is still mostly on its back side.',
+          input: {
+            card_id: focusCard.id,
+            delta: 1,
+            clarity_delta: 0.18,
+            confidence_delta: 0.08
+          }
+        }
+      ],
+      ui: {
+        focus_card_id: focusCard.id
+      },
+      state_patch: {
+        focus_card_id: focusCard.id
+      }
+    };
+  }
+
+  if (focusCard && (!Array.isArray(focusCard.linkedEntityIds) || focusCard.linkedEntityIds.length === 0)) {
+    return {
+      spoken_message: `The reading needs a name before ${firstDefinedString(focusCard.title, 'this thread')} can hold. I will look for one, and if none exists, one must be made.`,
+      transition_type: 'new_entity_suggested',
+      beat: 'relation_testing',
+      tool_calls: [
+        {
+          tool_id: 'retrieve_entity',
+          reason: 'Check the existing bank before making a new entity.',
+          input: {
+            entity_id: entityId,
+            search_label: firstDefinedString(focusCard.title, focusMemory?.location, playerReply)
+          }
+        },
+        {
+          tool_id: 'create_entity',
+          reason: 'Mint a reusable entity if retrieval does not find a good match.',
+          input: {
+            entity_id: entityId
+          }
+        },
+        {
+          tool_id: 'propose_relation',
+          reason: 'Bind the focused thread to the retrieved or created entity.',
+          input: {
+            entity_id: entityId
+          }
+        }
+      ],
+      ui: {
+        focus_card_id: focusCard.id
+      },
+      state_patch: {
+        focus_card_id: focusCard.id
+      }
+    };
+  }
+
+  if (focusCard && Number(focusCard.revealTier) < 3) {
+    return {
+      spoken_message: `${firstDefinedString(focusCard.title, 'The card')} sharpens again. It nears the point where it can be kept.`,
+      transition_type: 'card_reveal',
+      beat: 'card_attunement',
+      tool_calls: [
+        {
+          tool_id: 'reveal_card_tier',
+          reason: 'The card can still sharpen before the focus moves.',
+          input: {
+            card_id: focusCard.id,
+            delta: 1,
+            clarity_delta: 0.14,
+            confidence_delta: 0.12
+          }
+        }
+      ],
+      ui: {
+        focus_card_id: focusCard.id
+      },
+      state_patch: {
+        focus_card_id: focusCard.id
+      }
+    };
+  }
+
+  return {
+    spoken_message: 'That card has yielded what it will for now. We turn next to the next pressure.',
+    transition_type: 'focus_shift',
+    beat: 'card_attunement',
+    tool_calls: [
+      {
+        tool_id: 'advance_focus',
+        reason: 'The focused card has yielded its current visible structure.',
+        input: {}
+      }
+    ],
+    ui: {},
+    state_patch: {}
+  };
+}
+
+async function executeSeerToolCalls(ctx, toolCalls = [], registry = {}, availableTools = []) {
+  const availableToolIds = new Set((availableTools || []).map((tool) => tool.id));
+  const executionTrace = [];
+
+  for (const rawToolCall of toolCalls) {
+    const toolId = firstDefinedString(rawToolCall?.tool_id);
+    const normalizedInput = normalizeSeerToolInput(rawToolCall?.input);
+    const normalizedReason = firstDefinedString(rawToolCall?.reason);
+
+    if (!toolId) continue;
+
+    if (!availableToolIds.has(toolId)) {
+      executionTrace.push({
+        toolId,
+        status: 'skipped_unavailable',
+        reason: normalizedReason
+      });
+      continue;
+    }
+
+    const tool = registry[toolId];
+    if (!tool || typeof tool.run !== 'function') {
+      executionTrace.push({
+        toolId,
+        status: 'skipped_unimplemented',
+        reason: normalizedReason
+      });
+      continue;
+    }
+
+    try {
+      await tool.run(ctx, normalizedInput);
+      ctx.result.toolCalls.push(buildToolCall(toolId, normalizedInput, normalizedReason));
+      executionTrace.push({
+        toolId,
+        status: 'executed',
+        reason: normalizedReason,
+        input: normalizedInput
+      });
+    } catch (error) {
+      executionTrace.push({
+        toolId,
+        status: 'failed',
+        reason: normalizedReason,
+        input: normalizedInput,
+        error: error?.message || 'Tool execution failed.'
+      });
+    }
+  }
+
+  return executionTrace;
+}
+
+export async function runSeerOrchestratorDecision({
+  reading = {},
+  action = 'answer',
+  playerReply = '',
+  entityId = '',
+  availableTools = [],
+  useMock = false
+} = {}) {
+  const routeConfig = await getRouteConfig('seer_reading_orchestrator');
+  const promptDoc = await getLatestPromptTemplate('seer_reading_orchestrator');
+  const promptTemplate = firstDefinedString(
+    promptDoc?.promptTemplate,
+    routeConfig?.promptCore,
+    routeConfig?.promptTemplate
+  );
+  const promptPayload = buildSeerOrchestratorPromptPayload({
+    reading,
+    action,
+    playerReply,
+    entityId,
+    availableTools
+  });
+  const promptText = compileSeerOrchestratorPromptText(promptTemplate, promptPayload);
+  const fallbackDecision = buildFallbackSeerOrchestratorDecision({
+    reading,
+    playerReply,
+    entityId
+  });
+
+  if (useMock) {
+    return {
+      decision: fallbackDecision,
+      promptText,
+      decisionSource: 'mock_fallback',
+      rawDecisionText: asSeerJsonText(fallbackDecision),
+      errorMessage: ''
+    };
+  }
+
+  try {
+    const pipeline = await getPipelineSettings('seer_reading_orchestrator');
+    const decision = await callJsonLlm({
+      prompts: [{ role: 'system', content: promptText }],
+      provider: firstDefinedString(pipeline?.provider, 'openai'),
+      model: firstDefinedString(pipeline?.model),
+      max_tokens: 1600,
+      explicitJsonObjectFormat: true
+    });
+    await validatePayloadForRoute('seer_reading_orchestrator', decision);
+    return {
+      decision,
+      promptText,
+      decisionSource: 'live_llm',
+      rawDecisionText: asSeerJsonText(decision),
+      errorMessage: ''
+    };
+  } catch (error) {
+    return {
+      decision: fallbackDecision,
+      promptText,
+      decisionSource: 'live_fallback',
+      rawDecisionText: asSeerJsonText(fallbackDecision),
+      errorMessage: error?.message || 'Seer orchestrator failed.'
+    };
+  }
+}
+
 export async function buildSeerOrchestratorEnvelope(reading = {}) {
   const pipeline = await getPipelineSettings('seer_reading_orchestrator');
   const prompt = await getLatestPromptTemplate('seer_reading_orchestrator');
@@ -733,6 +1402,10 @@ export async function buildSeerOrchestratorEnvelope(reading = {}) {
   return {
     runtimeId: 'seer-agent-runtime-v1',
     persona: DEFAULT_SEER_PERSONA,
+    toolRegistry: {
+      routeKey: 'seer_reading_tool_registry',
+      path: 'internal://seer-reading/tools'
+    },
     pipeline: {
       key: 'seer_reading_orchestrator',
       provider: firstDefinedString(pipeline?.provider, 'openai'),
@@ -786,14 +1459,31 @@ export async function runSeerReadingTurn({
       createdEntity: null,
       createdEntityWasNew: false,
       createdEntityPromptText: '',
-      createdEntityMocked: false
+      createdEntityMocked: false,
+      entityRetrievalMiss: false,
+      offeredApparition: null,
+      executionNotes: []
     }
+  };
+  let decisionTrace = {
+    promptText: '',
+    decisionSource: '',
+    rawDecisionText: '',
+    errorMessage: '',
+    executionTrace: []
   };
 
   if (action === 'focus_card') {
     const focusTool = registry.focus_card;
     const toolInput = { focusCardId };
     result.toolCalls.push(buildToolCall(focusTool.id, toolInput, 'Player redirected the reading to another card.'));
+    decisionTrace.decisionSource = 'direct_focus_action';
+    decisionTrace.executionTrace.push({
+      toolId: focusTool.id,
+      status: 'executed',
+      reason: 'Player redirected the reading to another card.',
+      input: toolInput
+    });
     await focusTool.run(ctx, toolInput);
     state.transcript.push(createSeerTranscriptEntry('seer', result.spokenMessage, {
       kind: result.transitionType,
@@ -803,45 +1493,99 @@ export async function runSeerReadingTurn({
     const focusTool = registry.focus_memory;
     const toolInput = { focusMemoryId };
     result.toolCalls.push(buildToolCall(focusTool.id, toolInput, 'Player redirected the reading to another glimpse.'));
+    decisionTrace.decisionSource = 'direct_focus_action';
+    decisionTrace.executionTrace.push({
+      toolId: focusTool.id,
+      status: 'executed',
+      reason: 'Player redirected the reading to another glimpse.',
+      input: toolInput
+    });
     await focusTool.run(ctx, toolInput);
     state.transcript.push(createSeerTranscriptEntry('seer', result.spokenMessage, {
       kind: result.transitionType,
       focusMemoryId: focusMemoryId
     }));
   } else {
-    const focusCard = findSeerFocusCard(state.cards);
-    const focusMemory = findSeerFocusMemory(state.memories);
     state.transcript.push(createSeerTranscriptEntry('player', ctx.playerReply, {
       kind: 'reply',
       playerId: ctx.playerId
     }));
 
-    if (!focusCard && !focusMemory) {
-      result.transitionType = 'dead_end';
-      result.beat = 'seer_question_pending';
-      result.spokenMessage = 'No active thread answers the ritual yet.';
-    } else if (focusCard && Number(focusCard.revealTier) < 2) {
-      const revealInput = { delta: 1, clarityDelta: 0.18, confidenceDelta: 0.08 };
-      result.toolCalls.push(buildToolCall('reveal_card_tier', revealInput, 'The focused card is still mostly on its back side.'));
-      await registry.reveal_card_tier.run(ctx, revealInput);
-    } else if (focusCard && (!Array.isArray(focusCard.linkedEntityIds) || focusCard.linkedEntityIds.length === 0)) {
-      const createReason = 'The reading needs a named presence to bind the glimpse.';
-      result.toolCalls.push(buildToolCall('create_entity', { entityId }, createReason));
-      await registry.create_entity.run(ctx, { entityId });
-      const relationInput = {
-        entity_id: ctx.runtime.createdEntity?.id || '',
-        prompt_text: ctx.runtime.createdEntityPromptText || ''
-      };
-      result.toolCalls.push(buildToolCall('propose_relation', relationInput, 'The seer binds the glimpse to a named presence.'));
-      await registry.propose_relation.run(ctx, relationInput);
-    } else if (focusCard && Number(focusCard.revealTier) < 3) {
-      const revealInput = { delta: 1, clarityDelta: 0.14, confidenceDelta: 0.12 };
-      result.toolCalls.push(buildToolCall('reveal_card_tier', revealInput, 'The card can still sharpen before the focus moves.'));
-      await registry.reveal_card_tier.run(ctx, revealInput);
-    } else {
-      result.toolCalls.push(buildToolCall('advance_focus', {}, 'The focused card has yielded its current visible structure.'));
-      await registry.advance_focus.run(ctx, {});
+    const turnDecision = await runSeerOrchestratorDecision({
+      reading: {
+        ...reading,
+        memories: state.memories,
+        cards: state.cards,
+        entities: state.entities,
+        spread: state.spread,
+        unresolvedThreads: state.unresolvedThreads
+      },
+      action,
+      playerReply: ctx.playerReply,
+      entityId,
+      availableTools: orchestrator.availableTools,
+      useMock: Boolean(orchestrator.pipeline.useMock)
+    });
+
+    decisionTrace = {
+      promptText: turnDecision.promptText || '',
+      decisionSource: turnDecision.decisionSource || '',
+      rawDecisionText: turnDecision.rawDecisionText || '',
+      errorMessage: turnDecision.errorMessage || '',
+      executionTrace: []
+    };
+
+    let appliedDecision = turnDecision.decision || buildFallbackSeerOrchestratorDecision({
+      reading,
+      playerReply: ctx.playerReply,
+      entityId
+    });
+
+    result.spokenMessage = firstDefinedString(appliedDecision.spoken_message, result.spokenMessage);
+    result.transitionType = firstDefinedString(appliedDecision.transition_type, result.transitionType);
+    result.beat = firstDefinedString(appliedDecision.beat, result.beat);
+
+    const executionTrace = await executeSeerToolCalls(
+      ctx,
+      buildSeerToolCallResponse(appliedDecision.tool_calls, 'The seer runtime executed the orchestrator decision.'),
+      registry,
+      orchestrator.availableTools
+    );
+    decisionTrace.executionTrace = executionTrace;
+
+    const hasExecutedTool = executionTrace.some((entry) => entry.status === 'executed');
+    const shouldFallbackToDeterministic = !hasExecutedTool && (
+      firstDefinedString(turnDecision.errorMessage)
+      || (Array.isArray(appliedDecision.tool_calls) && appliedDecision.tool_calls.length > 0)
+      || !hasMeaningfulSeerDecisionPatch(appliedDecision)
+    );
+
+    if (shouldFallbackToDeterministic) {
+      const fallbackDecision = buildFallbackSeerOrchestratorDecision({
+        reading,
+        playerReply: ctx.playerReply,
+        entityId
+      });
+      appliedDecision = fallbackDecision;
+      result.toolCalls = [];
+      result.spokenMessage = firstDefinedString(fallbackDecision.spoken_message, result.spokenMessage);
+      result.transitionType = firstDefinedString(fallbackDecision.transition_type, result.transitionType);
+      result.beat = firstDefinedString(fallbackDecision.beat, result.beat);
+      decisionTrace.decisionSource = 'tool_fallback';
+      decisionTrace.rawDecisionText = asSeerJsonText(fallbackDecision);
+      decisionTrace.executionTrace = await executeSeerToolCalls(
+        ctx,
+        buildSeerToolCallResponse(fallbackDecision.tool_calls, 'Fallback tool execution.'),
+        registry,
+        orchestrator.availableTools
+      );
     }
+
+    applySeerOrchestratorStatePatch(ctx, appliedDecision);
+
+    result.spokenMessage = firstDefinedString(appliedDecision.spoken_message, result.spokenMessage);
+    result.transitionType = firstDefinedString(appliedDecision.transition_type, result.transitionType);
+    result.beat = firstDefinedString(appliedDecision.beat, result.beat);
 
     state.transcript.push(createSeerTranscriptEntry('seer', result.spokenMessage, {
       kind: result.transitionType,
@@ -862,7 +1606,15 @@ export async function runSeerReadingTurn({
     runtimeId: orchestrator.runtimeId,
     personaId: orchestrator.persona.id,
     createdEntityPromptText: ctx.runtime.createdEntityPromptText || '',
-    createdEntityMocked: ctx.runtime.createdEntityMocked
+    createdEntityMocked: ctx.runtime.createdEntityMocked,
+    decisionSource: decisionTrace.decisionSource || 'unknown',
+    orchestratorPromptText: decisionTrace.promptText || '',
+    orchestratorResponseText: decisionTrace.rawDecisionText || '',
+    orchestratorError: decisionTrace.errorMessage || '',
+    executionTrace: decisionTrace.executionTrace,
+    executionNotes: ctx.runtime.executionNotes,
+    offeredApparitionId: firstDefinedString(ctx.runtime.offeredApparition?.id),
+    offeredApparitionName: firstDefinedString(ctx.runtime.offeredApparition?.name)
   };
 
   return {
