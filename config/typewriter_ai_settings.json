@@ -1,14 +1,14 @@
 {
-  "updatedAt": "2026-03-24T21:43:41.563Z",
-  "updatedBy": "story-admin-ui",
+  "updatedAt": "2026-04-11T18:47:45.347Z",
+  "updatedBy": "immersive-rpg-test-reset",
   "pipelines": {
     "story_continuation": {
       "key": "story_continuation",
       "label": "Story Continuation",
       "modelKind": "text",
       "useMock": false,
-      "model": "claude-opus-4-6",
-      "provider": "anthropic"
+      "model": "gpt-5-mini",
+      "provider": "openai"
     },
     "xerofag_inspection": {
       "key": "xerofag_inspection",
@@ -22,7 +22,7 @@
       "key": "memory_creation",
       "label": "Memory Creation",
       "modelKind": "text",
-      "useMock": true,
+      "useMock": false,
       "model": "gpt-5-mini",
       "provider": "openai",
       "memoryCount": 3
@@ -31,7 +31,7 @@
       "key": "entity_creation",
       "label": "Entity Creation",
       "modelKind": "text",
-      "useMock": true,
+      "useMock": false,
       "model": "gpt-5-mini",
       "provider": "openai",
       "entityCount": 8
@@ -53,12 +53,20 @@
       "model": "gpt-5-mini",
       "provider": "openai"
     },
+    "typewriter_key_verification": {
+      "key": "typewriter_key_verification",
+      "label": "Typewriter Key Verification",
+      "modelKind": "text",
+      "useMock": false,
+      "model": "gpt-5-mini",
+      "provider": "openai"
+    },
     "messenger_chat": {
       "key": "messenger_chat",
       "label": "Messenger Chat",
       "modelKind": "text",
       "useMock": false,
-      "model": "gpt-5.3-chat-latest",
+      "model": "gpt-5-mini",
       "provider": "openai"
     },
     "immersive_rpg_gm": {
@@ -66,8 +74,25 @@
       "label": "Immersive RPG GM",
       "modelKind": "text",
       "useMock": false,
-      "model": "claude-opus-4-6",
-      "provider": "anthropic"
+      "model": "gpt-5-mini",
+      "provider": "openai"
+    },
+    "seer_reading_orchestrator": {
+      "key": "seer_reading_orchestrator",
+      "label": "Seer Reading Orchestrator",
+      "modelKind": "text",
+      "useMock": true,
+      "model": "gpt-5-mini",
+      "provider": "openai"
+    },
+    "seer_reading_card_generation": {
+      "key": "seer_reading_card_generation",
+      "label": "Seer Reading Card Generation",
+      "modelKind": "text",
+      "useMock": true,
+      "model": "gpt-5-mini",
+      "provider": "openai",
+      "cardCount": 3
     },
     "quest_generation": {
       "key": "quest_generation",
@@ -97,7 +122,7 @@
       "key": "relationship_evaluation",
       "label": "Relationship Evaluation",
       "modelKind": "text",
-      "useMock": true,
+      "useMock": false,
       "model": "gpt-5-mini",
       "provider": "openai"
     },

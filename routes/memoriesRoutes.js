@@ -2,7 +2,7 @@ import express from 'express';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { callJsonLlm } from '../ai/openai/apiService.js';
+import { callJsonLlm, resolveDirectExternalApiRouteError } from '../ai/openai/apiService.js';
 import { FragmentMemory } from '../models/memory_models.js';
 import { ensureDirectoryExists } from '../storyteller/utils.js';
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
@@ -25,6 +25,11 @@ import { getTypewriterSessionFragment } from '../services/typewriterSessionServi
 const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+function sendLlmAwareError(res, error, fallbackMessage, field = 'message') {
+  const { statusCode, message } = resolveDirectExternalApiRouteError(error, fallbackMessage);
+  return res.status(statusCode).json({ [field]: message });
+}
 
 const MEMORY_CARD_MOCK_FRONT_IMAGES = [
   '/assets/mocks/memory_cards/memory_front_01.png',
@@ -71,17 +76,43 @@ function parseBooleanFlag(value) {
   return null;
 }
 
-function resolveExplicitMockOverride(body = {}) {
-  const flags = [body.mock, body.debug, body.mock_api_calls, body.mocked_api_calls];
-  for (const flag of flags) {
-    const parsed = parseBooleanFlag(flag);
+function resolveExplicitBooleanOverride(body = {}, flagNames = []) {
+  for (const flagName of flagNames) {
+    const parsed = parseBooleanFlag(body?.[flagName]);
     if (parsed !== null) return parsed;
   }
   return null;
 }
 
+function resolveExplicitMockOverride(body = {}) {
+  return resolveExplicitBooleanOverride(body, [
+    'mock',
+    'debug',
+    'mock_api_calls',
+    'mocked_api_calls'
+  ]);
+}
+
 function resolveMockMode(body = {}, fallback = false) {
   const explicit = resolveExplicitMockOverride(body);
+  if (explicit !== null) return explicit;
+  return Boolean(fallback);
+}
+
+function resolveImageMockMode(body = {}, fallback = false, extraFlagNames = []) {
+  const explicit = resolveExplicitBooleanOverride(body, [
+    ...extraFlagNames,
+    'mockImage',
+    'mock_image',
+    'mockImages',
+    'mock_images',
+    'mockTextures',
+    'mock_texture',
+    'mock_textures',
+    'mock_texture_generation',
+    'mockedTextures',
+    'mocked_textures'
+  ]);
   if (explicit !== null) return explicit;
   return Boolean(fallback);
 }
@@ -582,6 +613,8 @@ router.post('/fragmentToMemories', async (req, res) => {
       includeCards,
       includeFront,
       includeBack,
+      mockImage,
+      mockTextures,
       debug,
       mock,
       mock_api_calls,
@@ -599,7 +632,10 @@ router.post('/fragmentToMemories', async (req, res) => {
     const textureProvider = typeof textureSettings?.provider === 'string' ? textureSettings.provider : 'openai';
     const memoryCount = normalizeMemoryCount(count ?? numberOfMemories ?? memorySettings.memoryCount);
     const shouldMock = resolveMockMode(body, memorySettings.useMock);
-    const shouldMockTextures = resolveMockMode(body, textureSettings.useMock);
+    const shouldMockTextures = resolveImageMockMode(body, textureSettings.useMock, [
+      'mockImage',
+      'mockTextures'
+    ]);
     const memoryFrontPrompt = await getLatestPromptTemplate('memory_card_front');
     const memoryBackPrompt = await getLatestPromptTemplate('memory_card_back');
     const shouldIncludeCards = includeCards === undefined ? false : Boolean(includeCards);
@@ -727,7 +763,7 @@ router.post('/fragmentToMemories', async (req, res) => {
       });
     }
     console.error('Error in /api/fragmentToMemories:', err);
-    return res.status(500).json({ message: 'Server error during fragment-to-memories generation.' });
+    return sendLlmAwareError(res, err, 'Server error during fragment-to-memories generation.');
   }
 });
 

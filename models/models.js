@@ -4,6 +4,7 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { ensureMongoConnection } from '../services/mongoConnectionService.js';
+import { TYPEWRITER_KEY_REQUIRED_FIELDS } from '../contracts/typewriterKeyContract.js';
 
 const chatMessageSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, index: true },
@@ -102,6 +103,57 @@ const ArenaSchema = new mongoose.Schema({
 
 export const Arena = mongoose.model('Arena', ArenaSchema);
 
+const SeerReadingSchema = new mongoose.Schema({
+  readingId: { type: String, required: true, index: true, unique: true },
+  sessionId: { type: String, required: true, index: true },
+  playerId: { type: String, index: true },
+  worldId: { type: String, index: true, default: '' },
+  universeId: { type: String, index: true, default: '' },
+  status: { type: String, enum: ['active', 'closed'], default: 'active', index: true },
+  beat: {
+    type: String,
+    enum: [
+      'invocation',
+      'cards_revealed',
+      'vision_attunement',
+      'card_attunement',
+      'triad_revealed',
+      'memory_in_focus',
+      'seer_question_pending',
+      'player_answer_received',
+      'vision_deepening',
+      'relation_testing',
+      'subject_chat_unlocked',
+      'card_claim_available',
+      'memory_deepening',
+      'cross_memory_synthesis',
+      'apparition_offer',
+      'reading_closed'
+    ],
+    default: 'invocation'
+  },
+  fragment: { type: mongoose.Schema.Types.Mixed, default: {} },
+  vision: { type: mongoose.Schema.Types.Mixed, default: {} },
+  seer: { type: mongoose.Schema.Types.Mixed, default: {} },
+  memories: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  cards: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  entities: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  apparitions: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  spread: { type: mongoose.Schema.Types.Mixed, default: {} },
+  transcript: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  subjectDialog: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  claimedCards: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  claimedEntityLinks: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  unresolvedThreads: { type: [String], default: [] },
+  worldbuildingOutputs: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  version: { type: Number, default: 1 }
+}, { timestamps: true });
+
+SeerReadingSchema.index({ sessionId: 1, playerId: 1, createdAt: -1 });
+
+export const SeerReading = mongoose.model('SeerReading', SeerReadingSchema);
+
 const WorldSchema = new mongoose.Schema({
   worldId: { type: String, required: true, index: true, unique: true },
   sessionId: { type: String, required: true, index: true },
@@ -166,7 +218,10 @@ const StorytellerSchema = new mongoose.Schema({
   keyBlankTextureUrl: { type: String },
   keySlotIndex: { type: Number },
   introducedInTypewriter: { type: Boolean, default: false },
+  typewriterInterventionInFlight: { type: Boolean, default: false },
   lastTypewriterInterventionAt: { type: Date, default: null },
+  lastTypewriterPressAt: { type: Date, default: null },
+  lastTypewriterPressFragmentLength: { type: Number, default: null },
   typewriterInterventionsCount: { type: Number, default: 0 },
   status: { type: String, enum: ['active', 'in_mission'], default: 'active' },
   missions: {
@@ -192,6 +247,48 @@ const StorytellerSchema = new mongoose.Schema({
 StorytellerSchema.index({ session_id: 1, playerId: 1, name: 1 });
 
 export const Storyteller = mongoose.model('Storyteller', StorytellerSchema);
+
+const typewriterKeySchemaDefinition = {
+  session_id: { type: String, required: true, index: true },
+  sessionId: { type: String, index: true },
+  playerId: { type: String, index: true },
+  entityId: { type: mongoose.Schema.Types.ObjectId, ref: 'NarrativeEntity', default: null, index: true },
+  entityName: { type: String, default: '' },
+  keyText: { type: String, required: true, index: true },
+  insertText: { type: String, required: true },
+  description: { type: String, default: '' },
+  sourceType: { type: String, required: true, index: true },
+  sourceRoute: { type: String, default: '' },
+  sourceStorytellerId: { type: String, default: '', index: true },
+  sourceStorytellerName: { type: String, default: '' },
+  sourceStorytellerKeySlot: { type: Number, default: null },
+  verificationKind: { type: String, required: true, default: 'typewriter_key_verification' },
+  activeInTypewriter: { type: Boolean, default: true, index: true },
+  knowledgeState: { type: String, default: 'known' },
+  playerFacingTooltip: { type: String, default: '' },
+  textureUrl: { type: String, default: '/textures/keys/blank_rect_horizontal_1.png' },
+  keyImageUrl: { type: String, default: '' },
+  sortOrder: { type: Number, default: 100 },
+  timesPressed: { type: Number, default: 0 },
+  lastPressedAt: { type: Date, default: null }
+};
+
+const TypewriterKeySchema = new mongoose.Schema(typewriterKeySchemaDefinition, {
+  timestamps: true,
+  strict: true
+});
+
+TypewriterKeySchema.index({ session_id: 1, playerId: 1, activeInTypewriter: 1, sortOrder: 1, createdAt: -1 });
+TypewriterKeySchema.index({ session_id: 1, playerId: 1, keyText: 1 });
+TypewriterKeySchema.index({ session_id: 1, playerId: 1, entityId: 1, sourceType: 1 });
+
+for (const field of TYPEWRITER_KEY_REQUIRED_FIELDS) {
+  if (!typewriterKeySchemaDefinition[field]) {
+    throw new Error(`TypewriterKey schema missing required contract field: ${field}`);
+  }
+}
+
+export const TypewriterKey = mongoose.model('TypewriterKey', TypewriterKeySchema);
 
 const QuestTraversalEventSchema = new mongoose.Schema({
   playerId: { type: String, default: '' },

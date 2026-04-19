@@ -51,9 +51,17 @@ async function buildMemoryCreationPromptTemplate() {
   return routeConfig?.promptTemplate || '';
 }
 
-function buildEntityCreationPromptTemplate() {
-  const prompt = generate_entities_by_fragment('{{fragmentText}}', DEFAULT_MAX_ENTITIES)?.[0]?.content || '';
-  return prompt.replace('and these existing entities []', 'and these existing entities {{existingEntities}}');
+async function buildEntityCreationPromptTemplate() {
+  const routeConfig = await getRouteConfig('text_to_entity');
+  if (routeConfig?.promptTemplate) {
+    return routeConfig.promptTemplate;
+  }
+  return generate_entities_by_fragment(
+    '{{fragmentText}}',
+    DEFAULT_MAX_ENTITIES,
+    '{{existingEntities}}',
+    '{{desiredEntityCategories}}'
+  )?.[0]?.content || '';
 }
 
 function buildTextureCreationPromptTemplate() {
@@ -232,14 +240,34 @@ Current narrative fragment:
 {{fragment_text}}
 """
 
-Your task:
-- Write a short storyteller intervention that enters the scene seamlessly, as if you had been there all along.
-- If you were not introduced before, briefly introduce yourself in-world without breaking tone.
-- Notice one specific thing in the fragment, investigate it, enrich the world with one fresh entity, and then drift back out.
-- The intervention must feel enchanting, observant, and precise rather than loud or expository.
-- Keep it concise: about 45-110 words.
-- Do not summarize the whole fragment.
+Your role in this intervention:
+- Enter as an added observer with your own narrative voice, as if you had been nearby all along.
+- If you were not introduced before, introduce yourself briefly and naturally in-world.
+- Notice one precise detail in the current fragment.
+- Something about that detail should trouble, remind, or alert you because of what you already know about this storytelling universe.
+- From that realization, introduce exactly one new entity that is NOT explicitly mentioned in the current fragment.
+- That entity may be any broad NER-like thing: item, location, person, flora, fauna, event, creature, relic, force, ritual, sign, etc.
+- Say what you already know or suspect about that entity.
+- Then leave the scene, allowing the original narrative to continue after you withdraw.
+
+Narrative rules:
+- Do not retell or summarize the whole fragment.
+- Do not take over the main narrative for long.
 - Do not explain mechanics or mention players, prompts, APIs, JSON, or typewriters.
+- Do not make the intervention feel like exposition notes; it must feel like living prose.
+- The new entity must feel specifically connected to something in the fragment, not randomly inserted.
+- The storyteller should sound observant, precise, slightly haunted, and already familiar with the wider world.
+- The intervention should begin with presence, move to recognition, then to the new entity, then to withdrawal.
+
+Length:
+- Keep it concise: about 55-120 words.
+
+Writing guidance:
+- Prefer first-person voice for the storyteller.
+- Ground the intervention in one concrete sensory or visual cue from the fragment.
+- Introduce only one fresh entity.
+- Give that entity one memorable, concrete association or danger.
+- End with a graceful exit, not a cliffhanger speech.
 
 You must also define one new entity discovered during this intervention.
 
@@ -253,7 +281,7 @@ Return JSON only in this exact shape:
   "continuation": "String",
   "entity": {
     "name": "String",
-    "key_text": "1-3 words, suitable for a small textual typewriter key",
+    "key_text": "1-3 words, suitable for a small pressable textual typewriter key",
     "summary": "Short vivid description",
     "type": "String",
     "subtype": "String",
@@ -268,12 +296,65 @@ Return JSON only in this exact shape:
 }`;
 }
 
+async function buildTypewriterKeyVerificationPromptTemplate() {
+  const routeConfig = await getRouteConfig('typewriter_key_verification');
+  if (routeConfig?.promptTemplate) {
+    return routeConfig.promptTemplate;
+  }
+
+  return `You are judging whether a saved textual typewriter key may be appended to a live narrative.
+
+Current narrative:
+"""
+{{current_narrative}}
+"""
+
+Candidate narrative after appending the key text:
+"""
+{{candidate_narrative}}
+"""
+
+Key label shown on the keyboard: "{{key_text}}"
+Exact text to append: "{{insert_text}}"
+Source type: "{{source_type}}"
+
+Entity context:
+- Name: {{entity_name}}
+- Description: {{entity_description}}
+- Lore: {{entity_lore}}
+- Type: {{entity_type}}
+- Subtype: {{entity_subtype}}
+
+Return JSON only in this exact shape:
+{
+  "allowed": true,
+  "reason": "Optional short explanation"
+}
+
+Rules:
+- Approve only when appending the key text at the end feels natural, supported, and tonally coherent.
+- Reject when the addition feels abrupt, redundant, contradictory, or unsupported by the current fragment.
+- Prefer restraint. This is an insertion check, not a worldbuilding opportunity.
+- The entity context is background guidance only. Do not force the key in just because the entity is interesting.
+- Keep reason short and practical if provided.`;
+}
+
 function buildMessengerChatPromptTemplate() {
   return buildInitialChatPromptText();
 }
 
 function buildImmersiveRpgGmPromptTemplate() {
   return getDefaultImmersiveRpgGmPromptTemplate();
+}
+
+async function buildSeerReadingOrchestratorPromptTemplate() {
+  const routeConfig = await getRouteConfig('seer_reading_orchestrator');
+  return routeConfig?.promptTemplate || '';
+}
+
+async function buildSeerReadingCardGenerationPromptTemplate() {
+  const routeConfig = await getRouteConfig('seer_reading_card_generation');
+  return routeConfig?.promptTemplate || '';
 }
 
 async function buildStorytellerMissionPromptTemplate() {
@@ -447,9 +528,9 @@ export async function getCurrentTypewriterPromptTemplates() {
     },
     entity_creation: {
       pipelineKey: 'entity_creation',
-      promptTemplate: buildEntityCreationPromptTemplate(),
-      source: 'ai/openai/promptsUtils.js:generate_entities_by_fragment',
-      variables: ['fragmentText', 'maxEntities', 'existingEntities']
+      promptTemplate: await buildEntityCreationPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:text_to_entity.promptTemplate',
+      variables: ['fragmentText', 'maxEntities', 'existingEntities', 'desiredEntityCategories', 'desiredEntityCategoriesJson', 'desiredEntityCategoriesBullets']
     },
     entity_card_front: {
       pipelineKey: 'entity_card_front',
@@ -487,6 +568,23 @@ export async function getCurrentTypewriterPromptTemplates() {
         'fragment_text'
       ]
     },
+    typewriter_key_verification: {
+      pipelineKey: 'typewriter_key_verification',
+      promptTemplate: await buildTypewriterKeyVerificationPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:typewriter_key_verification.promptTemplate',
+      variables: [
+        'current_narrative',
+        'candidate_narrative',
+        'key_text',
+        'insert_text',
+        'entity_name',
+        'entity_description',
+        'entity_lore',
+        'entity_type',
+        'entity_subtype',
+        'source_type'
+      ]
+    },
     messenger_chat: {
       pipelineKey: 'messenger_chat',
       promptTemplate: buildMessengerChatPromptTemplate(),
@@ -498,6 +596,33 @@ export async function getCurrentTypewriterPromptTemplates() {
       promptTemplate: buildImmersiveRpgGmPromptTemplate(),
       source: 'services/immersiveRpgService.js:getDefaultImmersiveRpgGmPromptTemplate',
       variables: []
+    },
+    seer_reading_orchestrator: {
+      pipelineKey: 'seer_reading_orchestrator',
+      promptTemplate: await buildSeerReadingOrchestratorPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:seer_reading_orchestrator.promptTemplate',
+      variables: [
+        'player_action',
+        'reading_state_json',
+        'focused_memory_json',
+        'focused_card_json',
+        'player_reply',
+        'player_requested_entity_id',
+        'available_tools_json'
+      ]
+    },
+    seer_reading_card_generation: {
+      pipelineKey: 'seer_reading_card_generation',
+      promptTemplate: await buildSeerReadingCardGenerationPromptTemplate(),
+      source: 'services/llmRouteConfigService.js:seer_reading_card_generation.promptTemplate',
+      variables: [
+        'fragment_text',
+        'vision_memory_json',
+        'known_entities_json',
+        'card_count',
+        'allowed_card_kinds_json',
+        'preferred_card_kinds_json'
+      ]
     },
     quest_generation: {
       pipelineKey: 'quest_generation',

@@ -59,6 +59,12 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     description: '/api/send_storyteller_typewriter_text storyteller entrance continuation',
     settingsKey: 'storyteller_intervention'
   },
+  typewriter_key_verification: {
+    key: 'typewriter_key_verification',
+    label: 'Typewriter key verification',
+    description: '/api/typewriter/keys/shouldAllow textual key insertion judge',
+    settingsKey: 'typewriter_key_verification'
+  },
   messenger_chat: {
     key: 'messenger_chat',
     label: 'Messenger chat',
@@ -70,6 +76,18 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     label: 'Immersive RPG GM',
     description: '/api/immersive-rpg/chat GM orchestration prompt',
     settingsKey: 'immersive_rpg_gm'
+  },
+  seer_reading_orchestrator: {
+    key: 'seer_reading_orchestrator',
+    label: 'Seer Reading Orchestrator',
+    description: '/api/seer/readings/:readingId/turn orchestration prompt',
+    settingsKey: 'seer_reading_orchestrator'
+  },
+  seer_reading_card_generation: {
+    key: 'seer_reading_card_generation',
+    label: 'Seer Reading Card Generation',
+    description: 'internal://seer-reading/cards/generate opening card-generation prompt',
+    settingsKey: 'seer_reading_card_generation'
   },
   quest_generation: {
     key: 'quest_generation',

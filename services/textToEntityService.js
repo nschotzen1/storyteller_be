@@ -10,6 +10,16 @@ import { generateEntitiesFromFragment, setEntitiesForSession, ensureDirectoryExi
 import { textToImageOpenAi } from '../ai/textToImage/api.js';
 import { renderPromptTemplateString } from './typewriterPromptConfigService.js';
 
+export const DEFAULT_DESIRED_ENTITY_CATEGORIES = Object.freeze([
+  'LOCATION',
+  'ITEM',
+  'NPC',
+  'FLORA',
+  'FAUNA',
+  'EVENT',
+  'FACTION'
+]);
+
 function normalizeConnections(connections) {
   if (!connections) {
     return '';
@@ -32,6 +42,69 @@ function normalizeConnections(connections) {
       .join(', ');
   }
   return String(connections);
+}
+
+function normalizeDesiredEntityCategoryToken(value) {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  if (!normalized) return '';
+
+  if (normalized === 'PERSON' || normalized === 'CHARACTER' || normalized === 'CHARACTERS') {
+    return 'NPC';
+  }
+  if (normalized === 'ORGANIZATION' || normalized === 'ORGANISATION' || normalized === 'GROUP') {
+    return 'FACTION';
+  }
+  if (normalized === 'LOCATIONS') return 'LOCATION';
+  if (normalized === 'ITEMS') return 'ITEM';
+  if (normalized === 'FLORAS') return 'FLORA';
+  if (normalized === 'FAUNAS') return 'FAUNA';
+  if (normalized === 'EVENTS') return 'EVENT';
+  if (normalized === 'FACTIONS') return 'FACTION';
+  return normalized;
+}
+
+export function normalizeDesiredEntityCategories(
+  rawCategories,
+  fallback = DEFAULT_DESIRED_ENTITY_CATEGORIES
+) {
+  const tokens = [];
+  if (Array.isArray(rawCategories)) {
+    rawCategories.forEach((entry) => {
+      if (Array.isArray(entry)) {
+        entry.forEach((nestedEntry) => tokens.push(nestedEntry));
+      } else {
+        tokens.push(entry);
+      }
+    });
+  } else if (typeof rawCategories === 'string') {
+    tokens.push(...rawCategories.split(','));
+  }
+
+  const normalized = Array.from(
+    new Set(tokens.map((entry) => normalizeDesiredEntityCategoryToken(entry)).filter(Boolean))
+  );
+
+  if (normalized.length) {
+    return normalized;
+  }
+  return Array.isArray(fallback) ? [...fallback] : [...DEFAULT_DESIRED_ENTITY_CATEGORIES];
+}
+
+export function buildDesiredEntityCategoryPromptVariables(rawCategories) {
+  const categories = normalizeDesiredEntityCategories(rawCategories);
+  const categoriesCsv = categories.join(', ');
+  const categoriesBullets = categories.map((category) => `- ${category}`).join('\n');
+  const categoriesJson = JSON.stringify(categories);
+  return {
+    desiredEntityCategories: categoriesCsv,
+    desired_entity_categories: categoriesCsv,
+    desiredEntityCategoriesCsv: categoriesCsv,
+    desired_entity_categories_csv: categoriesCsv,
+    desiredEntityCategoriesBullets: categoriesBullets,
+    desired_entity_categories_bullets: categoriesBullets,
+    desiredEntityCategoriesJson: categoriesJson,
+    desired_entity_categories_json: categoriesJson
+  };
 }
 
 function buildFrontPrompt(entity, texturePrompt, fragmentText) {
@@ -221,10 +294,159 @@ async function buildCardsForEntities({
   return cards;
 }
 
-function buildMockEntities(count = 3) {
+function extractQuotedPromptValue(text = '', label = '') {
+  if (!text || !label) return '';
+  const expression = new RegExp(`${label}:\\s*"([^"]+)"`, 'i');
+  const match = String(text).match(expression);
+  return match?.[1]?.trim() || '';
+}
+
+function extractSubEntitySubject(text = '') {
+  if (!text) return '';
+  const explicitAround = String(text).match(/around\s+([^:.,\n]+)\s*:/i);
+  if (explicitAround?.[1]) {
+    return explicitAround[1].trim();
+  }
+  const explicitTied = String(text).match(/tied to\s+([^.,\n]+)/i);
+  return explicitTied?.[1]?.trim() || '';
+}
+
+function deriveMockType(kind = '') {
+  switch (String(kind).trim().toLowerCase()) {
+    case 'character':
+    case 'person':
+      return { ner_type: 'PERSON', ner_subtype: 'Witness' };
+    case 'event':
+      return { ner_type: 'EVENT', ner_subtype: 'Turning Point' };
+    case 'skill':
+    case 'practice':
+      return { ner_type: 'SKILL', ner_subtype: 'Learned Practice' };
+    case 'ritual':
+      return { ner_type: 'CONCEPT', ner_subtype: 'Ritual Form' };
+    case 'authority':
+    case 'faction':
+    case 'institution':
+      return { ner_type: 'ORGANIZATION', ner_subtype: 'Order' };
+    case 'item':
+    case 'relic':
+      return { ner_type: 'ITEM', ner_subtype: 'Relic' };
+    case 'location':
+    default:
+      return { ner_type: 'LOCATION', ner_subtype: 'Watchpoint' };
+  }
+}
+
+function buildSeerContextMockEntities(text = '', count = 3) {
+  const focusKind = extractQuotedPromptValue(text, 'Focused card kind');
+  const focusTitle = extractQuotedPromptValue(text, 'Focused card title');
+  const witness = extractQuotedPromptValue(text, 'Witness');
+  const location = extractQuotedPromptValue(text, 'Location');
+  const playerClarification = extractQuotedPromptValue(text, 'Player clarification');
+  const relatedThrough = extractQuotedPromptValue(text, 'Related through what');
+  const primaryName = focusTitle || location;
+
+  if (!primaryName) return [];
+
+  const type = deriveMockType(focusKind);
+  const leadEntity = {
+    id: 'mock-entity-1',
+    name: primaryName,
+    ner_type: type.ner_type,
+    ner_subtype: type.ner_subtype,
+    description: playerClarification
+      ? `${primaryName} takes on clearer shape in the reading: ${playerClarification}`
+      : `${primaryName} stands out as a reusable thread made legible by the seer.`,
+    relevance: relatedThrough
+      ? `This thread matters because it binds the memory through ${relatedThrough}.`
+      : `This thread matters because the reading keeps circling back to ${primaryName}.`,
+    connections: [witness, location && location !== primaryName ? location : ''].filter(Boolean)
+  };
+
+  const supportEntities = [
+    witness
+      ? {
+        id: 'mock-entity-2',
+        name: witness,
+        ner_type: 'PERSON',
+        ner_subtype: 'Witness',
+        description: `${witness} is the living angle through which this memory becomes legible.`,
+        relevance: `Their relationship to ${primaryName} turns the thread from atmosphere into character history.`,
+        connections: [primaryName]
+      }
+      : null,
+    relatedThrough
+      ? {
+        id: 'mock-entity-3',
+        name: relatedThrough.charAt(0).toUpperCase() + relatedThrough.slice(1),
+        ner_type: 'CONCEPT',
+        ner_subtype: 'Binding Motif',
+        description: `${relatedThrough} acts as the thematic pressure connecting the visible facts in the spread.`,
+        relevance: `It explains why ${primaryName} recurs instead of staying a one-off detail.`,
+        connections: [primaryName, witness].filter(Boolean)
+      }
+      : null
+  ].filter(Boolean);
+
+  return [leadEntity, ...supportEntities].slice(0, count);
+}
+
+function buildMissionContextMockEntities(text = '', count = 3) {
+  const mainSubject = extractSubEntitySubject(text);
+  if (!mainSubject) return [];
+
+  const rootToken = mainSubject
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(-1)[0] || 'Thread';
+
   const templates = [
     {
       id: 'mock-entity-1',
+      name: `${mainSubject} Weather Marks`,
+      ner_type: 'ITEM',
+      ner_subtype: 'Field Notes',
+      description: `A reusable set of physical marks, scratches, and weather cues gathered from ${mainSubject}.`,
+      relevance: `These marks turn the mission around ${mainSubject} into something another player can discover later.`,
+      connections: [mainSubject]
+    },
+    {
+      id: 'mock-entity-2',
+      name: `${rootToken} Witness`,
+      ner_type: 'PERSON',
+      ner_subtype: 'Keeper',
+      description: `A minor witness whose knowledge of ${mainSubject} is practical rather than ceremonial.`,
+      relevance: `This witness can reopen the same thread in another reading or later scene.`,
+      connections: [mainSubject]
+    },
+    {
+      id: 'mock-entity-3',
+      name: `${mainSubject} Storm Rite`,
+      ner_type: 'SKILL',
+      ner_subtype: 'Weather Reading',
+      description: `A learned practice distilled from the mission around ${mainSubject}.`,
+      relevance: `This skill turns investigation into a lasting character consequence.`,
+      connections: [mainSubject]
+    }
+  ];
+
+  return templates.slice(0, count);
+}
+
+function buildMockEntities(text = '', count = 3, desiredEntityCategories = DEFAULT_DESIRED_ENTITY_CATEGORIES) {
+  const missionContextEntities = buildMissionContextMockEntities(text, count);
+  if (missionContextEntities.length) {
+    return missionContextEntities;
+  }
+
+  const seerContextEntities = buildSeerContextMockEntities(text, count);
+  if (seerContextEntities.length) {
+    return seerContextEntities;
+  }
+
+  const safeCount = Number.isFinite(Number(count)) ? Math.min(Math.max(1, Math.floor(Number(count))), 12) : 3;
+  const categories = normalizeDesiredEntityCategories(desiredEntityCategories);
+  const templatesByCategory = {
+    LOCATION: {
       name: 'Emberline Waystation',
       ner_type: 'LOCATION',
       ner_subtype: 'Border Outpost',
@@ -232,8 +454,15 @@ function buildMockEntities(count = 3) {
       relevance: 'A waypoint rumored to sit on the edge of shifting jurisdictions.',
       connections: ['Ashward Toll', 'The Cindergate Courier']
     },
-    {
-      id: 'mock-entity-2',
+    ITEM: {
+      name: 'Rain-Sealed Satchel',
+      ner_type: 'ITEM',
+      ner_subtype: 'Courier Relic',
+      description: 'A dark leather satchel whose wax seals carry the smell of pine smoke and wet iron.',
+      relevance: 'Its contents can redirect the next scene before anyone speaks of them aloud.',
+      connections: ['Emberline Waystation', 'The Cindergate Courier']
+    },
+    NPC: {
       name: 'Cindergate Courier',
       ner_type: 'PERSON',
       ner_subtype: 'Messenger',
@@ -241,28 +470,60 @@ function buildMockEntities(count = 3) {
       relevance: 'Brings secrets between settlements, often arriving just before unrest.',
       connections: ['Emberline Waystation']
     },
-    {
-      id: 'mock-entity-3',
+    FLORA: {
+      name: 'Blackfen Reed',
+      ner_type: 'FLORA',
+      ner_subtype: 'Marsh Growth',
+      description: 'Tall river reeds with soot-dark stems and silver undersides that flash under storm light.',
+      relevance: 'They mark the wet boundaries where roads become memories and footprints vanish.',
+      connections: ['Emberline Waystation']
+    },
+    FAUNA: {
+      name: 'Latchwing',
+      ner_type: 'FAUNA',
+      ner_subtype: 'Carrion Bird',
+      description: 'A sharp-beaked marsh bird that settles on rusted iron before rain turns serious.',
+      relevance: 'Its sudden silence is treated as a bad sign by anyone who has crossed the pass at dusk.',
+      connections: ['Emberline Waystation']
+    },
+    EVENT: {
       name: 'Ashward Toll',
       ner_type: 'EVENT',
       ner_subtype: 'Rite of Passage',
       description: 'A ritual tariff collected at dusk, marked by bell chimes and a sworn silence.',
       relevance: 'Signals a shift in authority and the start of a fragile truce.',
       connections: ['Emberline Waystation']
+    },
+    FACTION: {
+      name: 'Watchers of the Ninth Bell',
+      ner_type: 'ORGANIZATION',
+      ner_subtype: 'Border Order',
+      description: 'A disciplined river-watch order that inventories crossings, debts, and unusual arrivals.',
+      relevance: 'Their records decide which strangers become guests and which become warnings.',
+      connections: ['Emberline Waystation', 'Ashward Toll']
     }
-  ];
+  };
 
-  const safeCount = Number.isFinite(Number(count)) ? Math.min(Math.max(1, Math.floor(Number(count))), 12) : 3;
   return Array.from({ length: safeCount }).map((_, index) => {
-    const template = templates[index % templates.length];
-    if (index < templates.length) {
-      return { ...template };
+    const requestedCategory = categories[index % categories.length];
+    const template = templatesByCategory[requestedCategory] || {
+      name: `${requestedCategory} Thread`,
+      ner_type: requestedCategory,
+      ner_subtype: 'Narrative Thread',
+      description: `A reusable ${requestedCategory.toLowerCase()} thread drawn out of the fragment's pressure points.`,
+      relevance: `This ${requestedCategory.toLowerCase()} exists because the fragment implies it strongly enough to matter beyond the moment.`,
+      connections: []
+    };
+    if (index === 0) {
+      return {
+        id: 'mock-entity-1',
+        ...template
+      };
     }
     return {
-      ...template,
       id: `mock-entity-${index + 1}`,
-      name: `${template.name} ${index + 1}`,
-      relevance: `${template.relevance} Variant ${index + 1}.`
+      ...template,
+      name: `${template.name} ${index + 1}`
     };
   });
 }
@@ -272,6 +533,7 @@ export async function textToEntityFromText({
   playerId,
   text,
   entityCount = 8,
+  desiredEntityCategories = DEFAULT_DESIRED_ENTITY_CATEGORIES,
   includeCards = false,
   includeFront = true,
   includeBack = true,
@@ -290,9 +552,10 @@ export async function textToEntityFromText({
   const safeEntityCount = Number.isFinite(Number(entityCount))
     ? Math.min(Math.max(1, Math.floor(Number(entityCount))), 12)
     : 8;
+  const normalizedDesiredEntityCategories = normalizeDesiredEntityCategories(desiredEntityCategories);
 
   if (debug) {
-    const entities = buildMockEntities(safeEntityCount);
+    const entities = buildMockEntities(text, safeEntityCount, normalizedDesiredEntityCategories);
     if (mainEntityId) {
       entities.forEach((entity) => {
         entity.mainEntityId = mainEntityId;
@@ -323,6 +586,7 @@ export async function textToEntityFromText({
     return {
       entities,
       cards,
+      desiredEntityCategories: normalizedDesiredEntityCategories,
       mocked: true,
       mockedEntities: true,
       mockedTextures: true
@@ -341,7 +605,8 @@ export async function textToEntityFromText({
       maxEntities: safeEntityCount,
       llmModel,
       llmProvider,
-      entityPromptTemplate
+      entityPromptTemplate,
+      desiredEntityCategories: normalizedDesiredEntityCategories
     }
   );
   let cards;
@@ -366,6 +631,7 @@ export async function textToEntityFromText({
   return {
     entities,
     cards,
+    desiredEntityCategories: normalizedDesiredEntityCategories,
     mocked: shouldMockTextures,
     mockedEntities: false,
     mockedTextures: shouldMockTextures

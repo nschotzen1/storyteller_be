@@ -98,6 +98,19 @@ const PIPELINE_DEFINITIONS = {
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_STORYTELLER_INTERVENTION_PROVIDER || DEFAULT_PROVIDER
   },
+  typewriter_key_verification: {
+    key: 'typewriter_key_verification',
+    label: 'Typewriter Key Verification',
+    description: '/api/typewriter/keys/shouldAllow',
+    modelKind: 'text',
+    defaultUseMock: false,
+    defaultModel: process.env.OPENAI_TYPEWRITER_KEY_VERIFICATION_MODEL
+      || process.env.OPENAI_STORYTELLER_INTERVENTION_MODEL
+      || process.env.OPENAI_STORYTELLER_MODEL
+      || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_TYPEWRITER_KEY_VERIFICATION_PROVIDER || DEFAULT_PROVIDER
+  },
   messenger_chat: {
     key: 'messenger_chat',
     label: 'Messenger Chat',
@@ -117,6 +130,36 @@ const PIPELINE_DEFINITIONS = {
     defaultModel: process.env.OPENAI_IMMERSIVE_RPG_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_IMMERSIVE_RPG_PROVIDER || DEFAULT_PROVIDER
+  },
+  seer_reading_orchestrator: {
+    key: 'seer_reading_orchestrator',
+    label: 'Seer Reading Orchestrator',
+    description: '/api/seer/readings/:readingId/turn',
+    modelKind: 'text',
+    defaultUseMock: true,
+    defaultModel: process.env.OPENAI_SEER_READING_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_SEER_READING_PROVIDER || DEFAULT_PROVIDER
+  },
+  seer_reading_card_generation: {
+    key: 'seer_reading_card_generation',
+    label: 'Seer Reading Card Generation',
+    description: 'internal://seer-reading/cards/generate',
+    modelKind: 'text',
+    defaultUseMock: true,
+    countProperty: 'cardCount',
+    countLabel: 'Default card count',
+    minCount: 1,
+    maxCount: 10,
+    defaultCount: 3,
+    defaultModel: process.env.OPENAI_SEER_CARD_MODEL
+      || process.env.OPENAI_SEER_READING_MODEL
+      || process.env.OPENAI_CHAT_MODEL
+      || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.OPENAI_SEER_CARD_PROVIDER
+      || process.env.OPENAI_SEER_READING_PROVIDER
+      || DEFAULT_PROVIDER
   },
   quest_generation: {
     key: 'quest_generation',

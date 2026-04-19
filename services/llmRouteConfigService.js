@@ -67,6 +67,16 @@ const STORYTELLER_INTERVENTION_RESPONSE_SCHEMA = {
   additionalProperties: true
 };
 
+const TYPEWRITER_KEY_VERIFICATION_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['allowed'],
+  properties: {
+    allowed: { type: 'boolean' },
+    reason: { type: 'string' }
+  },
+  additionalProperties: true
+};
+
 const MESSENGER_SCENE_BRIEF_SCHEMA = {
   type: 'object',
   required: ['subject', 'place_name', 'place_summary', 'typewriter_hiding_spot', 'sensory_details', 'notable_features', 'scene_established'],
@@ -246,6 +256,226 @@ const IMMERSIVE_RPG_TURN_RESPONSE_SCHEMA = {
   additionalProperties: true
 };
 
+const SEER_ORCHESTRATOR_TOOL_CALL_SCHEMA = {
+  type: 'object',
+  required: ['tool_id', 'input'],
+  properties: {
+    tool_id: { type: 'string', minLength: 1 },
+    reason: { type: 'string' },
+    input: {
+      type: 'object',
+      additionalProperties: true
+    }
+  },
+  additionalProperties: true
+};
+
+const SEER_ORCHESTRATOR_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['spoken_message', 'transition_type', 'beat', 'tool_calls', 'ui', 'state_patch'],
+  properties: {
+    spoken_message: { type: 'string', minLength: 1 },
+    transition_type: {
+      type: 'string',
+      enum: [
+        'reveal',
+        'focus_shift',
+        'relation_proposed',
+        'relation_strengthened',
+        'relation_rejected',
+        'new_entity_created',
+        'new_entity_suggested',
+        'vision_reveal',
+        'card_reveal',
+        'new_card_created',
+        'subject_chat_unlocked',
+        'card_claim_available',
+        'card_claimed',
+        'synthesis',
+        'dead_end',
+        'apparition_offer',
+        'closure'
+      ]
+    },
+    beat: { type: 'string', minLength: 1 },
+    tool_calls: {
+      type: 'array',
+      items: SEER_ORCHESTRATOR_TOOL_CALL_SCHEMA
+    },
+    ui: {
+      type: 'object',
+      properties: {
+        focus_memory_id: { type: 'string' },
+        focus_card_id: { type: 'string' },
+        reveal_fields: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        card_patches: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['card_id'],
+            properties: {
+              card_id: { type: 'string', minLength: 1 },
+              clarity_delta: { type: 'number' },
+              confidence_delta: { type: 'number' },
+              reveal_tier_delta: { type: 'number' },
+              status: { type: 'string' }
+            },
+            additionalProperties: true
+          }
+        },
+        suggested_entity_labels: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        suggested_card_labels: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        composer_mode: { type: 'string' },
+        suggestions: {
+          type: 'array',
+          items: { type: 'string' }
+        }
+      },
+      additionalProperties: true
+    },
+    state_patch: {
+      type: 'object',
+      properties: {
+        clarity_delta: { type: 'number' },
+        vision_clarity_delta: { type: 'number' },
+        reveal_tier_delta: { type: 'number' },
+        focus_memory_id: { type: 'string' },
+        focus_card_id: { type: 'string' },
+        claimed_card_ids: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        unresolved_threads: {
+          type: 'array',
+          items: { type: 'string' }
+        }
+      },
+      additionalProperties: true
+    }
+  },
+  additionalProperties: true
+};
+
+const SEER_TOOL_REGISTRY_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['tools'],
+  properties: {
+    tools: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['id', 'label', 'description', 'inputHints'],
+        properties: {
+          id: { type: 'string', minLength: 1 },
+          label: { type: 'string', minLength: 1 },
+          description: { type: 'string', minLength: 1 },
+          inputHints: {
+            type: 'array',
+            items: { type: 'string' }
+          }
+        },
+        additionalProperties: true
+      }
+    }
+  },
+  additionalProperties: true
+};
+
+const SEER_CARD_GENERATION_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['vision_summary', 'cards'],
+  properties: {
+    vision_summary: { type: 'string', minLength: 1 },
+    cards: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 10,
+      items: {
+        type: 'object',
+        required: ['kind', 'label', 'back_moods', 'back_motifs'],
+        properties: {
+          kind: { type: 'string', minLength: 1 },
+          label: { type: 'string', minLength: 1 },
+          summary: { type: 'string' },
+          back_genre_signal: { type: 'string' },
+          back_moods: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string' }
+          },
+          back_motifs: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string' }
+          },
+          likely_relation_hint: { type: 'string' }
+        },
+        additionalProperties: true
+      }
+    }
+  },
+  additionalProperties: true
+};
+
+const TEXT_TO_ENTITY_ENTITY_SCHEMA = {
+  type: 'object',
+  required: ['name', 'ner_type', 'description', 'relevance'],
+  properties: {
+    familiarity_level: { type: 'number' },
+    reusability_level: {
+      anyOf: [
+        { type: 'string' },
+        { type: 'number' }
+      ]
+    },
+    ner_type: { type: 'string', minLength: 1 },
+    ner_subtype: { type: 'string' },
+    description: { type: 'string', minLength: 1 },
+    name: { type: 'string', minLength: 1 },
+    relevance: { type: 'string', minLength: 1 },
+    impact: { type: 'string' },
+    skills_and_rolls: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    development_cost: { type: 'string' },
+    storytelling_points_cost: { type: 'number' },
+    urgency: { type: 'string' },
+    connections: {
+      anyOf: [
+        { type: 'array', items: { type: 'string' } },
+        { type: 'string' }
+      ]
+    },
+    tile_distance: { type: 'number' },
+    evolution_state: { type: 'string' },
+    evolution_notes: { type: 'string' }
+  },
+  additionalProperties: true
+};
+
+const TEXT_TO_ENTITY_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['entities'],
+  properties: {
+    entities: {
+      type: 'array',
+      minItems: 1,
+      items: TEXT_TO_ENTITY_ENTITY_SCHEMA
+    }
+  },
+  additionalProperties: true
+};
+
 const ROUTE_KEY_ALIASES = Object.freeze({
   immersive_rpg_turn: Object.freeze(['immersive_rpg_chat'])
 });
@@ -324,6 +554,71 @@ name, description, tags (array), traits (array), hooks (array).`,
       additionalProperties: true
     }
   },
+  text_to_entity: {
+    routeKey: 'text_to_entity',
+    routePath: '/api/textToEntity',
+    method: 'POST',
+    description: 'Generate reusable narrative entities from a fragment.',
+    promptMode: 'manual',
+    promptTemplate: `You are generating reusable narrative entities for a storytelling universe.
+
+Narrative fragment:
+"""
+{{fragmentText}}
+"""
+
+Existing entities:
+{{existingEntities}}
+
+Requested maximum entities: {{maxEntities}}
+Preferred entity categories: {{desiredEntityCategories}}
+
+Rules:
+- Bias strongly toward the preferred entity categories when the fragment supports them.
+- Default categories are LOCATION, ITEM, NPC, FLORA, FAUNA, EVENT, and FACTION.
+- If the preferred list includes extra categories, treat them as valid additions.
+- Do not recreate existing entities unless they are clearly returning in a more developed form.
+- Each entity should feel reusable beyond this one fragment.
+- For typing, map NPC to PERSON and FACTION to ORGANIZATION unless another ner_type is more precise.
+
+Return JSON only with key "entities".`,
+    promptCore: '',
+    fieldDocs: {
+      entities: 'Generated entity list.',
+      'entities[].name': 'Concrete, evocative entity name.',
+      'entities[].ner_type': 'Broad NER-aligned type such as PERSON, LOCATION, ITEM, ORGANIZATION, EVENT, FLORA, or FAUNA.',
+      'entities[].relevance': 'Why this entity matters to the fragment and the wider world.',
+      'entities[].storytelling_points_cost': 'Approximate storytelling cost for acquiring or activating the entity.'
+    },
+    examplePayload: {
+      entities: [
+        {
+          familiarity_level: 3,
+          reusability_level: 'broad dark fantasy',
+          ner_type: 'LOCATION',
+          ner_subtype: 'Monastery',
+          description: 'A weather-cut riverside monastery whose lower stones hold old flood lines.',
+          name: 'Flood Court of Saint Vey',
+          relevance: 'The fragment points to it as the place where memory, ritual, and weather all meet.',
+          impact: 'Can anchor later scenes, NPC ties, and ritual discoveries.',
+          skills_and_rolls: ['Lore', 'Observation'],
+          development_cost: '5, 10, 15, 20',
+          storytelling_points_cost: 12,
+          urgency: 'Immediate',
+          connections: ['Saint Vey', 'storm rites'],
+          tile_distance: 0,
+          evolution_state: 'New',
+          evolution_notes: 'Introduced as a durable location thread.'
+        }
+      ]
+    },
+    outputRules: [
+      'Return JSON only.',
+      'Output must be an object with key "entities".',
+      'Each entity should be specific, sensory-rich, and reusable in later worldbuilding.'
+    ],
+    responseSchema: TEXT_TO_ENTITY_RESPONSE_SCHEMA
+  },
   text_to_storyteller: {
     routeKey: 'text_to_storyteller',
     routePath: '/api/textToStoryteller',
@@ -395,7 +690,7 @@ Output JSON only.`,
     routeKey: 'storyteller_typewriter_intervention',
     routePath: '/api/send_storyteller_typewriter_text',
     method: 'POST',
-    description: 'Generate a short storyteller entrance/intervention plus one new entity key.',
+    description: 'Generate a short storyteller entrance/intervention plus one new pressable textual typewriter key.',
     promptMode: 'manual',
     promptTemplate: `You are a hidden storyteller joining an already-unfolding scene.
 
@@ -416,14 +711,34 @@ Current narrative fragment:
 {{fragment_text}}
 """
 
-Your task:
-- Write a short storyteller intervention that enters the scene seamlessly, as if you had been there all along.
-- If you were not introduced before, briefly introduce yourself in-world without breaking tone.
-- Notice one specific thing in the fragment, investigate it, enrich the world with one fresh entity, and then drift back out.
-- The intervention must feel enchanting, observant, and precise rather than loud or expository.
-- Keep it concise: about 45-110 words.
-- Do not summarize the whole fragment.
+Your role in this intervention:
+- Enter as an added observer with your own narrative voice, as if you had been nearby all along.
+- If you were not introduced before, introduce yourself briefly and naturally in-world.
+- Notice one precise detail in the current fragment.
+- Something about that detail should trouble, remind, or alert you because of what you already know about this storytelling universe.
+- From that realization, introduce exactly one new entity that is NOT explicitly mentioned in the current fragment.
+- That entity may be any broad NER-like thing: item, location, person, flora, fauna, event, creature, relic, force, ritual, sign, etc.
+- Say what you already know or suspect about that entity.
+- Then leave the scene, allowing the original narrative to continue after you withdraw.
+
+Narrative rules:
+- Do not retell or summarize the whole fragment.
+- Do not take over the main narrative for long.
 - Do not explain mechanics or mention players, prompts, APIs, JSON, or typewriters.
+- Do not make the intervention feel like exposition notes; it must feel like living prose.
+- The new entity must feel specifically connected to something in the fragment, not randomly inserted.
+- The storyteller should sound observant, precise, slightly haunted, and already familiar with the wider world.
+- The intervention should begin with presence, move to recognition, then to the new entity, then to withdrawal.
+
+Length:
+- Keep it concise: about 55-120 words.
+
+Writing guidance:
+- Prefer first-person voice for the storyteller.
+- Ground the intervention in one concrete sensory or visual cue from the fragment.
+- Introduce only one fresh entity.
+- Give that entity one memorable, concrete association or danger.
+- End with a graceful exit, not a cliffhanger speech.
 
 You must also define one new entity discovered during this intervention.
 
@@ -437,7 +752,7 @@ Return JSON only in this exact shape:
   "continuation": "String",
   "entity": {
     "name": "String",
-    "key_text": "1-3 words, suitable for a small textual typewriter key",
+    "key_text": "1-3 words, suitable for a small pressable textual typewriter key",
     "summary": "Short vivid description",
     "type": "String",
     "subtype": "String",
@@ -452,8 +767,8 @@ Return JSON only in this exact shape:
 }`,
     promptCore: '',
     fieldDocs: {
-      continuation: '45-110 words, in-world, seamless entrance and exit.',
-      'entity.key_text': '1-3 words, compact enough for the typewriter entity key rail.',
+      continuation: '55-120 words, in-world, seamless entrance and exit.',
+      'entity.key_text': '1-3 words, compact enough for a pressable typewriter text key.',
       'style.font_color': 'Use only dark, legible CSS hex colors suitable for parchment.'
     },
     examplePayload: {
@@ -476,10 +791,66 @@ Return JSON only in this exact shape:
     },
     outputRules: [
       'continuation must remain in-world and cannot mention gameplay or interfaces',
-      'entity.key_text must be concise and readable at small UI size',
+      'entity.key_text must be concise and readable at small typewriter key size',
       'style.font_color must be dark and highly legible on parchment'
     ],
     responseSchema: STORYTELLER_INTERVENTION_RESPONSE_SCHEMA
+  },
+  typewriter_key_verification: {
+    routeKey: 'typewriter_key_verification',
+    routePath: '/api/typewriter/keys/shouldAllow',
+    method: 'POST',
+    description: 'Judge whether a saved textual typewriter key may be appended to the current narrative.',
+    promptMode: 'manual',
+    promptTemplate: `You are judging whether a saved textual typewriter key may be appended to a live narrative.
+
+Current narrative:
+"""
+{{current_narrative}}
+"""
+
+Candidate narrative after appending the key text:
+"""
+{{candidate_narrative}}
+"""
+
+Key label shown on the keyboard: "{{key_text}}"
+Exact text to append: "{{insert_text}}"
+Source type: "{{source_type}}"
+
+Entity context:
+- Name: {{entity_name}}
+- Description: {{entity_description}}
+- Lore: {{entity_lore}}
+- Type: {{entity_type}}
+- Subtype: {{entity_subtype}}
+
+Return JSON only in this exact shape:
+{
+  "allowed": true,
+  "reason": "Optional short explanation"
+}
+
+Rules:
+- Approve only when appending the key text at the end feels natural, supported, and tonally coherent.
+- Reject when the addition feels abrupt, redundant, contradictory, or unsupported by the current fragment.
+- Prefer restraint. This is an insertion check, not a worldbuilding opportunity.
+- The entity context is background guidance only. Do not force the key in just because the entity is interesting.
+- Keep reason short and practical if provided.`,
+    promptCore: '',
+    fieldDocs: {
+      allowed: 'Boolean verdict for whether the key may append its insert_text to the current narrative.',
+      reason: 'Optional short explanation for debugging or admin visibility.'
+    },
+    examplePayload: {
+      allowed: true,
+      reason: 'The sea-light anomaly is already present, so the key extends the sentence naturally.'
+    },
+    outputRules: [
+      'allowed must be a boolean',
+      'reason is optional and should stay short if present'
+    ],
+    responseSchema: TYPEWRITER_KEY_VERIFICATION_RESPONSE_SCHEMA
   },
   messenger_chat: {
     routeKey: 'messenger_chat',
@@ -662,6 +1033,252 @@ Return JSON only in this exact shape:
       'GM output must stay in-world and must not mention prompts, APIs, JSON, or tooling.'
     ],
     responseSchema: IMMERSIVE_RPG_TURN_RESPONSE_SCHEMA
+  },
+  seer_reading_orchestrator: {
+    routeKey: 'seer_reading_orchestrator',
+    routePath: '/api/seer/readings/:readingId/turn',
+    method: 'POST',
+    description: 'Prompt-driven tool orchestrator contract for Seer Reading turns.',
+    promptMode: 'manual',
+    promptTemplate: `You are the Seer Reading Orchestrator.
+
+You are not merely narrating. You are deciding one ritual move for a single turn.
+
+You receive:
+- the current reading state
+- the focused memory
+- the focused card
+- the player reply
+- the currently available tools
+
+Your job:
+- make exactly one primary consequence happen this turn
+- keep the seer voice specific, ritual, and world-facing
+- prefer precision over verbosity
+- preserve ambiguity when it is dramatically stronger than certainty
+- use only tools that are actually available
+
+Potential tools may include:
+- focus_vision
+- focus_card
+- reveal_vision_tier
+- reveal_card_tier
+- generate_cards
+- create_entity
+- propose_relation
+- unlock_subject_chat
+- claim_card
+- invoke_storyteller
+- create_world_truth
+- close_reading
+- roll_dice
+
+Rules:
+- one turn, one dominant consequence
+- begin from fragments, feelings, and partial images
+- do not reveal everything at once
+- in Phase 1, think in terms of one blurred vision and a configurable spread of interpretive cards
+- card kinds may be dynamic; use the available kinds or generate new kinds only when the runtime explicitly allows it
+- if you create a new entity, make it reusable in later worldbuilding
+- if you sharpen a card, make the new detail feel earned by the player's interpretation
+- if the vision becomes sufficiently vivid, you may unlock a short subject chat
+- if no tool should fire, return an intentional dead_end with a sharper spoken question
+
+Player action:
+{{player_action}}
+
+Player reply:
+{{player_reply}}
+
+Requested entity id:
+{{player_requested_entity_id}}
+
+Focused memory JSON:
+{{focused_memory_json}}
+
+Focused card JSON:
+{{focused_card_json}}
+
+Current reading JSON:
+{{reading_state_json}}
+
+Available tools JSON:
+{{available_tools_json}}
+
+Return JSON only in the configured schema.`,
+    promptCore: '',
+    fieldDocs: {
+      spoken_message: 'What the seer says aloud to the player for this turn.',
+      transition_type: 'The single dominant ritual consequence.',
+      tool_calls: 'Explicit tool invocations the runtime should execute.',
+      ui: 'Minimal UI directives for vision/card focus, reveal, and composer hints.',
+      state_patch: 'Small deterministic state changes implied by the turn.'
+    },
+    examplePayload: {
+      spoken_message: 'The event card stirs first. I see a woman checking some small kept thing again and again, as if losing it would undo everything.',
+      transition_type: 'card_reveal',
+      beat: 'card_attunement',
+      tool_calls: [
+        {
+          tool_id: 'reveal_card_tier',
+          reason: 'The player connected the blurred motion to the event lens.',
+          input: {
+            card_id: 'card-event',
+            clarity_delta: 0.18
+          }
+        }
+      ],
+      ui: {
+        focus_card_id: 'card-event',
+        suggested_card_labels: ['event', 'character'],
+        composer_mode: 'short_text',
+        suggestions: ['she is protecting something', 'it changed everything', 'she is fleeing discovery']
+      },
+      state_patch: {
+        vision_clarity_delta: 0.1,
+        reveal_tier_delta: 0,
+        focus_card_id: 'card-event',
+        unresolved_threads: ['What is the small item, and why does it matter so much to her?']
+      }
+    },
+    outputRules: [
+      'Return JSON only.',
+      'Choose exactly one dominant transition_type.',
+      'tool_calls must only reference tools that the runtime made available.',
+      'spoken_message should sound like an authored seer, not a generic assistant.',
+      'Default to fragments and suggestive pressure before explicit facts.'
+    ],
+    responseSchema: SEER_ORCHESTRATOR_RESPONSE_SCHEMA
+  },
+  seer_reading_tool_registry: {
+    routeKey: 'seer_reading_tool_registry',
+    routePath: 'internal://seer-reading/tools',
+    method: 'GET',
+    description: 'Read-only registry of executable tools the Seer orchestrator may use during a turn.',
+    promptMode: 'manual',
+    promptTemplate: '',
+    promptCore: '',
+    fieldDocs: {
+      id: 'Stable tool id returned to and from the orchestrator.',
+      label: 'Human-readable tool label shown in admin and debug views.',
+      description: 'What the runtime will actually do if this tool is executed.',
+      inputHints: 'Expected input keys the orchestrator may send with the tool call.'
+    },
+    examplePayload: {
+      tools: [
+        {
+          id: 'retrieve_entity',
+          label: 'Retrieve Entity',
+          description: 'Search the entity bank before minting a new entity.',
+          inputHints: ['entityId', 'searchLabel']
+        },
+        {
+          id: 'create_entity',
+          label: 'Create Entity',
+          description: 'Create a reusable entity from the current thread.',
+          inputHints: ['entityId']
+        },
+        {
+          id: 'propose_relation',
+          label: 'Propose Relation',
+          description: 'Bind the focused card and memory to the chosen entity.',
+          inputHints: ['entityId']
+        },
+        {
+          id: 'invoke_storyteller',
+          label: 'Invoke Storyteller',
+          description: 'Offer an apparition as the next interpretive force.',
+          inputHints: ['storytellerId']
+        }
+      ]
+    },
+    outputRules: [
+      'This registry is descriptive; it should stay aligned with the runtime implementation.',
+      'Do not list speculative tools that the runtime cannot execute.'
+    ],
+    responseSchema: SEER_TOOL_REGISTRY_RESPONSE_SCHEMA
+  },
+  seer_reading_card_generation: {
+    routeKey: 'seer_reading_card_generation',
+    routePath: 'internal://seer-reading/cards/generate',
+    method: 'POST',
+    description: 'Reserved structured card-generation contract for the opening Seer Reading cards.',
+    promptMode: 'manual',
+    promptTemplate: `You are generating the opening interpretive cards for a Seer Reading.
+
+You receive:
+- the fragment
+- one seeded blurred memory vision
+- known entities from the session
+- requested card count
+- optional preferred card kinds
+- optional allowed card kinds
+
+Generate {{card_count}} interpretive cards.
+
+Rules:
+- these are interpretive starting lenses, not final canon
+- the card backs should imply mood, genre, and motifs before facts
+- keep labels evocative but concrete
+- the cards should feel related to the vision without fully explaining it
+- choose card kinds creatively from the allowed list when provided
+- when preferred kinds are provided, bias toward them without becoming repetitive
+- good card kinds include character, location, event, item, faction, omen, symbol, institution, creature, feeling, authority, ritual, or practice
+- each card kind should be a short lower-case label
+
+Return JSON only in the configured schema.`,
+    promptCore: '',
+    fieldDocs: {
+      vision_summary: 'A concise summary of the blurred vision these cards surround.',
+      cards: 'A configurable array of interpretive cards whose kinds can vary by reading.'
+    },
+    examplePayload: {
+      vision_summary: 'Someone runs for a long time through thick growth, looking back as if pursuit never leaves the edge of sight.',
+      cards: [
+        {
+          kind: 'character',
+          label: 'The Runner',
+          summary: 'A person in practiced flight rather than sudden panic.',
+          back_genre_signal: 'flight through old danger',
+          back_moods: ['fear', 'urgency'],
+          back_motifs: ['breath', 'thorns', 'mud'],
+          likely_relation_hint: 'This person may be the subject of the vision.'
+        },
+        {
+          kind: 'location',
+          label: 'The Forgotten Green',
+          summary: 'A once-kept place now reclaimed by living overgrowth.',
+          back_genre_signal: 'ruin reclaimed by nature',
+          back_moods: ['decay', 'secrecy'],
+          back_motifs: ['roots', 'stone', 'mist'],
+          likely_relation_hint: 'The place seems older and grander than its present state.'
+        },
+        {
+          kind: 'event',
+          label: 'The Flight With The Kept Thing',
+          summary: 'A turning point centered on something small that must not be lost.',
+          back_genre_signal: 'escape after irreversible change',
+          back_moods: ['tension', 'devotion'],
+          back_motifs: ['pouch', 'hands', 'checking'],
+          likely_relation_hint: 'The event may explain why the running matters.'
+        },
+        {
+          kind: 'authority',
+          label: 'The Made Sovereign',
+          summary: 'Power acquired through maneuver rather than inheritance.',
+          back_genre_signal: 'political ascent through will',
+          back_moods: ['control', 'calculation'],
+          back_motifs: ['seal', 'ring', 'decree'],
+          likely_relation_hint: 'This force may bind the other cards without appearing directly in the vision.'
+        }
+      ]
+    },
+    outputRules: [
+      'Return exactly the requested number of cards.',
+      'Treat card kinds as configurable unless the caller explicitly fixes them.',
+      'Treat the output as an opening spread, not final truth.'
+    ],
+    responseSchema: SEER_CARD_GENERATION_RESPONSE_SCHEMA
   },
   quest_advance: {
     routeKey: 'quest_advance',

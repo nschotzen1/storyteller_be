@@ -6,6 +6,10 @@ import {
   NARRATIVE_ENTITY_JSON_SCHEMA,
   NARRATIVE_ENTITY_LIST_RESPONSE_SCHEMA
 } from './contracts/narrativeEntityContract.js';
+import {
+  TYPEWRITER_KEY_JSON_SCHEMA,
+  TYPEWRITER_KEY_LIST_RESPONSE_SCHEMA
+} from './contracts/typewriterKeyContract.js';
 
 const pathParam = (name, description) => ({
   name,
@@ -67,6 +71,300 @@ const LLM_ROUTE_CONFIG_EXAMPLE = {
   }
 };
 
+const SEER_TRANSCRIPT_ENTRY_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    role: { type: 'string', example: 'seer' },
+    kind: { type: 'string', example: 'invocation' },
+    content: { type: 'string' },
+    createdAt: { type: 'string', format: 'date-time' }
+  },
+  additionalProperties: true
+};
+
+const SEER_CARD_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    kind: { type: 'string', example: 'event' },
+    title: { type: 'string', example: 'The Flight With The Kept Thing' },
+    label: { type: 'string', example: 'The Flight With The Kept Thing' },
+    status: { type: 'string', example: 'sharpening' },
+    focusState: { type: 'string', example: 'active' },
+    clarity: { type: 'number', minimum: 0, maximum: 1 },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    revealTier: { type: 'integer', minimum: 0 },
+    likelyRelationHint: { type: 'string' },
+    linkedEntityIds: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    back: {
+      type: 'object',
+      additionalProperties: true
+    },
+    front: {
+      type: 'object',
+      additionalProperties: true
+    }
+  },
+  additionalProperties: true
+};
+
+const SEER_MEMORY_EVIDENCE_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    sourceMemoryId: { type: 'string' },
+    temporalSlot: { type: 'string', example: 'during' },
+    strength: { type: 'string', example: 'vivid' },
+    clarity: { type: 'number', minimum: 0, maximum: 1 },
+    revealTier: { type: 'integer', minimum: 0 },
+    focusState: { type: 'string', example: 'idle' },
+    visibleFields: {
+      type: 'array',
+      items: { type: 'string' }
+    }
+  },
+  additionalProperties: true
+};
+
+const SEER_CLAIMED_ENTITY_LINK_SCHEMA = {
+  type: 'object',
+  properties: {
+    cardId: { type: 'string' },
+    cardKind: { type: 'string' },
+    cardTitle: { type: 'string' },
+    entityId: { type: 'string' },
+    entityExternalId: { type: 'string' },
+    worldId: { type: 'string' },
+    universeId: { type: 'string' },
+    claimedAt: { type: 'string', format: 'date-time' }
+  },
+  additionalProperties: true
+};
+
+const TEXT_TO_ENTITY_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['sessionId', 'count', 'requestedCount', 'desiredEntityCategories', 'entities', 'mocked', 'mockedEntities', 'mockedTextures', 'runtime'],
+  properties: {
+    sessionId: { type: 'string' },
+    count: { type: 'integer', minimum: 0 },
+    requestedCount: { type: 'integer', minimum: 1 },
+    desiredEntityCategories: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    entities: {
+      type: 'array',
+      items: NARRATIVE_ENTITY_JSON_SCHEMA
+    },
+    cards: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: true
+      }
+    },
+    cardOptions: {
+      type: 'object',
+      properties: {
+        includeFront: { type: 'boolean' },
+        includeBack: { type: 'boolean' }
+      },
+      additionalProperties: true
+    },
+    mocked: { type: 'boolean' },
+    mockedEntities: { type: 'boolean' },
+    mockedTextures: { type: 'boolean' },
+    runtime: {
+      type: 'object',
+      additionalProperties: true
+    }
+  },
+  additionalProperties: true
+};
+
+const STORYTELLER_MISSION_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['sessionId', 'storytellerId', 'outcome', 'entity', 'subEntities', 'characterSheet', 'runtime'],
+  properties: {
+    sessionId: { type: 'string' },
+    storytellerId: { type: 'string' },
+    outcome: { type: 'string', enum: ['success', 'failure', 'delayed', 'pending'] },
+    userText: { type: 'string' },
+    gmNote: { type: 'string' },
+    entity: NARRATIVE_ENTITY_JSON_SCHEMA,
+    subEntities: {
+      type: 'array',
+      items: NARRATIVE_ENTITY_JSON_SCHEMA
+    },
+    characterSheet: { $ref: '#/components/schemas/ImmersiveRpgCharacterSheet' },
+    runtime: {
+      type: 'object',
+      additionalProperties: true
+    }
+  },
+  additionalProperties: true
+};
+
+const SEER_READING_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['readingId', 'sessionId', 'status', 'beat', 'cards', 'transcript'],
+  properties: {
+    readingId: { type: 'string' },
+    sessionId: { type: 'string' },
+    playerId: { type: 'string' },
+    worldId: { type: 'string' },
+    universeId: { type: 'string' },
+    status: { type: 'string', example: 'active' },
+    beat: { type: 'string', example: 'card_attunement' },
+    fragment: {
+      type: 'object',
+      additionalProperties: true
+    },
+    vision: {
+      type: 'object',
+      additionalProperties: true
+    },
+    seer: {
+      type: 'object',
+      additionalProperties: true
+    },
+    memories: {
+      type: 'array',
+      items: SEER_MEMORY_EVIDENCE_SCHEMA
+    },
+    cards: {
+      type: 'array',
+      items: SEER_CARD_SCHEMA
+    },
+    entities: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: true
+      }
+    },
+    apparitions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: true
+      }
+    },
+    spread: {
+      type: 'object',
+      additionalProperties: true
+    },
+    transcript: {
+      type: 'array',
+      items: SEER_TRANSCRIPT_ENTRY_SCHEMA
+    },
+    subjectDialog: {
+      type: 'array',
+      items: SEER_TRANSCRIPT_ENTRY_SCHEMA
+    },
+    claimedCards: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: true
+      }
+    },
+    claimedEntityLinks: {
+      type: 'array',
+      items: SEER_CLAIMED_ENTITY_LINK_SCHEMA
+    },
+    unresolvedThreads: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    worldbuildingOutputs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: true
+      }
+    },
+    metadata: {
+      type: 'object',
+      additionalProperties: true
+    },
+    focus: {
+      type: 'object',
+      additionalProperties: true
+    },
+    composer: {
+      type: 'object',
+      additionalProperties: true
+    },
+    orchestrator: {
+      type: 'object',
+      additionalProperties: true
+    },
+    lastTurn: {
+      type: 'object',
+      additionalProperties: true
+    },
+    characterSheet: { $ref: '#/components/schemas/ImmersiveRpgCharacterSheet' },
+    version: { type: 'integer', minimum: 1 },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' }
+  },
+  additionalProperties: true
+};
+
+const SEER_READING_CREATE_REQUEST_SCHEMA = {
+  type: 'object',
+  required: ['sessionId'],
+  properties: {
+    sessionId: { type: 'string' },
+    playerId: { type: 'string' },
+    text: { type: 'string' },
+    readingId: { type: 'string' },
+    batchId: { type: 'string' },
+    worldId: { type: 'string' },
+    universeId: { type: 'string' },
+    cardCount: { type: 'integer', minimum: 1, maximum: 10 },
+    cardKinds: { type: 'array', items: { type: 'string' } },
+    preferredCardKinds: { type: 'array', items: { type: 'string' } },
+    allowedCardKinds: { type: 'array', items: { type: 'string' } },
+    visionMemoryId: { type: 'string' },
+    mock: { type: 'boolean' },
+    mock_api_calls: { type: 'boolean' },
+    mocked_api_calls: { type: 'boolean' }
+  },
+  additionalProperties: true
+};
+
+const SEER_READING_TURN_REQUEST_SCHEMA = {
+  type: 'object',
+  required: ['action'],
+  properties: {
+    playerId: { type: 'string' },
+    action: {
+      type: 'string',
+      enum: ['answer', 'focus_card', 'focus_memory']
+    },
+    message: { type: 'string' },
+    focusCardId: { type: 'string' },
+    focusMemoryId: { type: 'string' },
+    entityId: { type: 'string' }
+  },
+  additionalProperties: true
+};
+
+const SEER_READING_CLOSE_REQUEST_SCHEMA = {
+  type: 'object',
+  properties: {
+    playerId: { type: 'string' },
+    reason: { type: 'string' }
+  },
+  additionalProperties: true
+};
+
 const op = ({ summary, importance, flow, ...rest }) => ({
   summary,
   description: `Importance: ${importance}. Used in flow: ${flow}.`,
@@ -97,6 +395,7 @@ export function buildOpenApiSpec() {
       { name: 'Docs', description: 'API documentation endpoints.' },
       { name: 'Admin', description: 'LLM prompt/schema management for important generation routes.' },
       { name: 'Sessions', description: 'Session lifecycle and shared arena persistence.' },
+      { name: 'Seer Reading', description: 'Single-screen seer reading orchestration, card claiming, and closure.' },
       { name: 'Messenger', description: 'Messenger intake flow used to place the typewriter delivery.' },
       { name: 'Immersive RPG', description: 'Mongo-backed scene, chat, roll, and character-sheet APIs for the immersive GM/PC flow.' },
       { name: 'Quest', description: 'Quest scene graph and directional screen editing APIs.' },
@@ -168,6 +467,13 @@ export function buildOpenApiSpec() {
           },
           example: LLM_ROUTE_CONFIG_EXAMPLE
         },
+        SeerReadingCreateRequest: SEER_READING_CREATE_REQUEST_SCHEMA,
+        SeerReadingTurnRequest: SEER_READING_TURN_REQUEST_SCHEMA,
+        SeerReadingCloseRequest: SEER_READING_CLOSE_REQUEST_SCHEMA,
+        SeerTranscriptEntry: SEER_TRANSCRIPT_ENTRY_SCHEMA,
+        SeerCard: SEER_CARD_SCHEMA,
+        SeerMemoryEvidence: SEER_MEMORY_EVIDENCE_SCHEMA,
+        SeerReadingResponse: SEER_READING_RESPONSE_SCHEMA,
         FragmentMemory: FRAGMENT_MEMORY_JSON_SCHEMA,
         NarrativeEntity: NARRATIVE_ENTITY_JSON_SCHEMA,
         NarrativeEntityListResponse: NARRATIVE_ENTITY_LIST_RESPONSE_SCHEMA,
@@ -760,23 +1066,59 @@ export function buildOpenApiSpec() {
             sessionId: { type: 'string' },
             fragment: { type: 'string' },
             initialFragment: { type: 'string' },
+            typewriterKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterKey' }
+            },
             entityKeys: {
               type: 'array',
-              items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
+              items: { $ref: '#/components/schemas/TypewriterKey' }
             }
           }
         },
-        TypewriterStoryEntityKey: {
+        TypewriterSessionInspectResponse: {
           type: 'object',
           properties: {
-            id: { type: 'string' },
-            entityName: { type: 'string' },
-            keyText: { type: 'string' },
-            summary: { type: 'string' },
-            storytellerId: { type: 'string' },
-            storytellerName: { type: 'string' },
-            createdAt: { type: 'string', format: 'date-time', nullable: true }
+            sessionId: { type: 'string' },
+            playerId: { type: 'string' },
+            fragment: { type: 'string' },
+            initialFragment: { type: 'string' },
+            narrativeWordCount: { type: 'integer' },
+            slots: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterStorytellerSlot' }
+            },
+            typewriterKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterKey' }
+            },
+            entityKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterKey' }
+            },
+            storytellers: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true }
+            },
+            entities: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/NarrativeEntity' }
+            },
+            counts: {
+              type: 'object',
+              properties: {
+                storytellerCount: { type: 'integer' },
+                slotFilledCount: { type: 'integer' },
+                typewriterKeyCount: { type: 'integer' },
+                entityCount: { type: 'integer' }
+              },
+              additionalProperties: true
+            }
           }
+        },
+        TypewriterKey: TYPEWRITER_KEY_JSON_SCHEMA,
+        TypewriterStoryEntityKey: {
+          allOf: [{ $ref: '#/components/schemas/TypewriterKey' }]
         },
         TypewriterStorytellerSlot: {
           type: 'object',
@@ -809,9 +1151,13 @@ export function buildOpenApiSpec() {
               type: 'array',
               items: { $ref: '#/components/schemas/TypewriterStorytellerSlot' }
             },
+            typewriterKeys: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/TypewriterKey' }
+            },
             entityKeys: {
               type: 'array',
-              items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
+              items: { $ref: '#/components/schemas/TypewriterKey' }
             }
           }
         },
@@ -824,10 +1170,15 @@ export function buildOpenApiSpec() {
                 sessionId: { type: 'string' },
                 fragment: { type: 'string' },
                 storyteller: { type: 'object', additionalProperties: true },
-                entityKey: { $ref: '#/components/schemas/TypewriterStoryEntityKey' },
+                typewriterKey: { $ref: '#/components/schemas/TypewriterKey' },
+                typewriterKeys: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/TypewriterKey' }
+                },
+                entityKey: { $ref: '#/components/schemas/TypewriterKey' },
                 entityKeys: {
                   type: 'array',
-                  items: { $ref: '#/components/schemas/TypewriterStoryEntityKey' }
+                  items: { $ref: '#/components/schemas/TypewriterKey' }
                 },
                 mocked: { type: 'boolean' },
                 runtime: {
@@ -843,6 +1194,27 @@ export function buildOpenApiSpec() {
               }
             }
           ]
+        },
+        TypewriterKeyVerificationResponse: {
+          type: 'object',
+          properties: {
+            allowed: { type: 'boolean' },
+            appendedText: { type: 'string' },
+            candidateNarrative: { type: 'string' },
+            reason: { type: 'string' },
+            key: { $ref: '#/components/schemas/TypewriterKey' },
+            mocked: { type: 'boolean' },
+            runtime: {
+              type: 'object',
+              properties: {
+                pipeline: { type: 'string' },
+                provider: { type: 'string' },
+                model: { type: 'string' },
+                mocked: { type: 'boolean' }
+              },
+              additionalProperties: true
+            }
+          }
         }
       }
     },
@@ -1405,6 +1777,46 @@ export function buildOpenApiSpec() {
           }
         })
       },
+      '/api/typewriter/keys/shouldAllow': {
+        post: op({
+          tags: ['Generation'],
+          summary: 'Check whether a saved textual typewriter key may be appended to the current narrative',
+          importance: 'High',
+          flow: 'Dynamic textual keys such as Xerofag and storyteller-created keys call this before inserting text into the live typewriter narrative.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId', 'currentNarrative'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    playerId: { type: 'string' },
+                    keyId: { type: 'string' },
+                    keyText: { type: 'string' },
+                    currentNarrative: { type: 'string' },
+                    candidateNarrative: { type: 'string' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Verdict returned for the textual key insertion attempt.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterKeyVerificationResponse' })
+            },
+            '400': { description: 'Missing sessionId, currentNarrative, or key target.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Key not found for the session.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '502': { description: 'LLM key verification failed.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
       '/api/typewriter/session/start': {
         post: op({
           tags: ['Sessions'],
@@ -1431,6 +1843,26 @@ export function buildOpenApiSpec() {
               description: 'Session returned or created.',
               ...jsonResponse({ $ref: '#/components/schemas/TypewriterSessionResponse' })
             }
+          }
+        })
+      },
+      '/api/typewriter/session/inspect': {
+        get: op({
+          tags: ['Sessions'],
+          summary: 'Inspect a typewriter session',
+          importance: 'High',
+          flow: 'Used by Story Admin and QA to inspect fragment, storyteller slots, textual keys, and linked entities for one live session.',
+          parameters: [
+            queryParam('sessionId', true, 'Typewriter session identifier.'),
+            queryParam('playerId', false, 'Optional player scope for session overlays.')
+          ],
+          responses: {
+            '200': {
+              description: 'Typewriter session inspection payload.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterSessionInspectResponse' })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Typewriter session not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
@@ -2427,9 +2859,16 @@ export function buildOpenApiSpec() {
             queryParam('type', false, 'Filter by canonical entity type.'),
             queryParam('subtype', false, 'Filter by canonical entity subtype.'),
             queryParam('externalId', false, 'Filter by canonical external entity id.'),
+            queryParam('worldId', false, 'Filter by persistent world id.'),
+            queryParam('universeId', false, 'Filter by persistent universe id.'),
+            queryParam('name', false, 'Case-insensitive entity-name search.'),
+            queryParam('tag', false, 'Case-insensitive tag search.'),
+            queryParam('canonicalStatus', false, 'Filter by bank canonical status such as candidate or canonical.'),
+            queryParam('linkedReadingId', false, 'Filter by seer reading linkage.'),
             queryParam('introducedByStorytellerId', false, 'Filter by storyteller origin id.'),
             queryParam('activeInTypewriter', false, 'Filter by active typewriter presence.'),
             queryParam('typewriterKeyText', false, 'Filter by the entity key label shown on the typewriter.'),
+            queryParam('sort', false, 'Optional sort mode. Use "reuse" for highest reuse count first.'),
             queryParam('limit', false, 'Optional cap on returned results (1-200).')
           ],
           responses: {
@@ -2490,9 +2929,17 @@ export function buildOpenApiSpec() {
                     sessionId: { type: 'string' },
                     playerId: { type: 'string' },
                     text: { type: 'string' },
+                    count: { type: 'number' },
+                    numberOfEntities: { type: 'number' },
+                    desiredEntityCategories: {
+                      type: 'array',
+                      items: { type: 'string' }
+                    },
                     includeCards: { type: 'boolean' },
                     includeFront: { type: 'boolean' },
                     includeBack: { type: 'boolean' },
+                    mockImage: { type: 'boolean' },
+                    mockTextures: { type: 'boolean' },
                     debug: { type: 'boolean' },
                     mock: { type: 'boolean' },
                     mock_api_calls: { type: 'boolean' },
@@ -2503,7 +2950,10 @@ export function buildOpenApiSpec() {
             }
           },
           responses: {
-            '200': { description: 'Entity payload returned.' }
+            '200': {
+              description: 'Entity payload returned.',
+              ...jsonResponse(TEXT_TO_ENTITY_RESPONSE_SCHEMA)
+            }
           }
         })
       },
@@ -2528,6 +2978,7 @@ export function buildOpenApiSpec() {
                     numberOfStorytellers: { type: 'number' },
                     generateKeyImages: { type: 'boolean' },
                     mockImage: { type: 'boolean' },
+                    mockIllustrations: { type: 'boolean' },
                     debug: { type: 'boolean' },
                     mock: { type: 'boolean' },
                     mock_api_calls: { type: 'boolean' },
@@ -2540,6 +2991,121 @@ export function buildOpenApiSpec() {
           responses: {
             '200': { description: 'Storytellers returned.' },
             '502': { description: 'LLM/schema mismatch.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/seer/readings': {
+        post: op({
+          tags: ['Seer Reading'],
+          summary: 'Create a seer reading',
+          importance: 'Critical',
+          flow: 'Seer setup route that seeds a blurred vision, opening cards, and the normalized reading payload from a session fragment.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SeerReadingCreateRequest' }
+              }
+            }
+          },
+          responses: {
+            '201': { description: 'Reading created.', ...jsonResponse({ $ref: '#/components/schemas/SeerReadingResponse' }) },
+            '400': { description: 'Missing required parameters.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '409': { description: 'No eligible memories found for this session.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/seer/readings/{readingId}': {
+        get: op({
+          tags: ['Seer Reading'],
+          summary: 'Load a seer reading',
+          importance: 'Critical',
+          flow: 'Hydrates an existing seer reading so the client can resume the ritual state.',
+          parameters: [
+            pathParam('readingId', 'Persisted seer reading identifier.'),
+            queryParam('playerId', false, 'Optional player identifier.')
+          ],
+          responses: {
+            '200': { description: 'Reading returned.', ...jsonResponse({ $ref: '#/components/schemas/SeerReadingResponse' }) },
+            '400': { description: 'Missing required path params.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Reading not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/seer/readings/{readingId}/turn': {
+        post: op({
+          tags: ['Seer Reading'],
+          summary: 'Advance one seer turn',
+          importance: 'Critical',
+          flow: 'Core Seer orchestration turn that applies one dominant ritual consequence and returns the next normalized reading state.',
+          parameters: [pathParam('readingId', 'Persisted seer reading identifier.')],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SeerReadingTurnRequest' }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Reading advanced.', ...jsonResponse({ $ref: '#/components/schemas/SeerReadingResponse' }) },
+            '400': { description: 'Missing turn payload fields.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Reading not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '409': { description: 'Reading already closed.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/seer/readings/{readingId}/cards/{cardId}/claim': {
+        post: op({
+          tags: ['Seer Reading'],
+          summary: 'Claim a revealed seer card',
+          importance: 'High',
+          flow: 'Seals a claimable card into the reading, updates focus, and returns the updated reading state.',
+          parameters: [
+            pathParam('readingId', 'Persisted seer reading identifier.'),
+            pathParam('cardId', 'Claimable card identifier.')
+          ],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    playerId: { type: 'string' }
+                  },
+                  additionalProperties: true
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Card claimed.', ...jsonResponse({ $ref: '#/components/schemas/SeerReadingResponse' }) },
+            '400': { description: 'Missing required path params.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Reading or card not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '409': { description: 'Card is not claimable or reading is closed.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/seer/readings/{readingId}/close': {
+        post: op({
+          tags: ['Seer Reading'],
+          summary: 'Close a seer reading',
+          importance: 'High',
+          flow: 'Closes the reading, records closure metadata, and returns the final normalized reading payload.',
+          parameters: [pathParam('readingId', 'Persisted seer reading identifier.')],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SeerReadingCloseRequest' }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Reading closed.', ...jsonResponse({ $ref: '#/components/schemas/SeerReadingResponse' }) },
+            '400': { description: 'Missing required path params.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Reading not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
@@ -2565,6 +3131,8 @@ export function buildOpenApiSpec() {
                     includeCards: { type: 'boolean' },
                     includeFront: { type: 'boolean' },
                     includeBack: { type: 'boolean' },
+                    mockImage: { type: 'boolean' },
+                    mockTextures: { type: 'boolean' },
                     debug: { type: 'boolean' },
                     mock: { type: 'boolean' },
                     mock_api_calls: { type: 'boolean' },
@@ -2706,7 +3274,10 @@ export function buildOpenApiSpec() {
             }
           },
           responses: {
-            '200': { description: 'Mission response.' },
+            '200': {
+              description: 'Mission response.',
+              ...jsonResponse(STORYTELLER_MISSION_RESPONSE_SCHEMA)
+            },
             '502': { description: 'LLM/schema mismatch.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
