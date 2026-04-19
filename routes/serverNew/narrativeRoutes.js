@@ -3,6 +3,8 @@ export function registerNarrativeRoutes(app, deps) {
     Storyteller,
     NarrativeEntity,
     applyOptionalPlayerId,
+    buildEntityAccessQuery,
+    dedupeNarrativeEntitiesForResponse,
     matchesOptionalPlayerId,
     buildStorytellerListItem,
     parseOptionalBooleanQuery,
@@ -36,7 +38,8 @@ export function registerNarrativeRoutes(app, deps) {
     updateNarrativeEntityAfterStorytellerMission,
     ensureImmersiveRpgCharacterSheet,
     buildStorytellerMissionCharacterSheetPatch,
-    toImmersiveRpgCharacterSheetPayload
+    toImmersiveRpgCharacterSheetPayload,
+    executeStorytellerMissionAction
   } = deps;
 
   app.get('/api/storytellers', async (req, res) => {
@@ -98,6 +101,7 @@ export function registerNarrativeRoutes(app, deps) {
         universeId,
         name,
         tag,
+        privacy,
         canonicalStatus,
         linkedReadingId,
         introducedByStorytellerId,
@@ -110,7 +114,7 @@ export function registerNarrativeRoutes(app, deps) {
         return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
       }
 
-      const query = applyOptionalPlayerId({ session_id: sessionId }, playerId);
+      const query = buildEntityAccessQuery(sessionId, playerId);
       if (mainEntityId) {
         query.mainEntityId = mainEntityId;
       }
@@ -124,6 +128,7 @@ export function registerNarrativeRoutes(app, deps) {
       if (externalId) query.externalId = String(externalId);
       if (worldId) query.worldId = String(worldId);
       if (universeId) query.universeId = String(universeId);
+      if (privacy) query.privacy = String(privacy);
       if (canonicalStatus) query.canonicalStatus = String(canonicalStatus);
       if (linkedReadingId) query.sourceReadingIds = String(linkedReadingId);
       if (introducedByStorytellerId) query.introducedByStorytellerId = String(introducedByStorytellerId);
@@ -149,10 +154,11 @@ export function registerNarrativeRoutes(app, deps) {
 
       let entitiesQuery = NarrativeEntity.find(query).sort(sortSpec);
       if (safeLimit) {
-        entitiesQuery = entitiesQuery.limit(safeLimit);
+        entitiesQuery = entitiesQuery.limit(safeLimit * 2);
       }
 
-      const entities = await entitiesQuery.exec();
+      const entities = dedupeNarrativeEntitiesForResponse(await entitiesQuery.exec())
+        .slice(0, safeLimit || undefined);
       return res.status(200).json({
         sessionId,
         playerId: normalizeOptionalPlayerId(playerId),
@@ -177,7 +183,8 @@ export function registerNarrativeRoutes(app, deps) {
       }
 
       const entity = await findEntityById(sessionId, resolvedPlayerId, id);
-      if (!entity || entity.session_id !== sessionId || !matchesOptionalPlayerId(entity.playerId, resolvedPlayerId)) {
+      const isPublicEntity = entity?.privacy === 'public';
+      if (!entity || (!isPublicEntity && (entity.session_id !== sessionId || !matchesOptionalPlayerId(entity.playerId, resolvedPlayerId)))) {
         return res.status(404).json({ message: 'Entity not found.' });
       }
 
@@ -551,230 +558,12 @@ export function registerNarrativeRoutes(app, deps) {
   });
 
   app.post('/api/sendStorytellerToEntity', async (req, res) => {
-    let storytellerDocIdForReset = null;
-    let missionActivated = false;
     try {
-      const body = req.body || {};
-      const {
-        sessionId,
-        playerId,
-        entityId,
-        storytellerId,
-        storytellingPoints,
-        message,
-        duration
-      } = body;
-      const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
-
-      if (!sessionId || !entityId || !storytellerId) {
-        return res.status(400).json({ message: 'Missing required parameters: sessionId, entityId, storytellerId.' });
-      }
-      if (!Number.isInteger(storytellingPoints)) {
-        return res.status(400).json({ message: 'Missing or invalid storytellingPoints (int required).' });
-      }
-      if (!message || typeof message !== 'string') {
-        return res.status(400).json({ message: 'Missing or invalid message (string required).' });
-      }
-
-      const entity = await findEntityById(sessionId, resolvedPlayerId, entityId);
-      if (!entity || entity.session_id !== sessionId || !matchesOptionalPlayerId(entity.playerId, resolvedPlayerId)) {
-        return res.status(404).json({ message: 'Entity not found.' });
-      }
-
-      let storyteller = await Storyteller.findById(storytellerId);
-      if (!storyteller) {
-        storyteller = await Storyteller.findOne(
-          applyOptionalPlayerId({ name: storytellerId, session_id: sessionId }, resolvedPlayerId)
-        );
-      }
-      if (!storyteller || storyteller.session_id !== sessionId || !matchesOptionalPlayerId(storyteller.playerId, resolvedPlayerId)) {
-        return res.status(404).json({ message: 'Storyteller not found.' });
-      }
-      storytellerDocIdForReset = storyteller._id;
-
-      const storytellerMissionPipeline = await getAiPipelineSettings('storyteller_mission');
-      const entityPipeline = await getAiPipelineSettings('entity_creation');
-      const storytellerProvider = typeof storytellerMissionPipeline?.provider === 'string'
-        ? storytellerMissionPipeline.provider
-        : 'openai';
-      const entityProvider = typeof entityPipeline?.provider === 'string' ? entityPipeline.provider : 'openai';
-      const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
-      const storytellerMissionPromptDoc = await getLatestPromptTemplate('storyteller_mission');
-      const shouldMockMission = resolveMockMode(body, storytellerMissionPipeline.useMock);
-      const shouldMockSubEntities = resolveMockMode(body, entityPipeline.useMock);
-      const durationDays = Number.isFinite(Number(duration)) ? Number(duration) : undefined;
-
-      await Storyteller.findByIdAndUpdate(
-        storyteller._id,
-        { $set: { status: 'in_mission' } }
-      );
-      missionActivated = true;
-
-      let missionResult;
-      if (shouldMockMission) {
-        missionResult = {
-          outcome: 'success',
-          userText: `The mission concludes. ${storyteller.name} returns with a focused insight about ${entity.name}.`,
-          gmNote: `Lean into the sensory details of ${entity.name}; highlight a single, striking detail that hints at hidden layers.`,
-          subEntitySeed: `New sub-entities emerge around ${entity.name}: a revealing clue, a minor witness, and a tangible relic tied to the mission.`
-        };
-      } else {
-        let prompt = '';
-        if (storytellerMissionPromptDoc?.promptTemplate) {
-          prompt = renderPromptTemplateString(storytellerMissionPromptDoc.promptTemplate, {
-            storytellerName: storyteller?.name || '',
-            entityName: entity?.name || '',
-            entityType: entity?.type || entity?.ner_type || 'ENTITY',
-            entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
-            entityDescription: entity?.description || '',
-            entityLore: entity?.lore || '',
-            storytellingPoints,
-            message,
-            durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
-          });
-        } else {
-          const routeConfig = await getRouteConfig('storyteller_mission');
-          prompt = renderPrompt(routeConfig.promptTemplate, {
-            storytellerName: storyteller?.name || '',
-            entityName: entity?.name || '',
-            entityType: entity?.type || entity?.ner_type || 'ENTITY',
-            entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
-            entityDescription: entity?.description || '',
-            entityLore: entity?.lore || '',
-            storytellingPoints,
-            message,
-            durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
-          });
-        }
-        missionResult = await callJsonLlm({
-          prompts: [{ role: 'system', content: prompt }],
-          provider: storytellerProvider,
-          model: storytellerMissionPipeline.model || '',
-          max_tokens: 1200,
-          explicitJsonObjectFormat: true
-        });
-      }
-
-      await validatePayloadForRoute('storyteller_mission', missionResult);
-
-      const outcome = missionResult?.outcome;
-      const userText = missionResult?.userText || '';
-      const gmNote = missionResult?.gmNote || '';
-      const subEntitySeed = missionResult?.subEntitySeed || `Sub-entities tied to ${entity.name} and ${message}.`;
-
-      const subEntityResult = await textToEntityFromText({
-        sessionId,
-        playerId: resolvedPlayerId,
-        text: subEntitySeed,
-        entityCount: 3,
-        includeCards: false,
-        debug: shouldMockSubEntities,
-        llmModel: entityPipeline.model,
-        llmProvider: entityProvider,
-        entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
-        mainEntityId: entity.externalId || String(entity._id),
-        isSubEntity: true
-      });
-
-      const subEntities = Array.isArray(subEntityResult?.entities) ? subEntityResult.entities : [];
-      const subEntityExternalIds = subEntities
-        .map((subEntity) => subEntity.externalId || subEntity.id)
-        .filter(Boolean)
-        .map((id) => String(id));
-      const savedSubEntities = subEntityExternalIds.length
-        ? await NarrativeEntity.find(
-          applyOptionalPlayerId(
-            {
-              session_id: sessionId,
-              externalId: { $in: subEntityExternalIds },
-              mainEntityId: entity.externalId || String(entity._id)
-            },
-            resolvedPlayerId
-          )
-        )
-        : [];
-      const updatedMissionEntity = await updateNarrativeEntityAfterStorytellerMission({
-        entity,
-        storyteller,
-        outcome: outcome || 'pending',
-        userText,
-        gmNote,
-        subEntitySeed,
-        subEntities: savedSubEntities,
-        storytellingPoints,
-        durationDays,
-        message
-      });
-      const missionRecord = {
-        entityId: entity._id,
-        entityExternalId: entity.externalId || String(entity._id),
-        playerId: resolvedPlayerId,
-        storytellingPoints,
-        message,
-        durationDays,
-        outcome: outcome || 'pending',
-        userText: userText || undefined,
-        gmNote: gmNote || undefined,
-        subEntityExternalIds: savedSubEntities.map((subEntity) => subEntity.externalId).filter(Boolean)
-      };
-
-      await Storyteller.findByIdAndUpdate(
-        storyteller._id,
-        {
-          $set: { status: 'active' },
-          $push: { missions: missionRecord }
-        },
-        { new: true }
-      );
-      missionActivated = false;
-
-      return res.status(200).json({
-        sessionId,
-        storytellerId: storyteller._id,
-        outcome: missionRecord.outcome,
-        userText: userText || undefined,
-        gmNote: gmNote || undefined,
-        entity: updatedMissionEntity || entity,
-        subEntities: savedSubEntities,
-        characterSheet: toImmersiveRpgCharacterSheetPayload(
-          await ensureImmersiveRpgCharacterSheet({
-            sessionId,
-            playerId: resolvedPlayerId,
-            playerName: '',
-            sourceSceneBrief: null,
-            patch: buildStorytellerMissionCharacterSheetPatch({
-              entity: updatedMissionEntity || entity,
-              storyteller,
-              outcome: missionRecord.outcome,
-              userText: userText || '',
-              gmNote: gmNote || '',
-              subEntities: savedSubEntities,
-              storytellingPoints
-            })
-          })
-        ),
-        runtime: {
-          mission: {
-            pipeline: 'storyteller_mission',
-            provider: storytellerProvider,
-            model: storytellerMissionPipeline.model || '',
-            mocked: shouldMockMission
-          },
-          subEntities: {
-            pipeline: 'entity_creation',
-            provider: entityProvider,
-            model: entityPipeline.model || '',
-            mocked: shouldMockSubEntities
-          }
-        }
-      });
+      const payload = await executeStorytellerMissionAction(req.body || {});
+      return res.status(200).json(payload);
     } catch (err) {
-      if (missionActivated && storytellerDocIdForReset) {
-        try {
-          await Storyteller.findByIdAndUpdate(storytellerDocIdForReset, { $set: { status: 'active' } });
-        } catch (resetError) {
-          console.error('Failed to restore storyteller status after mission error:', resetError);
-        }
+      if (Number.isInteger(err?.statusCode)) {
+        return res.status(err.statusCode).json({ message: err.message || 'Request failed.' });
       }
       if (err.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
         return res.status(502).json({

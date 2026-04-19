@@ -928,5 +928,112 @@
     ],
     "bundle": [],
     "completedAt": null
+  },
+  "well-preview-1775388828957-f7b502::": {
+    "session_id": "well-preview-1775388828957-f7b502",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": null,
+    "seenFragmentIds": [],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1775389950072-1e67cf::": {
+    "session_id": "well-preview-1775389950072-1e67cf",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "8789ec7a-340f-4974-85c8-ae82d0590fe9",
+      "type": "textual",
+      "bankId": "txt_1",
+      "surface": {
+        "text": "It was almost night as she"
+      },
+      "surfacedAt": "2026-04-05T12:27:55.620Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_4",
+      "txt_1"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1775392076272-36ee50::": {
+    "session_id": "well-preview-1775392076272-36ee50",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "72e8003f-aacb-415d-8137-4b5df6d699dd",
+      "type": "textual",
+      "bankId": "txt_3",
+      "surface": {
+        "text": "Elionda was observing herself in the golden embroidered mirror"
+      },
+      "surfacedAt": "2026-04-05T20:17:00.906Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_8",
+      "txt_3",
+      "txt_7",
+      "txt_9",
+      "txt_6",
+      "txt_10",
+      "txt_1",
+      "txt_4",
+      "txt_2",
+      "txt_5"
+    ],
+    "bundle": [],
+    "completedAt": null
+  },
+  "well-preview-1775422600511-d91e26::": {
+    "session_id": "well-preview-1775422600511-d91e26",
+    "playerId": "",
+    "sceneKey": "well",
+    "status": "observing",
+    "required": {
+      "textual": 3
+    },
+    "captured": {
+      "textual": 0
+    },
+    "currentFragment": {
+      "id": "50943b18-d88b-48d9-869a-c1128ce4647f",
+      "type": "textual",
+      "bankId": "txt_8",
+      "surface": {
+        "text": "By dawn the map had changed its mind again"
+      },
+      "surfacedAt": "2026-04-05T20:57:41.269Z",
+      "expiresAt": null
+    },
+    "seenFragmentIds": [
+      "txt_8"
+    ],
+    "bundle": [],
+    "completedAt": null
   }
 }

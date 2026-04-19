@@ -91,6 +91,11 @@ function normalizeNarrativeEntitySource(value, fallback = 'unknown') {
   return normalized || fallback;
 }
 
+function normalizeEntityPrivacy(value, fallback = 'session') {
+  const normalized = normalizeEntityString(value, '').toLowerCase();
+  return ['session', 'public', 'private'].includes(normalized) ? normalized : fallback;
+}
+
 export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
   const sourceEntity = rawEntity && typeof rawEntity === 'object' ? rawEntity : {};
   const sessionId = normalizeEntityString(
@@ -130,6 +135,7 @@ export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
       ''
     ),
     lore: normalizeEntityString(sourceEntity.lore, ''),
+    privacy: normalizeEntityPrivacy(sourceEntity.privacy || options.privacy, 'session'),
     type: normalizeEntityString(sourceEntity.type || sourceEntity.ner_type, ''),
     subtype: normalizeEntityString(sourceEntity.subtype || sourceEntity.ner_subtype, ''),
     tags,
@@ -224,6 +230,10 @@ export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
     sourceEntity.storytellingPointsCost || sourceEntity.storytelling_points_cost
   );
   if (storytellingPointsCost !== null) normalized.storytellingPointsCost = storytellingPointsCost;
+  const storytellingPoints = normalizeEntityNumber(
+    sourceEntity.storytelling_points ?? sourceEntity.storytellingPoints ?? options.storytelling_points ?? options.storytellingPoints
+  );
+  if (storytellingPoints !== null) normalized.storytelling_points = storytellingPoints;
   const reuseCount = normalizeEntityNumber(sourceEntity.reuseCount ?? options.reuseCount);
   if (reuseCount !== null) normalized.reuseCount = reuseCount;
   const lastUsedAt = normalizeEntityDate(sourceEntity.lastUsedAt || options.lastUsedAt);
@@ -252,6 +262,7 @@ const entitySchemaDefinition = {
   name: { type: String, required: true },
   description: { type: String },
   lore: { type: String },
+  privacy: { type: String, enum: ['session', 'public', 'private'], default: 'session', index: true },
   
   // Classification/Type Info
   type: { type: String },           // from ner_type
@@ -275,6 +286,7 @@ const entitySchemaDefinition = {
   impact: { type: String },
   developmentCost: { type: String },
   storytellingPointsCost: { type: Number },
+  storytelling_points: { type: Number },
   urgency: { type: String },
   
   // Other/Additional Data
@@ -318,6 +330,7 @@ entitySchema.index({ session_id: 1, playerId: 1, source: 1, createdAt: -1 });
 entitySchema.index({ session_id: 1, playerId: 1, type: 1, subtype: 1 });
 entitySchema.index({ session_id: 1, playerId: 1, worldId: 1, canonicalStatus: 1 });
 entitySchema.index({ session_id: 1, playerId: 1, universeId: 1, canonicalStatus: 1 });
+entitySchema.index({ privacy: 1, externalId: 1 });
 
 for (const field of NARRATIVE_ENTITY_REQUIRED_FIELDS) {
   if (!entitySchemaDefinition[field]) {

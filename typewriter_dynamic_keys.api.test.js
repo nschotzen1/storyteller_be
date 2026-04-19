@@ -90,6 +90,76 @@ describe('typewriter dynamic keys', () => {
     expect(savedKey.keyImageUrl).toBe('/textures/keys/THE_XEROFAG_1.png');
     expect(savedKey.knowledgeState).toBe('hidden');
     expect(savedKey.playerFacingTooltip).toBe('');
+
+    const savedEntity = await NarrativeEntity.findOne({
+      privacy: 'public',
+      externalId: 'builtin:xerofag'
+    }).lean();
+    expect(savedEntity).toEqual(
+      expect.objectContaining({
+        session_id: '__public__',
+        sessionId: '__public__',
+        privacy: 'public',
+        name: 'The Xerofag',
+        type: 'FAUNA',
+        subtype: 'Undead dog pack',
+        source: 'typewriter_builtin',
+        canonicalStatus: 'canonical',
+        storytelling_points: 14,
+        activeInTypewriter: true,
+        typewriterKeyText: 'THE XEROFAG'
+      })
+    );
+    expect(savedEntity.lore).toContain('yellowish-grey dog');
+    expect(savedEntity.lore).toContain('trained to find storytellers');
+    expect(savedEntity.attributes.leader.description).toContain('one missing eye');
+    expect(String(savedKey.entityId)).toBe(String(savedEntity._id));
+
+    await NarrativeEntity.create({
+      session_id: sessionId,
+      sessionId,
+      playerId: '',
+      privacy: 'session',
+      name: 'The Xerofag',
+      description: 'Old session-scoped placeholder.',
+      externalId: 'builtin:xerofag',
+      source: 'typewriter_builtin'
+    });
+
+    const dedupedLookupResponse = await request(app)
+      .get('/api/entities')
+      .query({
+        sessionId,
+        externalId: 'builtin:xerofag'
+      })
+      .expect(200);
+
+    expect(dedupedLookupResponse.body.entities).toHaveLength(1);
+    expect(dedupedLookupResponse.body.entities[0]).toEqual(
+      expect.objectContaining({
+        session_id: '__public__',
+        privacy: 'public',
+        externalId: 'builtin:xerofag',
+        storytelling_points: 14
+      })
+    );
+
+    const publicLookupResponse = await request(app)
+      .get('/api/entities')
+      .query({
+        sessionId: 'another-session-without-xerofag-bootstrap',
+        externalId: 'builtin:xerofag'
+      })
+      .expect(200);
+
+    expect(publicLookupResponse.body.entities).toEqual([
+      expect.objectContaining({
+        session_id: '__public__',
+        privacy: 'public',
+        externalId: 'builtin:xerofag',
+        storytelling_points: 14
+      })
+    ]);
   });
 
   test('generic typewriter key verification allows the builtin Xerofag key in mock mode when the narrative supports it', async () => {

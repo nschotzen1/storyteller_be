@@ -1,14 +1,14 @@
 {
-  "updatedAt": "2026-03-31T09:53:02.631Z",
-  "updatedBy": "story-admin-ui",
+  "updatedAt": "2026-04-11T18:47:45.347Z",
+  "updatedBy": "immersive-rpg-test-reset",
   "pipelines": {
     "story_continuation": {
       "key": "story_continuation",
       "label": "Story Continuation",
       "modelKind": "text",
       "useMock": false,
-      "model": "claude-opus-4-6",
-      "provider": "anthropic"
+      "model": "gpt-5-mini",
+      "provider": "openai"
     },
     "xerofag_inspection": {
       "key": "xerofag_inspection",
@@ -50,8 +50,8 @@
       "label": "Storyteller Intervention",
       "modelKind": "text",
       "useMock": false,
-      "model": "claude-opus-4-6",
-      "provider": "anthropic"
+      "model": "gpt-5-mini",
+      "provider": "openai"
     },
     "typewriter_key_verification": {
       "key": "typewriter_key_verification",
@@ -66,7 +66,7 @@
       "label": "Messenger Chat",
       "modelKind": "text",
       "useMock": false,
-      "model": "gpt-5.3-chat-latest",
+      "model": "gpt-5-mini",
       "provider": "openai"
     },
     "immersive_rpg_gm": {
@@ -74,8 +74,8 @@
       "label": "Immersive RPG GM",
       "modelKind": "text",
       "useMock": false,
-      "model": "claude-opus-4-6",
-      "provider": "anthropic"
+      "model": "gpt-5-mini",
+      "provider": "openai"
     },
     "seer_reading_orchestrator": {
       "key": "seer_reading_orchestrator",
@@ -122,7 +122,7 @@
       "key": "relationship_evaluation",
       "label": "Relationship Evaluation",
       "modelKind": "text",
-      "useMock": true,
+      "useMock": false,
       "model": "gpt-5-mini",
       "provider": "openai"
     },
@@ -130,16 +130,16 @@
       "key": "texture_creation",
       "label": "Texture Creation",
       "modelKind": "image",
-      "useMock": true,
-      "model": "gpt-image-1-mini",
+      "useMock": false,
+      "model": "gpt-image-1",
       "provider": "openai"
     },
     "illustration_creation": {
       "key": "illustration_creation",
       "label": "Illustration Creation",
       "modelKind": "image",
-      "useMock": true,
-      "model": "gpt-image-1-mini",
+      "useMock": false,
+      "model": "gpt-image-1",
       "provider": "openai"
     }
   }

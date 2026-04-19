@@ -7,6 +7,7 @@ let FragmentMemory;
 let SeerReading;
 let NarrativeEntity;
 let ImmersiveRpgCharacterSheet;
+let Storyteller;
 
 jest.setTimeout(30000);
 
@@ -61,7 +62,7 @@ beforeAll(async () => {
   process.env.NODE_ENV = 'test';
   ({ app } = await import('./server_new.js'));
   ({ FragmentMemory } = await import('./models/memory_models.js'));
-  ({ SeerReading, ImmersiveRpgCharacterSheet } = await import('./models/models.js'));
+  ({ SeerReading, ImmersiveRpgCharacterSheet, Storyteller } = await import('./models/models.js'));
   ({ NarrativeEntity } = await import('./storyteller/utils.js'));
 
   const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/storytelling_test';
@@ -96,6 +97,9 @@ beforeEach(async () => {
   if (ImmersiveRpgCharacterSheet && mongoose.connection.readyState === 1) {
     await ImmersiveRpgCharacterSheet.deleteMany({});
   }
+  if (Storyteller && mongoose.connection.readyState === 1) {
+    await Storyteller.deleteMany({});
+  }
 });
 
 afterEach(async () => {
@@ -110,6 +114,9 @@ afterEach(async () => {
   }
   if (ImmersiveRpgCharacterSheet && mongoose.connection.readyState === 1) {
     await ImmersiveRpgCharacterSheet.deleteMany({});
+  }
+  if (Storyteller && mongoose.connection.readyState === 1) {
+    await Storyteller.deleteMany({});
   }
 });
 
@@ -632,5 +639,258 @@ describe('Seer reading API skeleton', () => {
     expect(storedCharacterSheet).toBeTruthy();
     expect(storedCharacterSheet.identity?.archetype).toBe('North-Facing Cairn');
     expect(storedCharacterSheet.skills?.awareness).toBe(20);
+  });
+
+  it('executes claim_card as a real turn tool and persists the claim through /turn', async () => {
+    await SeerReading.create({
+      readingId: 'reading-turn-claim-1',
+      sessionId: 'seer-session-turn-claim-1',
+      playerId: 'seer-player-turn-claim-1',
+      worldId: 'world-turn-claim-1',
+      universeId: 'world-turn-claim-1',
+      status: 'active',
+      beat: 'card_claim_available',
+      vision: { sourceMemoryId: 'm1', status: 'blurred', clarity: 0.24, revealTier: 1, visibleFields: [], sensoryFragments: [] },
+      fragment: { text: 'The rope hangs from the cairn.', anchorLabel: 'Fragment' },
+      seer: { personaId: 'default-seer', voice: 'ritual witness' },
+      memories: [
+        {
+          id: 'm1',
+          temporalSlot: 'during',
+          focusState: 'active',
+          clarity: 0.62,
+          revealTier: 2,
+          card: { title: 'Rope on Cairn' },
+          confirmedEntityIds: ['entity-1']
+        }
+      ],
+      cards: [
+        {
+          id: 'card-location',
+          kind: 'location',
+          title: 'North-Facing Cairn',
+          status: 'claimable',
+          focusState: 'active',
+          clarity: 0.84,
+          confidence: 0.72,
+          revealTier: 3,
+          linkedEntityIds: ['entity-1'],
+          back: { mood: ['warning'], motifs: ['stone'] },
+          front: { summary: 'A high place that sees too far.', facts: [] }
+        },
+        {
+          id: 'card-event',
+          kind: 'event',
+          title: 'The Sign Is Read',
+          status: 'front_revealed',
+          focusState: 'idle',
+          clarity: 0.58,
+          confidence: 0.44,
+          revealTier: 2,
+          linkedEntityIds: [],
+          back: { mood: ['urgency'], motifs: ['rope'] },
+          front: { summary: 'Recognition arrives before certainty.', facts: [] }
+        }
+      ],
+      entities: [{ id: 'entity-1', name: 'North-Facing Cairn', externalId: 'entity-1', sourceEntityId: 'entity-1' }],
+      apparitions: [],
+      spread: {
+        layoutMode: 'seer_vision_cards',
+        focusMemoryId: 'm1',
+        focusCardId: 'card-location',
+        nodes: [],
+        edges: [],
+        cardLayout: []
+      },
+      transcript: [],
+      claimedCards: [],
+      claimedEntityLinks: [],
+      unresolvedThreads: [],
+      worldbuildingOutputs: [],
+      metadata: {
+        demoMockMode: true
+      }
+    });
+
+    const response = await request(app)
+      .post('/api/seer/readings/reading-turn-claim-1/turn')
+      .send({
+        playerId: 'seer-player-turn-claim-1',
+        message: 'Seal this thread now.'
+      })
+      .expect(200);
+
+    expect(response.body.claimedCards).toHaveLength(1);
+    expect(response.body.claimedEntityLinks).toHaveLength(1);
+    expect(response.body.cards.find((card) => card.id === 'card-location').status).toBe('claimed');
+    expect(response.body.lastTurn.transitionType).toBe('card_claimed');
+    expect(response.body.lastTurn.decisionSource).toBe('mock_fallback');
+    expect(response.body.lastTurn.toolCalls[0].tool_id).toBe('claim_card');
+    expect(response.body.lastTurn.executionTrace[0]).toEqual(
+      expect.objectContaining({
+        toolId: 'claim_card',
+        status: 'executed',
+        output: expect.objectContaining({
+          entityExternalId: 'entity-1'
+        })
+      })
+    );
+    expect(response.body.characterSheet).toEqual(
+      expect.objectContaining({
+        playerId: 'seer-player-turn-claim-1',
+        identity: expect.objectContaining({
+          archetype: 'North-Facing Cairn'
+        })
+      })
+    );
+
+    const stored = await SeerReading.findOne({ readingId: 'reading-turn-claim-1' }).lean();
+    expect(stored.claimedCards).toHaveLength(1);
+    expect(stored.claimedEntityLinks).toHaveLength(1);
+    expect(stored.metadata?.lastTurn?.transitionType).toBe('card_claimed');
+  });
+
+  it('executes invoke_storyteller as a real turn tool and returns mission output through /turn', async () => {
+    await NarrativeEntity.create({
+      session_id: 'seer-session-turn-storyteller-1',
+      sessionId: 'seer-session-turn-storyteller-1',
+      playerId: 'seer-player-turn-storyteller-1',
+      externalId: 'entity-1',
+      name: 'North-Facing Cairn',
+      description: 'A high place that teaches storm-reading.',
+      type: 'LOCATION',
+      canonicalStatus: 'candidate'
+    });
+    const storyteller = await Storyteller.create({
+      session_id: 'seer-session-turn-storyteller-1',
+      sessionId: 'seer-session-turn-storyteller-1',
+      playerId: 'seer-player-turn-storyteller-1',
+      name: 'Mira Salt',
+      illustration: '/img/mira-salt.png',
+      keyImageUrl: '/img/mira-salt-key.png'
+    });
+    await SeerReading.create({
+      readingId: 'reading-turn-storyteller-1',
+      sessionId: 'seer-session-turn-storyteller-1',
+      playerId: 'seer-player-turn-storyteller-1',
+      worldId: 'world-turn-storyteller-1',
+      universeId: 'world-turn-storyteller-1',
+      status: 'active',
+      beat: 'card_attunement',
+      vision: { sourceMemoryId: 'm1', status: 'blurred', clarity: 0.44, revealTier: 2, visibleFields: ['location'], sensoryFragments: [] },
+      fragment: { text: 'The cairn taught them how to read storms.', anchorLabel: 'Fragment' },
+      seer: { personaId: 'default-seer', voice: 'ritual witness' },
+      memories: [
+        {
+          id: 'm1',
+          temporalSlot: 'during',
+          focusState: 'active',
+          clarity: 0.71,
+          revealTier: 3,
+          card: { title: 'Rope on Cairn' },
+          confirmedEntityIds: ['entity-1']
+        }
+      ],
+      cards: [
+        {
+          id: 'card-location',
+          kind: 'location',
+          title: 'North-Facing Cairn',
+          status: 'front_revealed',
+          focusState: 'active',
+          clarity: 0.79,
+          confidence: 0.68,
+          revealTier: 2,
+          linkedEntityIds: ['entity-1'],
+          canonicalEntityExternalId: 'entity-1',
+          back: { mood: ['warning'], motifs: ['storm', 'stone'] },
+          front: { summary: 'A high place that teaches storm-reading.', facts: [] }
+        }
+      ],
+      entities: [
+        {
+          id: 'entity-1',
+          externalId: 'entity-1',
+          sourceEntityId: 'entity-1',
+          name: 'North-Facing Cairn',
+          type: 'LOCATION',
+          description: 'A high place that teaches storm-reading.'
+        }
+      ],
+      apparitions: [
+        {
+          id: String(storyteller._id),
+          name: 'Mira Salt',
+          status: 'active',
+          iconUrl: '/img/mira-salt-key.png',
+          state: 'available'
+        }
+      ],
+      spread: {
+        layoutMode: 'seer_vision_cards',
+        focusMemoryId: 'm1',
+        focusCardId: 'card-location',
+        nodes: [],
+        edges: [],
+        cardLayout: []
+      },
+      transcript: [],
+      claimedCards: [],
+      claimedEntityLinks: [],
+      unresolvedThreads: [],
+      worldbuildingOutputs: [],
+      metadata: {
+        demoMockMode: true
+      }
+    });
+
+    const response = await request(app)
+      .post('/api/seer/readings/reading-turn-storyteller-1/turn')
+      .send({
+        playerId: 'seer-player-turn-storyteller-1',
+        message: 'Send the apparition to investigate deeper.'
+      })
+      .expect(200);
+
+    expect(response.body.lastTurn.transitionType).toBe('relation_strengthened');
+    expect(response.body.lastTurn.toolCalls[0].tool_id).toBe('invoke_storyteller');
+    expect(response.body.lastTurn.executionTrace[0]).toEqual(
+      expect.objectContaining({
+        toolId: 'invoke_storyteller',
+        status: 'executed',
+        output: expect.objectContaining({
+          outcome: 'success'
+        })
+      })
+    );
+    expect(response.body.storytellerMission).toEqual(
+      expect.objectContaining({
+        outcome: 'success',
+        storytellerId: String(storyteller._id)
+      })
+    );
+    expect(response.body.storytellerMission.subEntities.length).toBeGreaterThan(0);
+    expect(response.body.characterSheet).toEqual(
+      expect.objectContaining({
+        playerId: 'seer-player-turn-storyteller-1'
+      })
+    );
+    expect(response.body.characterSheet.notes.join(' ')).toContain('North-Facing Cairn');
+    expect(response.body.worldbuildingOutputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'storyteller_mission',
+          outcome: 'success'
+        })
+      ])
+    );
+
+    const storedStoryteller = await Storyteller.findById(storyteller._id).lean();
+    expect(storedStoryteller.missions).toHaveLength(1);
+    expect(storedStoryteller.missions[0].entityExternalId).toBe('entity-1');
+
+    const storedReading = await SeerReading.findOne({ readingId: 'reading-turn-storyteller-1' }).lean();
+    expect(storedReading.worldbuildingOutputs).toHaveLength(1);
+    expect(storedReading.metadata?.lastTurn?.toolCalls[0].tool_id).toBe('invoke_storyteller');
   });
 });

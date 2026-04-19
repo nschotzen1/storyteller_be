@@ -83,13 +83,13 @@ const SEER_ORCHESTRATOR_TOOL_DEFINITIONS = Object.freeze([
   Object.freeze({
     id: 'invoke_storyteller',
     label: 'Invoke Storyteller',
-    description: 'Offer a current apparition as the next interpretive force in the reading.',
-    inputHints: Object.freeze(['storytellerId'])
+    description: 'Send an apparition to deepen a persistent entity tied to the current thread.',
+    inputHints: Object.freeze(['storytellerId', 'entityId', 'storytellingPoints', 'message', 'duration'])
   }),
   Object.freeze({
     id: 'claim_card',
     label: 'Claim Card',
-    description: 'Mark that a fully revealed card is ready to be sealed by the player.',
+    description: 'Seal a fully revealed card into the persistent entity bank.',
     inputHints: Object.freeze(['cardId'])
   }),
   Object.freeze({
@@ -483,6 +483,31 @@ async function createEntityFromService({ reading, focusMemory, focusCard, player
   };
 }
 
+function buildSeerRuntimeEntityProjection(entity = {}, fallback = {}) {
+  const existing = fallback && typeof fallback === 'object' ? fallback : {};
+  const source = entity && typeof entity.toObject === 'function' ? entity.toObject() : (entity || {});
+  const externalId = firstDefinedString(source.externalId, source.sourceEntityId);
+  const mongoId = source?._id ? String(source._id) : '';
+  return {
+    ...existing,
+    id: firstDefinedString(existing.id, externalId, mongoId, source.id, `seer-entity-${randomUUID()}`),
+    externalId,
+    sourceEntityId: firstDefinedString(source.sourceEntityId, externalId, mongoId, source.id),
+    name: firstDefinedString(source.name, source.title, existing.name, 'Unnamed entity'),
+    type: firstDefinedString(source.type, existing.type),
+    subtype: firstDefinedString(source.subtype, existing.subtype),
+    description: firstDefinedString(source.description, existing.description),
+    lore: firstDefinedString(source.lore, existing.lore),
+    tags: Array.from(new Set([
+      ...(Array.isArray(existing.tags) ? existing.tags : []),
+      ...(Array.isArray(source.tags) ? source.tags : [])
+    ])),
+    kind: firstDefinedString(existing.kind, 'existing'),
+    status: firstDefinedString(existing.status, 'present'),
+    provenance: firstDefinedString(existing.provenance, 'session')
+  };
+}
+
 function collectEntitySearchLabels({ reading = {}, focusMemory = {}, focusCard = {}, playerReply = '', explicitLabel = '' } = {}) {
   const labels = [
     firstDefinedString(explicitLabel),
@@ -568,12 +593,67 @@ function findEntityInReading(entities = [], requestedEntityId = '', replyText = 
   return entity || null;
 }
 
+function findSeerProjectedEntity(reading = {}, entityId = '') {
+  const safeEntityId = firstDefinedString(entityId);
+  if (!safeEntityId) return null;
+  return (Array.isArray(reading?.entities) ? reading.entities : []).find((entity) => (
+    safeEntityId === firstDefinedString(entity?.id)
+    || safeEntityId === firstDefinedString(entity?.externalId)
+    || safeEntityId === firstDefinedString(entity?.sourceEntityId)
+  )) || null;
+}
+
+function resolveSeerPersistentEntityId(reading = {}, focusCard = null) {
+  const safeFocusCard = focusCard || findSeerFocusCard(reading?.cards || []);
+  const candidateIds = [
+    firstDefinedString(safeFocusCard?.canonicalEntityExternalId),
+    firstDefinedString(safeFocusCard?.canonicalEntityId),
+    ...(Array.isArray(safeFocusCard?.linkedEntityIds) ? safeFocusCard.linkedEntityIds.map((value) => firstDefinedString(value)) : [])
+  ].filter(Boolean);
+  const claimedLinks = Array.isArray(reading?.claimedEntityLinks) ? reading.claimedEntityLinks : [];
+  const linkedClaim = claimedLinks.find((link) => firstDefinedString(link?.cardId) === firstDefinedString(safeFocusCard?.id));
+  if (linkedClaim) {
+    candidateIds.unshift(
+      firstDefinedString(linkedClaim.entityExternalId),
+      firstDefinedString(linkedClaim.entityId)
+    );
+  }
+  for (const candidateId of candidateIds) {
+    const projected = findSeerProjectedEntity(reading, candidateId);
+    const persistentId = firstDefinedString(
+      projected?.externalId,
+      projected?.sourceEntityId,
+      candidateId
+    );
+    if (persistentId && !persistentId.startsWith('seer-entity-')) {
+      return persistentId;
+    }
+  }
+  return '';
+}
+
+function buildSeerRuntimeReadingSnapshot(ctx = {}) {
+  return {
+    ...(ctx.reading || {}),
+    memories: Array.isArray(ctx.state?.memories) ? ctx.state.memories : [],
+    cards: Array.isArray(ctx.state?.cards) ? ctx.state.cards : [],
+    entities: Array.isArray(ctx.state?.entities) ? ctx.state.entities : [],
+    spread: ctx.state?.spread || {},
+    transcript: Array.isArray(ctx.state?.transcript) ? ctx.state.transcript : [],
+    unresolvedThreads: Array.isArray(ctx.state?.unresolvedThreads) ? ctx.state.unresolvedThreads : [],
+    claimedCards: Array.isArray(ctx.state?.claimedCards) ? ctx.state.claimedCards : [],
+    claimedEntityLinks: Array.isArray(ctx.state?.claimedEntityLinks) ? ctx.state.claimedEntityLinks : [],
+    worldbuildingOutputs: Array.isArray(ctx.state?.worldbuildingOutputs) ? ctx.state.worldbuildingOutputs : []
+  };
+}
+
 function describeAvailableSeerTool(toolId = '') {
   return cloneToolDefinition(SEER_ORCHESTRATOR_TOOL_MAP[toolId] || { id: toolId });
 }
 
 function buildAvailableTools(reading = {}, focusMemory = null, focusCard = null) {
   const tools = [];
+  const persistentEntityId = resolveSeerPersistentEntityId(reading, focusCard);
 
   if (focusCard && Number(focusCard.revealTier) < 3) {
     tools.push(describeAvailableSeerTool('reveal_card_tier'));
@@ -589,7 +669,7 @@ function buildAvailableTools(reading = {}, focusMemory = null, focusCard = null)
     tools.push(describeAvailableSeerTool('propose_relation'));
   }
 
-  if (Array.isArray(reading.apparitions) && reading.apparitions.length) {
+  if (Array.isArray(reading.apparitions) && reading.apparitions.length && persistentEntityId) {
     tools.push(describeAvailableSeerTool('invoke_storyteller'));
   }
 
@@ -623,7 +703,7 @@ function buildAvailableTools(reading = {}, focusMemory = null, focusCard = null)
   );
 }
 
-function createToolRegistry() {
+function createToolRegistry(runtimeActions = {}) {
   return {
     focus_card: {
       id: 'focus_card',
@@ -848,30 +928,157 @@ function createToolRegistry() {
     },
     invoke_storyteller: {
       id: 'invoke_storyteller',
-      description: 'Offer an apparition as the next interpretive force.',
+      description: 'Send an apparition to deepen the current persistent thread.',
       run: async (ctx, input) => {
-        const apparitions = Array.isArray(ctx.reading?.apparitions) ? ctx.reading.apparitions : [];
+        const activeReading = buildSeerRuntimeReadingSnapshot(ctx);
+        const apparitions = Array.isArray(activeReading?.apparitions) ? activeReading.apparitions : (Array.isArray(ctx.reading?.apparitions) ? ctx.reading.apparitions : []);
         const selected = apparitions.find((apparition) => apparition.id === firstDefinedString(input?.storytellerId))
           || apparitions[0]
           || null;
         if (!selected) return;
         ctx.runtime.offeredApparition = selected;
-        ctx.runtime.executionNotes.push(`invoke_storyteller:${selected.name}`);
-        ctx.result.transitionType = 'apparition_offer';
-        ctx.result.beat = 'apparition_offer';
-        ctx.result.spokenMessage = `${firstDefinedString(selected.name, 'An apparition')} presses at the margin of the reading and asks to be let nearer.`;
+        const resolvedEntityId = firstDefinedString(
+          input?.entityId,
+          resolveSeerPersistentEntityId(activeReading, findSeerFocusCard(ctx.state.cards)),
+          ctx.runtime.createdEntity?.externalId,
+          ctx.runtime.createdEntity?.sourceEntityId,
+          ctx.runtime.createdEntity?.id
+        );
+        if (!runtimeActions?.invokeStoryteller || !resolvedEntityId) {
+          ctx.runtime.executionNotes.push(`invoke_storyteller:offered:${selected.name}`);
+          ctx.result.transitionType = 'apparition_offer';
+          ctx.result.beat = 'apparition_offer';
+          ctx.result.spokenMessage = `${firstDefinedString(selected.name, 'An apparition')} presses at the margin of the reading and asks to be let nearer.`;
+          return {
+            summary: `Apparition offered: ${selected.name}`
+          };
+        }
+
+        const missionMessage = firstDefinedString(
+          input?.message,
+          ctx.playerReply,
+          `Deepen ${firstDefinedString(findSeerFocusCard(ctx.state.cards)?.title, 'this thread')}.`
+        );
+        const storytellingPoints = Number.isInteger(input?.storytellingPoints) ? input.storytellingPoints : 5;
+        const duration = Number.isFinite(Number(input?.duration)) ? Number(input.duration) : 1;
+        const missionResult = await runtimeActions.invokeStoryteller({
+          sessionId: firstDefinedString(activeReading?.sessionId),
+          playerId: ctx.playerId,
+          entityId: resolvedEntityId,
+          storytellerId: selected.id,
+          storytellingPoints,
+          message: missionMessage,
+          duration,
+          mock: Boolean(ctx.mockMode)
+        });
+
+        const missionEntity = missionResult?.entity || null;
+        const missionSubEntities = Array.isArray(missionResult?.subEntities) ? missionResult.subEntities : [];
+        const entityProjection = missionEntity
+          ? buildSeerRuntimeEntityProjection(
+            missionEntity,
+            findSeerProjectedEntity(activeReading, resolvedEntityId) || {}
+          )
+          : null;
+
+        if (entityProjection) {
+          const existingIndex = ctx.state.entities.findIndex((entity) => (
+            resolvedEntityId === firstDefinedString(entity?.id)
+            || resolvedEntityId === firstDefinedString(entity?.externalId)
+            || resolvedEntityId === firstDefinedString(entity?.sourceEntityId)
+          ));
+          if (existingIndex >= 0) {
+            ctx.state.entities[existingIndex] = entityProjection;
+          } else {
+            ctx.state.entities.push(entityProjection);
+          }
+        }
+
+        missionSubEntities.forEach((subEntity) => {
+          const projection = buildSeerRuntimeEntityProjection(subEntity);
+          const existingIndex = ctx.state.entities.findIndex((entity) => (
+            projection.id === firstDefinedString(entity?.id)
+            || projection.externalId === firstDefinedString(entity?.externalId)
+            || projection.sourceEntityId === firstDefinedString(entity?.sourceEntityId)
+          ));
+          if (existingIndex >= 0) {
+            ctx.state.entities[existingIndex] = {
+              ...ctx.state.entities[existingIndex],
+              ...projection
+            };
+          } else {
+            ctx.state.entities.push(projection);
+          }
+        });
+
+        ctx.runtime.storytellerMission = missionResult;
+        ctx.runtime.characterSheetPayload = missionResult?.characterSheet || ctx.runtime.characterSheetPayload || null;
+        ctx.runtime.executionNotes.push(`invoke_storyteller:${selected.name}:${resolvedEntityId}`);
+        ctx.state.worldbuildingOutputs = [
+          ...(Array.isArray(ctx.state.worldbuildingOutputs) ? ctx.state.worldbuildingOutputs : []),
+          {
+            kind: 'storyteller_mission',
+            storytellerId: selected.id,
+            storytellerName: firstDefinedString(selected.name),
+            entityId: resolvedEntityId,
+            outcome: firstDefinedString(missionResult?.outcome, 'pending'),
+            userText: firstDefinedString(missionResult?.userText),
+            gmNote: firstDefinedString(missionResult?.gmNote),
+            subEntities: missionSubEntities.map((subEntity) => ({
+              id: firstDefinedString(subEntity?.externalId, subEntity?._id ? String(subEntity._id) : '', subEntity?.id),
+              name: firstDefinedString(subEntity?.name)
+            }))
+          }
+        ].slice(-12);
+        ctx.result.transitionType = 'relation_strengthened';
+        ctx.result.beat = 'relation_testing';
+        ctx.result.spokenMessage = firstDefinedString(
+          missionResult?.userText,
+          `${firstDefinedString(selected.name, 'An apparition')} returns with a deeper reading of ${firstDefinedString(entityProjection?.name, findSeerFocusCard(ctx.state.cards)?.title, 'the thread')}.`
+        );
+        return {
+          summary: `${firstDefinedString(selected.name)} investigated ${firstDefinedString(entityProjection?.name, resolvedEntityId)}`,
+          outcome: firstDefinedString(missionResult?.outcome, 'pending'),
+          subEntityCount: missionSubEntities.length
+        };
       }
     },
     claim_card: {
       id: 'claim_card',
-      description: 'Mark that the current card is ready to be sealed by the player.',
-      run: async (ctx) => {
+      description: 'Seal the current claimable card into the persistent bank.',
+      run: async (ctx, input) => {
         const focusCard = findSeerFocusCard(ctx.state.cards);
         if (!focusCard) return;
-        ctx.runtime.executionNotes.push(`claim_card:ready:${focusCard.id}`);
-        ctx.result.transitionType = 'card_claim_available';
-        ctx.result.beat = 'card_claim_available';
-        ctx.result.spokenMessage = `${firstDefinedString(focusCard.title, 'This card')} stands ready. If the truth holds, the player may seal it now.`;
+        if (!runtimeActions?.claimCard) {
+          ctx.runtime.executionNotes.push(`claim_card:ready:${focusCard.id}`);
+          ctx.result.transitionType = 'card_claim_available';
+          ctx.result.beat = 'card_claim_available';
+          ctx.result.spokenMessage = `${firstDefinedString(focusCard.title, 'This card')} stands ready. If the truth holds, the player may seal it now.`;
+          return {
+            summary: `Card ready to claim: ${focusCard.id}`
+          };
+        }
+        const claimResult = await runtimeActions.claimCard({
+          reading: buildSeerRuntimeReadingSnapshot(ctx),
+          playerId: ctx.playerId,
+          cardId: firstDefinedString(input?.cardId, focusCard.id)
+        });
+        const nextFields = claimResult?.nextReadingFields || {};
+        ctx.state.cards = Array.isArray(nextFields.cards) ? nextFields.cards : ctx.state.cards;
+        ctx.state.claimedCards = Array.isArray(nextFields.claimedCards) ? nextFields.claimedCards : ctx.state.claimedCards;
+        ctx.state.claimedEntityLinks = Array.isArray(nextFields.claimedEntityLinks) ? nextFields.claimedEntityLinks : ctx.state.claimedEntityLinks;
+        ctx.state.entities = Array.isArray(nextFields.entities) ? nextFields.entities : ctx.state.entities;
+        ctx.state.transcript = Array.isArray(nextFields.transcript) ? nextFields.transcript : ctx.state.transcript;
+        ctx.state.spread = nextFields.spread || ctx.state.spread;
+        ctx.result.transitionType = claimResult?.turnSummary?.transitionType || 'card_claimed';
+        ctx.result.beat = claimResult?.turnSummary?.beat || 'card_attunement';
+        ctx.result.spokenMessage = claimResult?.turnSummary?.spokenMessage || `${firstDefinedString(focusCard.title, 'The card')} is sealed.`;
+        ctx.runtime.characterSheetPayload = claimResult?.characterSheet || ctx.runtime.characterSheetPayload || null;
+        ctx.runtime.executionNotes.push(`claim_card:executed:${firstDefinedString(focusCard.id)}`);
+        return {
+          summary: `${firstDefinedString(focusCard.title, focusCard.id)} sealed into the entity bank`,
+          entityExternalId: firstDefinedString(claimResult?.claimedEntityLink?.entityExternalId)
+        };
       }
     },
     synthesize: {
@@ -949,7 +1156,10 @@ function cloneReadingState(reading = {}) {
     entities: Array.isArray(reading.entities) ? reading.entities.map((entity) => ({ ...entity })) : [],
     spread: reading.spread ? { ...reading.spread } : {},
     transcript: Array.isArray(reading.transcript) ? reading.transcript.map((entry) => ({ ...entry })) : [],
-    unresolvedThreads: Array.isArray(reading.unresolvedThreads) ? [...reading.unresolvedThreads] : []
+    unresolvedThreads: Array.isArray(reading.unresolvedThreads) ? [...reading.unresolvedThreads] : [],
+    claimedCards: Array.isArray(reading.claimedCards) ? reading.claimedCards.map((card) => ({ ...card })) : [],
+    claimedEntityLinks: Array.isArray(reading.claimedEntityLinks) ? reading.claimedEntityLinks.map((link) => ({ ...link })) : [],
+    worldbuildingOutputs: Array.isArray(reading.worldbuildingOutputs) ? reading.worldbuildingOutputs.map((entry) => ({ ...entry })) : []
   };
 }
 
@@ -970,6 +1180,7 @@ function summarizeReadingForOrchestrator(reading = {}) {
     memories: Array.isArray(reading?.memories) ? reading.memories : [],
     cards: Array.isArray(reading?.cards) ? reading.cards : [],
     entities: Array.isArray(reading?.entities) ? reading.entities : [],
+    claimedEntityLinks: Array.isArray(reading?.claimedEntityLinks) ? reading.claimedEntityLinks : [],
     apparitions: Array.isArray(reading?.apparitions) ? reading.apparitions : [],
     unresolvedThreads: Array.isArray(reading?.unresolvedThreads) ? reading.unresolvedThreads : []
   };
@@ -1035,7 +1246,8 @@ function normalizeSeerToolInput(input = {}) {
     entityId: firstDefinedString(source.entityId, source.entity_id),
     searchLabel: firstDefinedString(source.searchLabel, source.search_label, source.entityLabel, source.entity_label),
     storytellerId: firstDefinedString(source.storytellerId, source.storyteller_id),
-    cardId: firstDefinedString(source.cardId, source.card_id)
+    cardId: firstDefinedString(source.cardId, source.card_id),
+    message: firstDefinedString(source.message, source.mission_message, source.prompt)
   };
 
   const delta = Number(source.delta ?? source.reveal_tier_delta);
@@ -1044,6 +1256,10 @@ function normalizeSeerToolInput(input = {}) {
   if (Number.isFinite(clarityDelta)) normalized.clarityDelta = clarityDelta;
   const confidenceDelta = Number(source.confidenceDelta ?? source.confidence_delta);
   if (Number.isFinite(confidenceDelta)) normalized.confidenceDelta = confidenceDelta;
+  const storytellingPoints = Number(source.storytellingPoints ?? source.storytelling_points);
+  if (Number.isInteger(storytellingPoints)) normalized.storytellingPoints = storytellingPoints;
+  const duration = Number(source.duration ?? source.duration_days);
+  if (Number.isFinite(duration)) normalized.duration = duration;
   return normalized;
 }
 
@@ -1129,6 +1345,9 @@ function hasMeaningfulSeerDecisionPatch(decision = {}) {
 function buildFallbackSeerOrchestratorDecision({ reading = {}, playerReply = '', entityId = '' } = {}) {
   const focusCard = findSeerFocusCard(reading?.cards || []);
   const focusMemory = findSeerFocusMemory(reading?.memories || []);
+  const normalizedReply = firstDefinedString(playerReply).toLowerCase();
+  const persistentEntityId = firstDefinedString(entityId, resolveSeerPersistentEntityId(reading, focusCard));
+  const hasStorytellerIntent = /(storyteller|apparition|seer|investigate|deepen|explore|send|learn more|follow)/i.test(normalizedReply);
 
   if (!focusCard && !focusMemory) {
     return {
@@ -1155,12 +1374,8 @@ function buildFallbackSeerOrchestratorDecision({ reading = {}, playerReply = '',
           }
         }
       ],
-      ui: {
-        focus_card_id: focusCard.id
-      },
-      state_patch: {
-        focus_card_id: focusCard.id
-      }
+      ui: {},
+      state_patch: {}
     };
   }
 
@@ -1216,6 +1431,33 @@ function buildFallbackSeerOrchestratorDecision({ reading = {}, playerReply = '',
           reason: 'Bind the focused thread to the retrieved or created entity.',
           input: {
             entity_id: entityId
+          }
+        }
+      ],
+      ui: {
+        focus_card_id: focusCard.id
+      },
+      state_patch: {
+        focus_card_id: focusCard.id
+      }
+    };
+  }
+
+  if (focusCard && persistentEntityId && Array.isArray(reading?.apparitions) && reading.apparitions.length && hasStorytellerIntent) {
+    return {
+      spoken_message: `${firstDefinedString(reading.apparitions[0]?.name, 'The apparition')} can follow this thread deeper, if we send it now.`,
+      transition_type: 'relation_strengthened',
+      beat: 'relation_testing',
+      tool_calls: [
+        {
+          tool_id: 'invoke_storyteller',
+          reason: 'The player asked to deepen an already stabilized thread.',
+          input: {
+            storyteller_id: firstDefinedString(reading.apparitions[0]?.id),
+            entity_id: persistentEntityId,
+            storytelling_points: 5,
+            message: firstDefinedString(playerReply),
+            duration_days: 1
           }
         }
       ],
@@ -1301,13 +1543,14 @@ async function executeSeerToolCalls(ctx, toolCalls = [], registry = {}, availabl
     }
 
     try {
-      await tool.run(ctx, normalizedInput);
+      const output = await tool.run(ctx, normalizedInput);
       ctx.result.toolCalls.push(buildToolCall(toolId, normalizedInput, normalizedReason));
       executionTrace.push({
         toolId,
         status: 'executed',
         reason: normalizedReason,
-        input: normalizedInput
+        input: normalizedInput,
+        output: output && typeof output === 'object' ? output : undefined
       });
     } catch (error) {
       executionTrace.push({
@@ -1437,10 +1680,17 @@ export async function runSeerReadingTurn({
   focusMemoryId = '',
   focusCardId = '',
   entityId = '',
-  mock = null
+  mock = null,
+  runtimeActions = {}
 }) {
   const orchestrator = await buildSeerOrchestratorEnvelope(reading);
-  const registry = createToolRegistry();
+  if (typeof mock === 'boolean') {
+    orchestrator.pipeline = {
+      ...(orchestrator.pipeline || {}),
+      useMock: mock
+    };
+  }
+  const registry = createToolRegistry(runtimeActions);
   const state = cloneReadingState(reading);
   const result = {
     transitionType: 'dead_end',
@@ -1462,6 +1712,8 @@ export async function runSeerReadingTurn({
       createdEntityMocked: false,
       entityRetrievalMiss: false,
       offeredApparition: null,
+      characterSheetPayload: null,
+      storytellerMission: null,
       executionNotes: []
     }
   };
@@ -1583,9 +1835,9 @@ export async function runSeerReadingTurn({
 
     applySeerOrchestratorStatePatch(ctx, appliedDecision);
 
-    result.spokenMessage = firstDefinedString(appliedDecision.spoken_message, result.spokenMessage);
-    result.transitionType = firstDefinedString(appliedDecision.transition_type, result.transitionType);
-    result.beat = firstDefinedString(appliedDecision.beat, result.beat);
+    result.spokenMessage = firstDefinedString(result.spokenMessage, appliedDecision.spoken_message);
+    result.transitionType = firstDefinedString(result.transitionType, appliedDecision.transition_type);
+    result.beat = firstDefinedString(result.beat, appliedDecision.beat);
 
     state.transcript.push(createSeerTranscriptEntry('seer', result.spokenMessage, {
       kind: result.transitionType,
@@ -1614,7 +1866,12 @@ export async function runSeerReadingTurn({
     executionTrace: decisionTrace.executionTrace,
     executionNotes: ctx.runtime.executionNotes,
     offeredApparitionId: firstDefinedString(ctx.runtime.offeredApparition?.id),
-    offeredApparitionName: firstDefinedString(ctx.runtime.offeredApparition?.name)
+    offeredApparitionName: firstDefinedString(ctx.runtime.offeredApparition?.name),
+    storytellerMissionOutcome: firstDefinedString(ctx.runtime.storytellerMission?.outcome),
+    storytellerMissionEntityId: firstDefinedString(
+      ctx.runtime.storytellerMission?.entity?.externalId,
+      ctx.runtime.storytellerMission?.entity?._id ? String(ctx.runtime.storytellerMission.entity._id) : ''
+    )
   };
 
   return {
@@ -1625,10 +1882,15 @@ export async function runSeerReadingTurn({
       spread: state.spread,
       transcript: state.transcript,
       unresolvedThreads: state.unresolvedThreads,
+      claimedCards: state.claimedCards,
+      claimedEntityLinks: state.claimedEntityLinks,
+      worldbuildingOutputs: state.worldbuildingOutputs,
       beat: result.beat,
       lastTurn,
       orchestrator
-    }
+    },
+    characterSheet: ctx.runtime.characterSheetPayload || null,
+    storytellerMission: ctx.runtime.storytellerMission || null
   };
 }
 

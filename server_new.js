@@ -80,6 +80,10 @@ import { registerSessionWorldRoutes } from './routes/serverNew/sessionWorldRoute
 import { registerNarrativeRoutes } from './routes/serverNew/narrativeRoutes.js';
 import { registerArenaRoutes } from './routes/serverNew/arenaRoutes.js';
 import { registerBrewingRoutes } from './routes/serverNew/brewingRoutes.js';
+import { registerMessengerRoutes } from './routes/serverNew/messengerRoutes.js';
+import { registerImmersiveRpgRoutes } from './routes/serverNew/immersiveRpgRoutes.js';
+import { registerTypewriterRoutes } from './routes/serverNew/typewriterRoutes.js';
+import { registerDocsRoutes } from './routes/serverNew/docsRoutes.js';
 import { generateTypewriterPrompt } from './ai/openai/promptsUtils.js';
 import {
   getPipelineSettings,
@@ -416,10 +420,82 @@ const TYPEWRITER_DEFAULT_FONT_SIZE = '1.9rem';
 const TYPEWRITER_PREFERRED_FONT_SIZE_PX = 30;
 const TYPEWRITER_TEXT_KEY_TEXTURE_URL = '/textures/keys/blank_rect_horizontal_1.png';
 const TYPEWRITER_XEROFAG_KEY_IMAGE_URL = '/textures/keys/THE_XEROFAG_1.png';
+const PUBLIC_NARRATIVE_ENTITY_SESSION_ID = '__public__';
 const XEROFAG_CANDIDATE_TERM = 'The Xerofag';
 const XEROFAG_KEY_TEXT = 'THE XEROFAG';
-const XEROFAG_LORE = 'The Xerofag are a group of undead canines.';
+const XEROFAG_SUMMARY = 'A pack of eerie undead dogs trained to find storytellers and devour them.';
+const XEROFAG_LORE = [
+  'The Xerofag are a pack of eerie undead dogs. At a distance they can pass for stray dogs: dusty, bruised, limping, and worn down as if they have been running for far too long.',
+  'Closer attention reveals the truth. Some members of the pack are severely injured, with broken legs, open wounds, or exposed bone, yet they keep moving with the obedience and hunger of things that should no longer be alive.',
+  'The pack is led by a yellowish-grey dog with one missing eye, a cut tail, and scars across its body, some old and some fresh.',
+  'The Xerofag have been trained to find storytellers and devour them as a pack of undead dogs would: surrounding, exhausting, and consuming the target together.'
+].join('\n\n');
 const XEROFAG_ENTITY_EXTERNAL_ID = 'builtin:xerofag';
+const XEROFAG_ENTITY_PROFILE = Object.freeze({
+  session_id: PUBLIC_NARRATIVE_ENTITY_SESSION_ID,
+  sessionId: PUBLIC_NARRATIVE_ENTITY_SESSION_ID,
+  playerId: '',
+  name: XEROFAG_CANDIDATE_TERM,
+  description: XEROFAG_SUMMARY,
+  lore: XEROFAG_LORE,
+  privacy: 'public',
+  type: 'FAUNA',
+  subtype: 'Undead dog pack',
+  tags: ['xerofag', 'undead', 'dogs', 'canines', 'pack', 'storyteller-hunter', 'predator'],
+  universalTraits: [
+    'appears at first like a pack of stray dogs',
+    'dusty, bruised, injured, and unnaturally persistent',
+    'severe wounds do not stop the pack from moving',
+    'hunts storytellers by scent or story-signature',
+    'led by a yellowish-grey one-eyed dog'
+  ],
+  attributes: {
+    composition: 'A pack of undead dogs moving together like trained hunting animals.',
+    surfaceAppearance: 'Dusty, bruised stray dogs that look exhausted from endless running.',
+    closerInspection: 'Broken legs, exposed bones, deep wounds, and other injuries reveal that the dogs are undead.',
+    leader: {
+      description: 'A yellowish-grey dog with one missing eye, a cut tail, and scars across its body.',
+      scars: 'Some scars are old; some are fresh.'
+    },
+    purpose: 'Trained to find storytellers and devour them.',
+    huntingMethod: 'The pack surrounds, exhausts, and tears into its target together.',
+    threatLevel: 'high'
+  },
+  connections: [
+    'Storytellers',
+    'The Storytellers Society',
+    'Typewriter keys',
+    'Undead hunting packs'
+  ],
+  relevance: 'A recurring threat that can enter a narrative when the story has made room for undead canine danger.',
+  impact: 'Pressures storytellers, turns ordinary stray-dog imagery into a warning sign, and can force flight, concealment, or defensive storytelling.',
+  developmentCost: '6, 10, 15, 20',
+  storytellingPointsCost: 18,
+  storytelling_points: 14,
+  urgency: 'Immediate when detected',
+  hooks: {
+    firstHint: 'A stray pack appears dusty and badly bruised, running as if it cannot stop.',
+    reveal: 'One dog moves on a broken leg; another shows bone where flesh should cover it.',
+    leaderTell: 'The yellowish-grey leader has one missing eye, a cut tail, and fresh scars.',
+    escalation: 'The pack stops acting like strays once it catches a storyteller scent.'
+  },
+  specificity: {
+    familiarSurface: 'stray dogs',
+    hiddenTruth: 'trained undead storyteller-hunting pack',
+    leader: 'yellowish-grey one-eyed scarred dog'
+  },
+  externalId: XEROFAG_ENTITY_EXTERNAL_ID,
+  source: 'typewriter_builtin',
+  sourceRoute: '/api/typewriter/session/start',
+  typewriterKeyText: XEROFAG_KEY_TEXT,
+  typewriterSource: 'builtin',
+  activeInTypewriter: true,
+  canonicalStatus: 'canonical',
+  bankSource: {
+    sourceType: 'builtin_entity',
+    keyText: XEROFAG_KEY_TEXT
+  }
+});
 const XEROFAG_CANINE_KEYWORDS = [
   'canine',
   'dog',
@@ -2326,49 +2402,13 @@ async function handleMessengerChatPost(req, res) {
   }
 }
 
-app.get('/api/messenger/chat', async (req, res) => {
-  try {
-    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
-    const sceneId = normalizeMessengerSceneId(req.query?.sceneId);
-    if (!sessionId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
-    }
-
-    const persistence = await resolveMessengerPersistenceMode();
-    const conversation = await buildMessengerConversationPayload(sessionId, sceneId, persistence);
-    return res.status(200).json(conversation);
-  } catch (error) {
-    console.error('Error in GET /api/messenger/chat:', error);
-    return res.status(500).json({ message: 'Server error while loading messenger chat.' });
-  }
-});
-
-app.post('/api/messenger/chat', handleMessengerChatPost);
-app.post('/api/sendMessage', handleMessengerChatPost);
-
-app.delete('/api/messenger/chat', async (req, res) => {
-  try {
-    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
-    const sceneId = normalizeMessengerSceneId(req.query?.sceneId);
-    if (!sessionId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
-    }
-
-    const persistence = await resolveMessengerPersistenceMode();
-    const deletion = await deleteMessengerConversation(sessionId, sceneId, persistence);
-    const deletedSceneBriefCount = await deleteMessengerSceneBrief(sessionId, sceneId, persistence);
-    return res.status(200).json({
-      sessionId,
-      sceneId,
-      deletedCount: (deletion?.deletedCount || 0) + deletedSceneBriefCount,
-      deletedMessagesCount: deletion?.deletedCount || 0,
-      deletedSceneBriefCount,
-      storage: persistence
-    });
-  } catch (error) {
-    console.error('Error in DELETE /api/messenger/chat:', error);
-    return res.status(500).json({ message: 'Server error while clearing messenger chat.' });
-  }
+registerMessengerRoutes(app, {
+  handleMessengerChatPost,
+  normalizeMessengerSceneId,
+  resolveMessengerPersistenceMode,
+  buildMessengerConversationPayload,
+  deleteMessengerConversation,
+  deleteMessengerSceneBrief
 });
 
 function normalizeImmersiveRpgSessionId(value) {
@@ -2711,6 +2751,181 @@ async function synthesizeCharacterSheetFromSeerClaim({ reading, playerId, claime
   });
 }
 
+function createRouteError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+async function executeSeerCardClaimAction({
+  reading,
+  playerId = '',
+  cardId = ''
+} = {}) {
+  const readingSnapshot = reading && typeof reading.toObject === 'function'
+    ? reading.toObject()
+    : (reading || {});
+  const safePlayerId = normalizeOptionalPlayerId(playerId);
+  const safeCardId = firstDefinedString(cardId);
+
+  const cards = Array.isArray(readingSnapshot.cards)
+    ? readingSnapshot.cards.map((card) => ({
+      ...card,
+      back: card?.back ? { ...card.back } : {},
+      front: card?.front ? { ...card.front } : {}
+    }))
+    : [];
+  const cardIndex = cards.findIndex((card) => card.id === safeCardId);
+  if (cardIndex < 0) {
+    throw createRouteError('Claimable card not found in this reading.', 404);
+  }
+
+  const targetCard = cards[cardIndex];
+  if (firstDefinedString(targetCard.status) !== 'claimable') {
+    throw createRouteError('This card is not claimable yet.', 409);
+  }
+
+  const claimedAt = new Date().toISOString();
+  const linkedReadingEntity = findSeerReadingEntityByCard(readingSnapshot, targetCard);
+  const existingEntity = await resolveCanonicalEntityForClaim(readingSnapshot, safePlayerId, targetCard);
+  const claimedEntity = await upsertNarrativeEntityFromSeerClaim({
+    reading: readingSnapshot,
+    playerId: safePlayerId,
+    card: targetCard,
+    claimedAt,
+    linkedReadingEntity,
+    existingEntity
+  });
+  const claimedEntityLink = buildClaimedEntityLink(claimedEntity, targetCard, readingSnapshot, claimedAt);
+  const canonicalEntityId = firstDefinedString(claimedEntityLink.entityId);
+  const canonicalEntityExternalId = firstDefinedString(claimedEntityLink.entityExternalId);
+  const claimedCard = {
+    ...targetCard,
+    status: 'claimed',
+    focusState: 'resolved',
+    clarity: 1,
+    confidence: Math.max(0.86, Number(targetCard.confidence) || 0),
+    linkedEntityIds: Array.from(new Set([
+      ...(Array.isArray(targetCard.linkedEntityIds) ? targetCard.linkedEntityIds : []),
+      canonicalEntityExternalId
+    ].filter(Boolean))),
+    canonicalEntityId,
+    canonicalEntityExternalId
+  };
+  cards[cardIndex] = claimedCard;
+
+  const nextFocus = findNextSeerClaimFocusCard(cards, safeCardId);
+  const nextCards = cards.map((card) => {
+    if (card.id === safeCardId) {
+      return claimedCard;
+    }
+    if (nextFocus && card.id === nextFocus.id) {
+      return { ...card, focusState: 'active' };
+    }
+    return {
+      ...card,
+      focusState: card.focusState === 'resolved' || firstDefinedString(card.status) === 'claimed' ? 'resolved' : 'idle'
+    };
+  });
+
+  const spokenMessage = nextFocus
+    ? `${firstDefinedString(targetCard.title, 'The card')} is yours now. Keep it, and turn next to ${firstDefinedString(nextFocus.title, 'the next thread')}.`
+    : `${firstDefinedString(targetCard.title, 'The card')} is yours now. The spread stands ready for synthesis.`;
+
+  const playerEntry = createSeerTranscriptEntry('player', `I claim ${firstDefinedString(targetCard.title, 'this card')}.`, {
+    kind: 'claim_card',
+    playerId: safePlayerId
+  });
+  const seerEntry = createSeerTranscriptEntry('seer', spokenMessage, {
+    kind: 'card_claimed',
+    focusCardId: nextFocus?.id || '',
+    focusMemoryId: firstDefinedString(readingSnapshot?.spread?.focusMemoryId)
+  });
+
+  const nextClaimedCards = Array.isArray(readingSnapshot.claimedCards) ? [...readingSnapshot.claimedCards] : [];
+  nextClaimedCards.push({
+    ...buildClaimedSeerCardRecord(claimedCard, claimedAt),
+    entityId: canonicalEntityId,
+    entityExternalId: canonicalEntityExternalId
+  });
+  const nextClaimedEntityLinks = Array.isArray(readingSnapshot.claimedEntityLinks) ? [...readingSnapshot.claimedEntityLinks] : [];
+  if (!nextClaimedEntityLinks.some((link) => link.cardId === claimedEntityLink.cardId && link.entityExternalId === claimedEntityLink.entityExternalId)) {
+    nextClaimedEntityLinks.push(claimedEntityLink);
+  }
+
+  const canonicalEntityProjection = buildSeerReadingEntity(claimedEntity);
+  const nextReadingEntities = Array.isArray(readingSnapshot.entities) ? [...readingSnapshot.entities] : [];
+  const projectionIndex = nextReadingEntities.findIndex((entity) => (
+    firstDefinedString(entity?.id) === firstDefinedString(linkedReadingEntity?.id)
+    || firstDefinedString(entity?.externalId) === canonicalEntityExternalId
+    || firstDefinedString(entity?.id) === canonicalEntityId
+    || firstDefinedString(entity?.sourceEntityId) === canonicalEntityExternalId
+  ));
+  if (projectionIndex >= 0) {
+    nextReadingEntities[projectionIndex] = {
+      ...nextReadingEntities[projectionIndex],
+      ...canonicalEntityProjection
+    };
+  } else {
+    nextReadingEntities.push(canonicalEntityProjection);
+  }
+
+  const nextTranscript = [
+    ...(Array.isArray(readingSnapshot.transcript) ? readingSnapshot.transcript : []),
+    playerEntry,
+    seerEntry
+  ];
+  const nextSpread = {
+    ...(readingSnapshot.spread || {}),
+    focusCardId: nextFocus?.id || '',
+    cardLayout: buildSeerCardLayout(nextCards)
+  };
+  const nextBeat = nextFocus ? 'card_attunement' : 'cross_memory_synthesis';
+  const nextReadingSnapshot = {
+    ...readingSnapshot,
+    cards: nextCards,
+    claimedCards: nextClaimedCards,
+    claimedEntityLinks: nextClaimedEntityLinks,
+    entities: nextReadingEntities,
+    transcript: nextTranscript,
+    spread: nextSpread,
+    beat: nextBeat
+  };
+  const characterSheetDoc = await synthesizeCharacterSheetFromSeerClaim({
+    reading: nextReadingSnapshot,
+    playerId: safePlayerId,
+    claimedEntity,
+    card: claimedCard
+  });
+
+  return {
+    nextReadingSnapshot,
+    nextReadingFields: {
+      cards: nextCards,
+      claimedCards: nextClaimedCards,
+      claimedEntityLinks: nextClaimedEntityLinks,
+      entities: nextReadingEntities,
+      transcript: nextTranscript,
+      spread: nextSpread,
+      beat: nextBeat
+    },
+    claimedEntity,
+    claimedCard,
+    claimedEntityLink,
+    spokenMessage,
+    characterSheet: characterSheetDoc ? toImmersiveRpgCharacterSheetPayload(characterSheetDoc) : null,
+    turnSummary: {
+      transitionType: 'card_claimed',
+      beat: nextBeat,
+      spokenMessage,
+      focusMemoryId: firstDefinedString(nextSpread.focusMemoryId),
+      focusCardId: nextFocus?.id || '',
+      claimedCardIds: [safeCardId],
+      claimedEntityLinks: [claimedEntityLink]
+    }
+  };
+}
+
 function buildStorytellerMissionEntityRecords({
   entity = {},
   storyteller = {},
@@ -2869,6 +3084,237 @@ async function updateNarrativeEntityAfterStorytellerMission({
   );
 }
 
+async function executeStorytellerMissionAction(body = {}) {
+  let storytellerDocIdForReset = null;
+  let missionActivated = false;
+
+  try {
+    const {
+      sessionId,
+      playerId,
+      entityId,
+      storytellerId,
+      storytellingPoints,
+      message,
+      duration
+    } = body || {};
+    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
+
+    if (!sessionId || !entityId || !storytellerId) {
+      throw createRouteError('Missing required parameters: sessionId, entityId, storytellerId.', 400);
+    }
+    if (!Number.isInteger(storytellingPoints)) {
+      throw createRouteError('Missing or invalid storytellingPoints (int required).', 400);
+    }
+    if (!message || typeof message !== 'string') {
+      throw createRouteError('Missing or invalid message (string required).', 400);
+    }
+
+    const entity = await findEntityById(sessionId, resolvedPlayerId, entityId);
+    const isPublicEntity = entity?.privacy === 'public';
+    if (!entity || (!isPublicEntity && (entity.session_id !== sessionId || !matchesOptionalPlayerId(entity.playerId, resolvedPlayerId)))) {
+      throw createRouteError('Entity not found.', 404);
+    }
+
+    let storyteller = await Storyteller.findById(storytellerId);
+    if (!storyteller) {
+      storyteller = await Storyteller.findOne(
+        applyOptionalPlayerId({ name: storytellerId, session_id: sessionId }, resolvedPlayerId)
+      );
+    }
+    if (!storyteller || storyteller.session_id !== sessionId || !matchesOptionalPlayerId(storyteller.playerId, resolvedPlayerId)) {
+      throw createRouteError('Storyteller not found.', 404);
+    }
+    storytellerDocIdForReset = storyteller._id;
+
+    const storytellerMissionPipeline = await getAiPipelineSettings('storyteller_mission');
+    const entityPipeline = await getAiPipelineSettings('entity_creation');
+    const storytellerProvider = typeof storytellerMissionPipeline?.provider === 'string'
+      ? storytellerMissionPipeline.provider
+      : 'openai';
+    const entityProvider = typeof entityPipeline?.provider === 'string' ? entityPipeline.provider : 'openai';
+    const entityPromptDoc = await getLatestPromptTemplate('entity_creation');
+    const storytellerMissionPromptDoc = await getLatestPromptTemplate('storyteller_mission');
+    const shouldMockMission = resolveMockMode(body, storytellerMissionPipeline.useMock);
+    const shouldMockSubEntities = resolveMockMode(body, entityPipeline.useMock);
+    const durationDays = Number.isFinite(Number(duration)) ? Number(duration) : undefined;
+
+    await Storyteller.findByIdAndUpdate(
+      storyteller._id,
+      { $set: { status: 'in_mission' } }
+    );
+    missionActivated = true;
+
+    let missionResult;
+    if (shouldMockMission) {
+      missionResult = {
+        outcome: 'success',
+        userText: `The mission concludes. ${storyteller.name} returns with a focused insight about ${entity.name}.`,
+        gmNote: `Lean into the sensory details of ${entity.name}; highlight a single, striking detail that hints at hidden layers.`,
+        subEntitySeed: `New sub-entities emerge around ${entity.name}: a revealing clue, a minor witness, and a tangible relic tied to the mission.`
+      };
+    } else {
+      let prompt = '';
+      if (storytellerMissionPromptDoc?.promptTemplate) {
+        prompt = renderPromptTemplateString(storytellerMissionPromptDoc.promptTemplate, {
+          storytellerName: storyteller?.name || '',
+          entityName: entity?.name || '',
+          entityType: entity?.type || entity?.ner_type || 'ENTITY',
+          entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
+          entityDescription: entity?.description || '',
+          entityLore: entity?.lore || '',
+          storytellingPoints,
+          message,
+          durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
+        });
+      } else {
+        const routeConfig = await getRouteConfig('storyteller_mission');
+        prompt = renderPrompt(routeConfig.promptTemplate, {
+          storytellerName: storyteller?.name || '',
+          entityName: entity?.name || '',
+          entityType: entity?.type || entity?.ner_type || 'ENTITY',
+          entitySubtype: entity?.subtype || entity?.ner_subtype || 'General',
+          entityDescription: entity?.description || '',
+          entityLore: entity?.lore || '',
+          storytellingPoints,
+          message,
+          durationDays: Number.isFinite(durationDays) ? `${durationDays} days` : 'unknown'
+        });
+      }
+      missionResult = await callJsonLlm({
+        prompts: [{ role: 'system', content: prompt }],
+        provider: storytellerProvider,
+        model: storytellerMissionPipeline.model || '',
+        max_tokens: 1200,
+        explicitJsonObjectFormat: true
+      });
+    }
+
+    await validatePayloadForRoute('storyteller_mission', missionResult);
+
+    const outcome = missionResult?.outcome;
+    const userText = missionResult?.userText || '';
+    const gmNote = missionResult?.gmNote || '';
+    const subEntitySeed = missionResult?.subEntitySeed || `Sub-entities tied to ${entity.name} and ${message}.`;
+
+    const subEntityResult = await textToEntityFromText({
+      sessionId,
+      playerId: resolvedPlayerId,
+      text: subEntitySeed,
+      entityCount: 3,
+      includeCards: false,
+      debug: shouldMockSubEntities,
+      llmModel: entityPipeline.model,
+      llmProvider: entityProvider,
+      entityPromptTemplate: entityPromptDoc?.promptTemplate || '',
+      mainEntityId: entity.externalId || String(entity._id),
+      isSubEntity: true
+    });
+
+    const subEntities = Array.isArray(subEntityResult?.entities) ? subEntityResult.entities : [];
+    const subEntityExternalIds = subEntities
+      .map((subEntity) => subEntity.externalId || subEntity.id)
+      .filter(Boolean)
+      .map((id) => String(id));
+    const savedSubEntities = subEntityExternalIds.length
+      ? await NarrativeEntity.find(
+        applyOptionalPlayerId(
+          {
+            session_id: sessionId,
+            externalId: { $in: subEntityExternalIds },
+            mainEntityId: entity.externalId || String(entity._id)
+          },
+          resolvedPlayerId
+        )
+      )
+      : [];
+    const updatedMissionEntity = await updateNarrativeEntityAfterStorytellerMission({
+      entity,
+      storyteller,
+      outcome: outcome || 'pending',
+      userText,
+      gmNote,
+      subEntitySeed,
+      subEntities: savedSubEntities,
+      storytellingPoints,
+      durationDays,
+      message
+    });
+    const missionRecord = {
+      entityId: entity._id,
+      entityExternalId: entity.externalId || String(entity._id),
+      playerId: resolvedPlayerId,
+      storytellingPoints,
+      message,
+      durationDays,
+      outcome: outcome || 'pending',
+      userText: userText || undefined,
+      gmNote: gmNote || undefined,
+      subEntityExternalIds: savedSubEntities.map((subEntity) => subEntity.externalId).filter(Boolean)
+    };
+
+    await Storyteller.findByIdAndUpdate(
+      storyteller._id,
+      {
+        $set: { status: 'active' },
+        $push: { missions: missionRecord }
+      },
+      { new: true }
+    );
+    missionActivated = false;
+
+    return {
+      sessionId,
+      storytellerId: storyteller._id,
+      outcome: missionRecord.outcome,
+      userText: userText || undefined,
+      gmNote: gmNote || undefined,
+      entity: updatedMissionEntity || entity,
+      subEntities: savedSubEntities,
+      characterSheet: toImmersiveRpgCharacterSheetPayload(
+        await ensureImmersiveRpgCharacterSheet({
+          sessionId,
+          playerId: resolvedPlayerId,
+          playerName: '',
+          sourceSceneBrief: null,
+          patch: buildStorytellerMissionCharacterSheetPatch({
+            entity: updatedMissionEntity || entity,
+            storyteller,
+            outcome: missionRecord.outcome,
+            userText: userText || '',
+            gmNote: gmNote || '',
+            subEntities: savedSubEntities,
+            storytellingPoints
+          })
+        })
+      ),
+      runtime: {
+        mission: {
+          pipeline: 'storyteller_mission',
+          provider: storytellerProvider,
+          model: storytellerMissionPipeline.model || '',
+          mocked: shouldMockMission
+        },
+        subEntities: {
+          pipeline: 'entity_creation',
+          provider: entityProvider,
+          model: entityPipeline.model || '',
+          mocked: shouldMockSubEntities
+        }
+      }
+    };
+  } catch (error) {
+    if (missionActivated && storytellerDocIdForReset) {
+      try {
+        await Storyteller.findByIdAndUpdate(storytellerDocIdForReset, { $set: { status: 'active' } });
+      } catch (resetError) {
+        console.error('Failed to restore storyteller status after mission error:', resetError);
+      }
+    }
+    throw error;
+  }
+}
+
 async function createOrLoadImmersiveRpgScene({
   sessionId,
   playerId,
@@ -2999,1234 +3445,102 @@ function buildImmersiveRpgEnvelope(sceneDoc, characterSheetDoc, extras = {}) {
   };
 }
 
-app.get('/api/immersive-rpg/scene', async (req, res) => {
-  try {
-    const sessionId = normalizeImmersiveRpgSessionId(req.query?.sessionId);
-    const playerId = normalizeImmersiveRpgPlayerId(req.query?.playerId);
-    const playerName = normalizeImmersiveRpgPlayerName(req.query?.playerName);
-    const { promptTemplate, routeConfig } = await resolveImmersiveRpgRuntimeConfig();
-    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
-
-    if (!sessionId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
-    }
-
-    const result = await createOrLoadImmersiveRpgScene({
-      sessionId,
-      playerId,
-      playerName,
-      promptTemplate,
-      routeConfig,
-      allowMockDependencies: Boolean(immersiveRpgPipeline?.useMock)
-    });
-
-    if (!result.sceneDoc) {
-      return res.status(200).json(buildImmersiveRpgEnvelope(null, null, {
-        sessionId,
-        ready: false,
-        currentSceneNumber: result.sceneDefinition?.number || getDefaultImmersiveRpgSceneDefinition().number,
-        currentSceneKey: result.sceneDefinition?.key || getDefaultImmersiveRpgSceneDefinition().key,
-        missingContext: result.missingContext || [],
-        mockedContext: result.mockedContext || [],
-        storage: 'mongo',
-        sourceStorage: result.messengerStorage
-      }));
-    }
-
-    return res.status(200).json(buildImmersiveRpgEnvelope(result.sceneDoc, result.characterSheetDoc, {
-      sessionId,
-      ready: true,
-      currentSceneNumber: result.sceneDefinition?.number || result.sceneDoc?.currentSceneNumber,
-      currentSceneKey: result.sceneDefinition?.key || result.sceneDoc?.currentSceneKey,
-      bootstrapped: result.bootstrapped,
-      mockedContext: result.mockedContext || [],
-      messengerReady: Boolean(result.messengerSceneBrief?.sceneEstablished),
-      storage: 'mongo',
-      sourceStorage: result.messengerStorage
-    }));
-  } catch (error) {
-    console.error('Error in GET /api/immersive-rpg/scene:', error);
-    return res.status(500).json({ message: 'Server error while loading immersive RPG scene.' });
-  }
+registerImmersiveRpgRoutes(app, {
+  normalizeImmersiveRpgSessionId,
+  normalizeImmersiveRpgPlayerId,
+  normalizeImmersiveRpgPlayerName,
+  normalizeImmersiveRpgMessengerSceneId,
+  resolveImmersiveRpgRuntimeConfig,
+  getAiPipelineSettings,
+  createOrLoadImmersiveRpgScene,
+  buildImmersiveRpgEnvelope,
+  getDefaultImmersiveRpgSceneDefinition,
+  resolveMockMode,
+  createTranscriptEntry,
+  buildMockImmersiveRpgChatResponse,
+  buildImmersiveRpgPromptMessages,
+  callJsonLlm,
+  validatePayloadForRoute,
+  IMMERSIVE_RPG_TURN_CONTRACT_KEY,
+  normalizeImmersiveRpgChatResponse,
+  buildCompiledScenePrompt,
+  ImmersiveRpgSceneSession,
+  resolveSchemaErrorMessage,
+  sendLlmAwareError,
+  simulateDicePoolRoll,
+  resolveRollOutcome,
+  getImmersiveRpgSceneDefinition,
+  resolveImmersiveRpgSceneContext,
+  ensureImmersiveRpgCharacterSheet,
+  toImmersiveRpgCharacterSheetPayload
 });
 
-app.post('/api/immersive-rpg/chat', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
-    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
-    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
-    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
-    const message = typeof body.message === 'string' ? body.message.trim() : '';
-
-    if (!sessionId || !message) {
-      return res.status(400).json({ message: 'Missing required parameters: sessionId or message.' });
-    }
-
-    const { promptTemplate, routeConfig } = await resolveImmersiveRpgRuntimeConfig();
-    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
-    const immersiveRpgProvider = typeof immersiveRpgPipeline?.provider === 'string'
-      ? immersiveRpgPipeline.provider
-      : 'openai';
-    const shouldMock = resolveMockMode(body, immersiveRpgPipeline.useMock);
-    let result = await createOrLoadImmersiveRpgScene({
-      sessionId,
-      playerId,
-      playerName,
-      messengerSceneId,
-      promptTemplate,
-      routeConfig,
-      allowMockDependencies: shouldMock
-    });
-
-    if (!result.ready || !result.sceneDoc) {
-      return res.status(409).json({
-        message: 'Immersive RPG scene is missing required persisted context.',
-        missingContext: result.missingContext || [],
-        mockedContext: result.mockedContext || []
-      });
-    }
-
-    const currentScene = result.sceneDoc;
-    const playerEntry = createTranscriptEntry({
-      role: 'pc',
-      kind: 'action',
-      text: message
-    });
-    const requestTranscript = [...(Array.isArray(currentScene.transcript) ? currentScene.transcript : []), playerEntry];
-
-    let rawResponse;
-    if (shouldMock) {
-      rawResponse = buildMockImmersiveRpgChatResponse(currentScene, message);
-    } else {
-      const promptMessages = buildImmersiveRpgPromptMessages({
-        promptTemplate,
-        routeContract: routeConfig,
-        sceneBrief: currentScene.sourceSceneBrief,
-        characterSheet: result.characterSheetDoc,
-        currentBeat: currentScene.currentBeat,
-        transcript: requestTranscript,
-        playerMessage: message
-      });
-      rawResponse = await callJsonLlm({
-        prompts: promptMessages.prompts,
-        provider: immersiveRpgProvider,
-        model: immersiveRpgPipeline.model || '',
-        max_tokens: 1400,
-        explicitJsonObjectFormat: true
-      });
-    }
-
-    if (!rawResponse || typeof rawResponse !== 'object') {
-      return res.status(502).json({
-        message: 'Immersive RPG generation failed.',
-        runtime: {
-          pipeline: 'immersive_rpg_gm',
-          provider: immersiveRpgProvider,
-          model: immersiveRpgPipeline.model || '',
-          mocked: shouldMock
-        }
-      });
-    }
-
-    await validatePayloadForRoute(IMMERSIVE_RPG_TURN_CONTRACT_KEY, rawResponse);
-    const normalizedResponse = normalizeImmersiveRpgChatResponse(rawResponse);
-    if (!normalizedResponse.gmReply) {
-      return res.status(502).json({
-        message: 'Immersive RPG generation returned an empty GM reply.',
-        runtime: {
-          pipeline: 'immersive_rpg_gm',
-          provider: immersiveRpgProvider,
-          model: immersiveRpgPipeline.model || '',
-          mocked: shouldMock
-        }
-      });
-    }
-
-    const gmEntry = createTranscriptEntry({
-      role: 'gm',
-      kind: normalizedResponse.pendingRoll ? 'roll_prompt' : 'response',
-      text: normalizedResponse.gmReply,
-      meta: {
-        beat: normalizedResponse.currentBeat,
-        pendingRoll: normalizedResponse.pendingRoll,
-        shouldPauseForChoice: normalizedResponse.shouldPauseForChoice
-      }
-    });
-
-    const nextTranscript = [...requestTranscript, gmEntry];
-    const compiledPrompt = buildCompiledScenePrompt({
-      promptTemplate,
-      routeContract: routeConfig,
-      sceneBrief: currentScene.sourceSceneBrief,
-      characterSheet: result.characterSheetDoc,
-      currentBeat: normalizedResponse.currentBeat,
-      transcript: nextTranscript
-    });
-    const nextSceneFlags = {
-      ...(currentScene.sceneFlags && typeof currentScene.sceneFlags === 'object' ? currentScene.sceneFlags : {}),
-      ...(normalizedResponse.sceneFlagsPatch && typeof normalizedResponse.sceneFlagsPatch === 'object'
-        ? normalizedResponse.sceneFlagsPatch
-        : {})
-    };
-    const nextNotes = Array.from(new Set([
-      ...(Array.isArray(currentScene.notes) ? currentScene.notes : []),
-      ...(Array.isArray(normalizedResponse.keeperNotes) ? normalizedResponse.keeperNotes : [])
-    ])).slice(-20);
-
-    const updatedScene = await ImmersiveRpgSceneSession.findOneAndUpdate(
-      { sessionId },
-      {
-        $set: {
-          currentBeat: normalizedResponse.currentBeat,
-          pendingRoll: normalizedResponse.pendingRoll,
-          notebook: normalizedResponse.notebook,
-          stageLayout: normalizedResponse.stageLayout,
-          stageModules: normalizedResponse.stageModules,
-          compiledPrompt,
-          sceneFlags: nextSceneFlags,
-          notes: nextNotes
-        },
-        $push: {
-          transcript: {
-            $each: [playerEntry, gmEntry]
-          }
-        }
-      },
-      { new: true }
-    ).lean();
-
-    return res.status(200).json(buildImmersiveRpgEnvelope(updatedScene, result.characterSheetDoc, {
-      sessionId,
-      reply: gmEntry.text,
-      pendingRoll: updatedScene.pendingRoll,
-      storage: 'mongo',
-      mocked: shouldMock,
-      runtime: {
-        pipeline: 'immersive_rpg_gm',
-        provider: immersiveRpgProvider,
-        model: immersiveRpgPipeline.model || '',
-        mocked: shouldMock
-      }
-    }));
-  } catch (error) {
-    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
-      return res.status(error.statusCode || 409).json({ message: error.message });
-    }
-    if (error.code === 'LLM_SCHEMA_VALIDATION_ERROR') {
-      return res.status(502).json({
-        message: resolveSchemaErrorMessage(error, 'Immersive RPG chat schema validation failed.')
-      });
-    }
-    console.error('Error in POST /api/immersive-rpg/chat:', error);
-    return sendLlmAwareError(res, error, 'Server error while advancing immersive RPG chat.');
-  }
+registerTypewriterRoutes(app, {
+  collectTypewriterPageImages,
+  ASSETS_ROOTS,
+  TYPEWRITER_PAGE_IMAGES_SUBDIR,
+  TYPEWRITER_ALLOWED_PAGE_IMAGE_EXTENSIONS,
+  TYPEWRITER_DEFAULT_SERVER_BACKGROUNDS,
+  pickRandomItem,
+  buildAbsoluteAssetUrl,
+  TYPEWRITER_DEFAULT_FONTS,
+  countWords,
+  clampValue,
+  getAiPipelineSettings,
+  resolveMockMode,
+  narrativeEndsWithTerm,
+  XEROFAG_CANDIDATE_TERM,
+  startTypewriterSession,
+  shouldAllowXerofagInMock,
+  getLatestPromptTemplate,
+  buildXerofagInspectionPromptMessages,
+  callJsonLlm,
+  sendLlmAwareError,
+  normalizeOptionalPlayerId,
+  firstDefinedString,
+  ensureBuiltinTypewriterKeys,
+  findTypewriterKeyForSession,
+  buildTypewriterKeyCandidateNarrative,
+  buildTypewriterKeyState,
+  NarrativeEntity,
+  shouldAllowTypewriterKeyInMock,
+  markTypewriterKeyPressed,
+  resolveTypewriterKeyVerificationPromptTemplate,
+  buildTypewriterKeyVerificationPromptMessages,
+  validatePayloadForRoute,
+  saveTypewriterSessionFragment,
+  buildTypewriterSessionPayload,
+  buildTypewriterSessionInspectPayload,
+  getTypewriterSessionFragment,
+  listTypewriterSlotStorytellers,
+  filterAssignedTypewriterStorytellers,
+  findNextAvailableTypewriterStorytellerSlot,
+  getTypewriterStorytellerThreshold,
+  TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS,
+  generateTypewriterStorytellerForSlot,
+  buildStorytellerListItem,
+  buildTypewriterStorytellerSlots,
+  listTypewriterKeysForSession,
+  findTypewriterStorytellerForIntervention,
+  acquireTypewriterStorytellerInterventionLock,
+  buildTypewriterSessionStorytellerItem,
+  toFiniteNumber,
+  buildMockStorytellerIntervention,
+  resolveStorytellerInterventionPromptTemplate,
+  buildStorytellerInterventionPromptMessages,
+  normalizeTypewriterMetadata,
+  mergeTypewriterFragment,
+  saveTypewriterEntityFromIntervention,
+  saveTypewriterKeyFromIntervention,
+  Storyteller,
+  normalizeContinuationInsights,
+  createTypewriterResponse,
+  buildMockContinuation,
+  buildTypewriterPromptMessages
 });
 
-app.post('/api/immersive-rpg/rolls', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
-    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
-    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
-    const messengerSceneId = normalizeImmersiveRpgMessengerSceneId(body.messengerSceneId);
-
-    if (!sessionId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
-    }
-
-    const { promptTemplate, routeConfig } = await resolveImmersiveRpgRuntimeConfig();
-    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
-    const result = await createOrLoadImmersiveRpgScene({
-      sessionId,
-      playerId,
-      playerName,
-      messengerSceneId,
-      promptTemplate,
-      routeConfig,
-      allowMockDependencies: Boolean(immersiveRpgPipeline?.useMock)
-    });
-
-    if (!result.ready || !result.sceneDoc) {
-      return res.status(409).json({
-        message: 'Immersive RPG scene is missing required persisted context.',
-        missingContext: result.missingContext || [],
-        mockedContext: result.mockedContext || []
-      });
-    }
-
-    const currentScene = result.sceneDoc;
-    const pendingRoll = currentScene.pendingRoll && typeof currentScene.pendingRoll === 'object'
-      ? currentScene.pendingRoll
-      : null;
-
-    const roll = simulateDicePoolRoll({
-      contextKey: typeof body.contextKey === 'string' && body.contextKey.trim()
-        ? body.contextKey.trim()
-        : pendingRoll?.contextKey,
-      skill: typeof body.skill === 'string' && body.skill.trim()
-        ? body.skill.trim()
-        : pendingRoll?.skill,
-      label: typeof body.label === 'string' && body.label.trim()
-        ? body.label.trim()
-        : pendingRoll?.label,
-      diceNotation: typeof body.diceNotation === 'string' && body.diceNotation.trim()
-        ? body.diceNotation.trim()
-        : pendingRoll?.diceNotation,
-      difficulty: typeof body.difficulty === 'string' && body.difficulty.trim()
-        ? body.difficulty.trim()
-        : pendingRoll?.difficulty,
-      successThreshold: body.successThreshold ?? pendingRoll?.successThreshold,
-      successesRequired: body.successesRequired ?? pendingRoll?.successesRequired
-    });
-
-    const resolution = resolveRollOutcome(currentScene, roll);
-    const gmEntry = createTranscriptEntry({
-      role: 'gm',
-      kind: 'resolution',
-      text: resolution.gmText,
-      meta: {
-        beat: resolution.nextBeat,
-        resolvedRollId: roll.rollId,
-        contextKey: roll.contextKey
-      }
-    });
-
-    const nextTranscript = [...(Array.isArray(currentScene.transcript) ? currentScene.transcript : []), gmEntry];
-    const nextSceneFlags = {
-      ...(currentScene.sceneFlags && typeof currentScene.sceneFlags === 'object' ? currentScene.sceneFlags : {}),
-      ...(resolution.sceneFlags && typeof resolution.sceneFlags === 'object' ? resolution.sceneFlags : {})
-    };
-    const compiledPrompt = buildCompiledScenePrompt({
-      promptTemplate,
-      routeContract: routeConfig,
-      sceneBrief: currentScene.sourceSceneBrief,
-      characterSheet: result.characterSheetDoc,
-      currentBeat: resolution.nextBeat,
-      transcript: nextTranscript
-    });
-
-    const updatedScene = await ImmersiveRpgSceneSession.findOneAndUpdate(
-      { sessionId },
-      {
-        $set: {
-          currentBeat: resolution.nextBeat,
-          pendingRoll: null,
-          notebook: resolution.notebook,
-          stageLayout: resolution.stageLayout,
-          stageModules: resolution.stageModules,
-          sceneFlags: nextSceneFlags,
-          compiledPrompt
-        },
-        $push: {
-          rollLog: {
-            ...roll,
-            meta: {
-              source: pendingRoll ? 'scene_pending_roll' : 'manual'
-            }
-          },
-          transcript: gmEntry
-        }
-      },
-      { new: true }
-    ).lean();
-
-    return res.status(200).json(buildImmersiveRpgEnvelope(updatedScene, result.characterSheetDoc, {
-      sessionId,
-      roll,
-      resolution: {
-        currentBeat: resolution.nextBeat,
-        message: gmEntry.text
-      },
-      storage: 'mongo'
-    }));
-  } catch (error) {
-    if (error.code === 'IMMERSIVE_RPG_MESSENGER_BRIEF_REQUIRED') {
-      return res.status(error.statusCode || 409).json({ message: error.message });
-    }
-    if (error.code === 'INVALID_DICE_NOTATION') {
-      return res.status(400).json({ message: error.message });
-    }
-    console.error('Error in POST /api/immersive-rpg/rolls:', error);
-    return res.status(500).json({ message: 'Server error while resolving immersive RPG roll.' });
-  }
-});
-
-app.get('/api/immersive-rpg/character-sheet', async (req, res) => {
-  try {
-    const sessionId = normalizeImmersiveRpgSessionId(req.query?.sessionId);
-    const playerId = normalizeImmersiveRpgPlayerId(req.query?.playerId);
-    const playerName = normalizeImmersiveRpgPlayerName(req.query?.playerName);
-
-    if (!sessionId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
-    }
-
-    const sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
-    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
-    const sceneDefinition = getImmersiveRpgSceneDefinition(
-      sceneDoc?.currentSceneNumber || sceneDoc?.currentSceneKey || null
-    );
-    const resolvedContext = await resolveImmersiveRpgSceneContext({
-      sessionId,
-      playerId,
-      playerName,
-      sceneDefinition,
-      allowMockDependencies: Boolean(immersiveRpgPipeline?.useMock)
-    });
-    const sourceSceneBrief = sceneDoc?.sourceSceneBrief || resolvedContext.context.messenger_scene_brief || {};
-    const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
-      sessionId,
-      playerId,
-      playerName,
-      sourceSceneBrief
-    });
-
-    return res.status(200).json({
-      sessionId,
-      playerId: characterSheetDoc.playerId,
-      characterSheet: toImmersiveRpgCharacterSheetPayload(characterSheetDoc)
-    });
-  } catch (error) {
-    console.error('Error in GET /api/immersive-rpg/character-sheet:', error);
-    return res.status(500).json({ message: 'Server error while loading immersive RPG character sheet.' });
-  }
-});
-
-app.put('/api/immersive-rpg/character-sheet', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const sessionId = normalizeImmersiveRpgSessionId(body.sessionId);
-    const playerId = normalizeImmersiveRpgPlayerId(body.playerId);
-    const playerName = normalizeImmersiveRpgPlayerName(body.playerName);
-
-    if (!sessionId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
-    }
-
-    const sceneDoc = await ImmersiveRpgSceneSession.findOne({ sessionId }).lean();
-    const immersiveRpgPipeline = await getAiPipelineSettings('immersive_rpg_gm');
-    const sceneDefinition = getImmersiveRpgSceneDefinition(
-      sceneDoc?.currentSceneNumber || sceneDoc?.currentSceneKey || null
-    );
-    const resolvedContext = await resolveImmersiveRpgSceneContext({
-      sessionId,
-      playerId,
-      playerName,
-      sceneDefinition,
-      allowMockDependencies: Boolean(immersiveRpgPipeline?.useMock)
-    });
-    const sourceSceneBrief = sceneDoc?.sourceSceneBrief || resolvedContext.context.messenger_scene_brief || {};
-    const characterSheetDoc = await ensureImmersiveRpgCharacterSheet({
-      sessionId,
-      playerId,
-      playerName,
-      sourceSceneBrief,
-      patch: body
-    });
-
-    if (sceneDoc) {
-      const { promptTemplate, routeConfig } = await resolveImmersiveRpgRuntimeConfig();
-      await ImmersiveRpgSceneSession.updateOne(
-        { sessionId },
-        {
-          $set: {
-            compiledPrompt: buildCompiledScenePrompt({
-              promptTemplate,
-              routeContract: routeConfig,
-              sceneBrief: sceneDoc.sourceSceneBrief,
-              characterSheet: characterSheetDoc,
-              currentBeat: sceneDoc.currentBeat,
-              transcript: sceneDoc.transcript
-            })
-          }
-        }
-      );
-    }
-
-    return res.status(200).json({
-      sessionId,
-      playerId: characterSheetDoc.playerId,
-      characterSheet: toImmersiveRpgCharacterSheetPayload(characterSheetDoc)
-    });
-  } catch (error) {
-    console.error('Error in PUT /api/immersive-rpg/character-sheet:', error);
-    return res.status(500).json({ message: 'Server error while saving immersive RPG character sheet.' });
-  }
-});
-
-app.post('/api/next_film_image', async (req, res) => {
-  try {
-    const { sessionId } = req.body || {};
-    if (!sessionId) {
-      return res.status(400).json({ error: 'Missing sessionId' });
-    }
-
-    const discoveredBackgrounds = collectTypewriterPageImages(
-      ASSETS_ROOTS,
-      TYPEWRITER_PAGE_IMAGES_SUBDIR,
-      TYPEWRITER_ALLOWED_PAGE_IMAGE_EXTENSIONS
-    );
-    const availableBackgrounds = discoveredBackgrounds.length
-      ? discoveredBackgrounds
-      : TYPEWRITER_DEFAULT_SERVER_BACKGROUNDS;
-    const backgroundPath = pickRandomItem(availableBackgrounds) || availableBackgrounds[0];
-    const backgroundUrl = buildAbsoluteAssetUrl(req, backgroundPath);
-    if (!backgroundUrl) {
-      return res.status(500).json({ error: 'No typewriter page image available' });
-    }
-
-    const fontStyle = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
-    return res.status(200).json({ image_url: backgroundUrl, image_path: backgroundPath, ...fontStyle });
-  } catch (error) {
-    console.error('Error in /api/next_film_image:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-app.post('/api/shouldGenerateContinuation', async (req, res) => {
-  try {
-    const goldenRatio = 1.61;
-    const minWords = 3;
-    const { currentText, latestAddition, latestPauseSeconds, lastGhostwriterWordCount } = req.body || {};
-
-    if (!currentText || !latestAddition || typeof latestPauseSeconds !== 'number') {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const wordCount = countWords(latestAddition);
-    const goldenThreshold = Math.max(minWords, Math.floor((lastGhostwriterWordCount || 1) / goldenRatio));
-    if (wordCount < goldenThreshold) {
-      return res.status(200).json({ shouldGenerate: false });
-    }
-
-    const totalLength = countWords(currentText);
-    const additionChars = String(latestAddition || '').trim().length;
-
-    const hardMinimumPauseSeconds = 4.2;
-    if (latestPauseSeconds < hardMinimumPauseSeconds) {
-      return res.status(200).json({ shouldGenerate: false });
-    }
-
-    // Keep continuation from interrupting likely writing sprees.
-    if (wordCount >= 8 && latestPauseSeconds < 6.8) {
-      return res.status(200).json({ shouldGenerate: false });
-    }
-    if (wordCount >= 14 && latestPauseSeconds < 8.6) {
-      return res.status(200).json({ shouldGenerate: false });
-    }
-
-    const basePause = 5.4;
-    const narrativeFactor = clampValue(totalLength * 0.018, 0, 3.5);
-    const additionFactor = clampValue(wordCount * 0.11, 0, 2.2);
-    const densityFactor = clampValue(additionChars / 120, 0, 1.2);
-    const requiredPause = basePause + narrativeFactor + additionFactor + densityFactor;
-
-    return res.status(200).json({ shouldGenerate: latestPauseSeconds >= requiredPause });
-  } catch (error) {
-    console.error('Error in /api/shouldGenerateContinuation:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-app.post('/api/shouldAllowXerofag', async (req, res) => {
-  try {
-    const { sessionId, currentNarrative, candidateNarrative } = req.body || {};
-    if (!sessionId || typeof currentNarrative !== 'string') {
-      return res.status(400).json({ error: 'Missing sessionId or currentNarrative' });
-    }
-
-    const inspectionPipeline = await getAiPipelineSettings('xerofag_inspection');
-    const inspectionProvider = typeof inspectionPipeline?.provider === 'string'
-      ? inspectionPipeline.provider
-      : 'openai';
-    const shouldMock = resolveMockMode(req.body, inspectionPipeline.useMock);
-
-    if (!currentNarrative.trim() || narrativeEndsWithTerm(currentNarrative, XEROFAG_CANDIDATE_TERM)) {
-      return res.status(200).json({
-        allowed: false,
-        mocked: shouldMock,
-        runtime: {
-          pipeline: 'xerofag_inspection',
-          provider: inspectionProvider,
-          model: inspectionPipeline.model || '',
-          mocked: shouldMock
-        }
-      });
-    }
-
-    await startTypewriterSession(sessionId);
-
-    if (shouldMock) {
-      return res.status(200).json({
-        allowed: shouldAllowXerofagInMock(currentNarrative),
-        mocked: true,
-        runtime: {
-          pipeline: 'xerofag_inspection',
-          provider: inspectionProvider,
-          model: inspectionPipeline.model || '',
-          mocked: true
-        }
-      });
-    }
-
-    try {
-      const inspectionPromptDoc = await getLatestPromptTemplate('xerofag_inspection');
-      const prompt = buildXerofagInspectionPromptMessages(
-        currentNarrative,
-        candidateNarrative,
-        inspectionPromptDoc?.promptTemplate || ''
-      );
-      const aiResponse = await callJsonLlm({
-        prompts: prompt,
-        provider: inspectionProvider,
-        model: inspectionPipeline.model || '',
-        max_tokens: 180,
-        explicitJsonObjectFormat: true
-      });
-
-      if (typeof aiResponse?.allowed !== 'boolean') {
-        return res.status(502).json({
-          error: 'Live Xerofag inspection did not return a valid boolean verdict.',
-          runtime: {
-            pipeline: 'xerofag_inspection',
-            provider: inspectionProvider,
-            model: inspectionPipeline.model || '',
-            mocked: false
-          }
-        });
-      }
-
-      return res.status(200).json({
-        allowed: aiResponse.allowed,
-        mocked: false,
-        runtime: {
-          pipeline: 'xerofag_inspection',
-          provider: inspectionProvider,
-          model: inspectionPipeline.model || '',
-          mocked: false
-        }
-      });
-    } catch (aiError) {
-      console.error('Error in live /api/shouldAllowXerofag call:', aiError);
-      return res.status(502).json({
-        error: 'Live Xerofag inspection failed.',
-        details: aiError?.message || 'Unknown error',
-        runtime: {
-          pipeline: 'xerofag_inspection',
-          provider: inspectionProvider,
-          model: inspectionPipeline.model || '',
-          mocked: false
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Error in /api/shouldAllowXerofag:', error);
-    return sendLlmAwareError(res, error, 'Internal Server Error', 'error');
-  }
-});
-
-app.post('/api/typewriter/keys/shouldAllow', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const { sessionId, currentNarrative, candidateNarrative } = body;
-    const resolvedPlayerId = normalizeOptionalPlayerId(body.playerId);
-    const requestedKeyId = firstDefinedString(body.keyId);
-    const requestedKeyText = firstDefinedString(body.keyText);
-
-    if (!sessionId || typeof currentNarrative !== 'string') {
-      return res.status(400).json({ error: 'Missing sessionId or currentNarrative' });
-    }
-    if (!requestedKeyId && !requestedKeyText) {
-      return res.status(400).json({ error: 'Missing keyId or keyText' });
-    }
-
-    await startTypewriterSession(sessionId);
-    await ensureBuiltinTypewriterKeys(sessionId, resolvedPlayerId);
-
-    const typewriterKey = await findTypewriterKeyForSession({
-      sessionId,
-      playerId: resolvedPlayerId,
-      keyId: requestedKeyId,
-      keyText: requestedKeyText
-    });
-
-    if (!typewriterKey) {
-      return res.status(404).json({ error: 'Typewriter key not found for this session.' });
-    }
-
-    const insertText = firstDefinedString(typewriterKey.insertText, typewriterKey.keyText);
-    const candidate = buildTypewriterKeyCandidateNarrative(currentNarrative, insertText);
-    const effectiveCandidateNarrative = firstDefinedString(candidateNarrative) || candidate.candidateNarrative;
-    const appendedText = effectiveCandidateNarrative.slice(String(currentNarrative || '').length);
-    const verificationPipeline = await getAiPipelineSettings('typewriter_key_verification');
-    const verificationProvider = typeof verificationPipeline?.provider === 'string'
-      ? verificationPipeline.provider
-      : 'openai';
-    const shouldMock = resolveMockMode(body, verificationPipeline.useMock);
-
-    if (!currentNarrative.trim() || narrativeEndsWithTerm(currentNarrative, insertText)) {
-      return res.status(200).json({
-        allowed: false,
-        appendedText,
-        candidateNarrative: effectiveCandidateNarrative,
-        key: buildTypewriterKeyState(typewriterKey),
-        mocked: shouldMock,
-        runtime: {
-          pipeline: 'typewriter_key_verification',
-          provider: verificationProvider,
-          model: verificationPipeline.model || '',
-          mocked: shouldMock
-        }
-      });
-    }
-
-    const linkedEntity = typewriterKey.entityId
-      ? await NarrativeEntity.findById(typewriterKey.entityId).lean()
-      : null;
-
-    if (shouldMock) {
-      const allowed = shouldAllowTypewriterKeyInMock(typewriterKey, currentNarrative);
-      if (allowed) {
-        await markTypewriterKeyPressed(typewriterKey?._id ? String(typewriterKey._id) : '');
-      }
-      return res.status(200).json({
-        allowed,
-        appendedText,
-        candidateNarrative: effectiveCandidateNarrative,
-        key: buildTypewriterKeyState(typewriterKey),
-        mocked: true,
-        runtime: {
-          pipeline: 'typewriter_key_verification',
-          provider: verificationProvider,
-          model: verificationPipeline.model || '',
-          mocked: true
-        }
-      });
-    }
-
-    try {
-      const promptTemplate = await resolveTypewriterKeyVerificationPromptTemplate();
-      const aiResponse = await callJsonLlm({
-        prompts: buildTypewriterKeyVerificationPromptMessages(
-          typewriterKey,
-          linkedEntity,
-          currentNarrative,
-          effectiveCandidateNarrative,
-          promptTemplate
-        ),
-        provider: verificationProvider,
-        model: verificationPipeline.model || '',
-        max_tokens: 220,
-        explicitJsonObjectFormat: true
-      });
-
-      await validatePayloadForRoute('typewriter_key_verification', aiResponse);
-      const allowed = Boolean(aiResponse.allowed);
-      if (allowed) {
-        await markTypewriterKeyPressed(typewriterKey?._id ? String(typewriterKey._id) : '');
-      }
-
-      return res.status(200).json({
-        allowed,
-        appendedText,
-        candidateNarrative: effectiveCandidateNarrative,
-        reason: firstDefinedString(aiResponse.reason),
-        key: buildTypewriterKeyState(typewriterKey),
-        mocked: false,
-        runtime: {
-          pipeline: 'typewriter_key_verification',
-          provider: verificationProvider,
-          model: verificationPipeline.model || '',
-          mocked: false
-        }
-      });
-    } catch (aiError) {
-      console.error('Error in live /api/typewriter/keys/shouldAllow call:', aiError);
-      return res.status(502).json({
-        error: 'Live typewriter key verification failed.',
-        details: aiError?.message || 'Unknown error',
-        key: buildTypewriterKeyState(typewriterKey),
-        runtime: {
-          pipeline: 'typewriter_key_verification',
-          provider: verificationProvider,
-          model: verificationPipeline.model || '',
-          mocked: false
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Error in /api/typewriter/keys/shouldAllow:', error);
-    return sendLlmAwareError(res, error, 'Internal Server Error', 'error');
-  }
-});
-
-app.post('/api/typewriter/session/start', async (req, res) => {
-  try {
-    const { sessionId, fragment, playerId, setInitialFragment } = req.body || {};
-    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
-    const session = await startTypewriterSession(sessionId);
-    await ensureBuiltinTypewriterKeys(session.sessionId, resolvedPlayerId);
-    if (typeof fragment === 'string') {
-      const seededSession = await saveTypewriterSessionFragment(session.sessionId, fragment, {
-        updateInitialFragment: Boolean(setInitialFragment)
-      });
-      return res.status(200).json(
-        await buildTypewriterSessionPayload(
-          session.sessionId,
-          seededSession.fragment,
-          seededSession.initialFragment,
-          resolvedPlayerId
-        )
-      );
-    }
-    return res.status(200).json(
-      await buildTypewriterSessionPayload(
-        session.sessionId,
-        session.fragment,
-        session.initialFragment,
-        resolvedPlayerId
-      )
-    );
-  } catch (error) {
-    console.error('Error in /api/typewriter/session/start:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-app.get('/api/typewriter/session/inspect', async (req, res) => {
-  try {
-    const sessionId = firstDefinedString(req.query?.sessionId);
-    const resolvedPlayerId = normalizeOptionalPlayerId(req.query?.playerId);
-
-    if (!sessionId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
-    }
-
-    const payload = await buildTypewriterSessionInspectPayload(sessionId, resolvedPlayerId);
-    if (!payload) {
-      return res.status(404).json({ message: 'Typewriter session not found.' });
-    }
-
-    return res.status(200).json(payload);
-  } catch (error) {
-    console.error('Error in GET /api/typewriter/session/inspect:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const { sessionId, playerId } = body;
-    const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
-
-    if (!sessionId) {
-      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
-    }
-
-    await startTypewriterSession(sessionId);
-    await ensureBuiltinTypewriterKeys(sessionId, resolvedPlayerId);
-    const fragmentText = await getTypewriterSessionFragment(sessionId);
-    const narrativeWordCount = countWords(fragmentText);
-    const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
-    const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
-    const shouldMockStorytellers = resolveMockMode(body, storytellerPipeline.useMock);
-    const shouldMockIllustrations = resolveMockMode(body, illustrationPipeline.useMock);
-    const allowMockSlots = shouldMockStorytellers || shouldMockIllustrations;
-    const assignedStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
-    const effectiveAssignedStorytellers = filterAssignedTypewriterStorytellers(assignedStorytellers, {
-      allowMockSlots
-    });
-    const nextAvailableSlot = findNextAvailableTypewriterStorytellerSlot(effectiveAssignedStorytellers);
-    const currentAssignedCount = effectiveAssignedStorytellers.length;
-    const currentThreshold = getTypewriterStorytellerThreshold(currentAssignedCount);
-    const shouldCreate = Boolean(nextAvailableSlot && currentThreshold !== null && narrativeWordCount >= currentThreshold);
-
-    let createdStoryteller = null;
-    if (shouldCreate && nextAvailableSlot) {
-      createdStoryteller = await generateTypewriterStorytellerForSlot({
-        sessionId,
-        playerId: resolvedPlayerId,
-        fragmentText,
-        slotDefinition: nextAvailableSlot,
-        req,
-        body
-      });
-    }
-
-    const storytellers = createdStoryteller
-      ? await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId)
-      : effectiveAssignedStorytellers;
-    const visibleStorytellers = filterAssignedTypewriterStorytellers(storytellers, { allowMockSlots });
-    const filledCount = visibleStorytellers.length;
-    const nextThreshold = getTypewriterStorytellerThreshold(filledCount);
-
-    return res.status(200).json({
-      sessionId,
-      narrativeWordCount,
-      checkIntervalWords: TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS,
-      shouldCreate,
-      created: Boolean(createdStoryteller),
-      createdStoryteller: createdStoryteller ? buildStorytellerListItem(createdStoryteller) : null,
-      assignedStorytellerCount: filledCount,
-      nextThreshold,
-      slots: buildTypewriterStorytellerSlots(visibleStorytellers, fragmentText.length),
-      typewriterKeys: (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState),
-      entityKeys: (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState)
-    });
-  } catch (error) {
-    console.error('Error in /api/shouldCreateStorytellerKey:', error);
-    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-    return res.status(statusCode).json({
-      message: statusCode === 500 ? 'Server error during storyteller key creation check.' : error.message
-    });
-  }
-});
-
-app.post('/api/send_storyteller_typewriter_text', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const { sessionId, storytellerId } = body;
-    const slotIndexRaw = Number(body.slotIndex);
-    const slotIndex = Number.isInteger(slotIndexRaw) ? slotIndexRaw : null;
-    const resolvedPlayerId = normalizeOptionalPlayerId(body.playerId);
-
-    if (!sessionId || (!storytellerId && slotIndex === null)) {
-      return res.status(400).json({ error: 'Missing sessionId and storytellerId or slotIndex.' });
-    }
-
-    await startTypewriterSession(sessionId);
-    await ensureBuiltinTypewriterKeys(sessionId, resolvedPlayerId);
-    const fragmentText = await getTypewriterSessionFragment(sessionId);
-    const storyteller = await findTypewriterStorytellerForIntervention(
-      sessionId,
-      storytellerId,
-      slotIndex,
-      resolvedPlayerId
-    );
-
-    if (!storyteller) {
-      return res.status(404).json({ error: 'Storyteller not found for this session.' });
-    }
-
-    const currentFragmentLength = fragmentText.length;
-    let storytellerLockHeld = false;
-    const lockedStoryteller = await acquireTypewriterStorytellerInterventionLock(
-      storyteller._id,
-      currentFragmentLength
-    );
-
-    if (!lockedStoryteller) {
-      const visibleStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
-      return res.status(409).json({
-        error: 'Storyteller press is not allowed yet.',
-        code: 'STORYTELLER_PRESS_NOT_ALLOWED',
-        sessionId,
-        currentFragmentLength,
-        slots: buildTypewriterStorytellerSlots(visibleStorytellers, currentFragmentLength),
-        storyteller: buildTypewriterSessionStorytellerItem(storyteller)
-      });
-    }
-
-    storytellerLockHeld = true;
-    const interventionPipeline = await getAiPipelineSettings('storyteller_intervention');
-    const interventionProvider = typeof interventionPipeline?.provider === 'string'
-      ? interventionPipeline.provider
-      : 'openai';
-    const shouldMock = resolveMockMode(body, interventionPipeline.useMock);
-    const requestedFadeTimingScale = toFiniteNumber(body?.fadeTimingScale);
-
-    try {
-      let interventionResponse;
-      if (shouldMock) {
-        interventionResponse = buildMockStorytellerIntervention(lockedStoryteller, fragmentText);
-      } else {
-        const promptTemplate = await resolveStorytellerInterventionPromptTemplate();
-        interventionResponse = await callJsonLlm({
-          prompts: buildStorytellerInterventionPromptMessages(lockedStoryteller, fragmentText, promptTemplate),
-          provider: interventionProvider,
-          model: interventionPipeline.model || '',
-          max_tokens: 1800,
-          explicitJsonObjectFormat: true
-        });
-      }
-
-      const continuation = firstDefinedString(interventionResponse?.continuation);
-      if (!continuation) {
-        return res.status(502).json({
-          error: 'Storyteller intervention did not return valid continuation text.',
-          runtime: {
-            pipeline: 'storyteller_intervention',
-            provider: interventionProvider,
-            model: interventionPipeline.model || '',
-            mocked: shouldMock
-          }
-        });
-      }
-
-      const rawEntity = interventionResponse?.entity && typeof interventionResponse.entity === 'object'
-        ? interventionResponse.entity
-        : null;
-      if (!rawEntity || !firstDefinedString(rawEntity.name, rawEntity.key_text)) {
-        return res.status(502).json({
-          error: 'Storyteller intervention did not return a valid entity.',
-          runtime: {
-            pipeline: 'storyteller_intervention',
-            provider: interventionProvider,
-            model: interventionPipeline.model || '',
-            mocked: shouldMock
-          }
-        });
-      }
-
-      const metadata = normalizeTypewriterMetadata(interventionResponse?.style)
-        || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
-        || TYPEWRITER_DEFAULT_FONTS[0];
-      const nextFragment = mergeTypewriterFragment(fragmentText, continuation);
-      const savedEntity = await saveTypewriterEntityFromIntervention({
-        sessionId,
-        playerId: resolvedPlayerId,
-        storyteller: lockedStoryteller,
-        entity: rawEntity
-      });
-      const savedTypewriterKey = await saveTypewriterKeyFromIntervention({
-        sessionId,
-        playerId: resolvedPlayerId,
-        storyteller: lockedStoryteller,
-        entity: savedEntity,
-        keyText: rawEntity?.key_text,
-        insertText: rawEntity?.insert_text
-      });
-
-      await saveTypewriterSessionFragment(sessionId, nextFragment);
-
-      const updatedStoryteller = await Storyteller.findOneAndUpdate(
-        { _id: lockedStoryteller._id },
-        {
-          $set: {
-            introducedInTypewriter: true,
-            lastTypewriterInterventionAt: new Date(),
-            lastTypewriterPressAt: new Date(),
-            lastTypewriterPressFragmentLength: nextFragment.length,
-            typewriterInterventionInFlight: false
-          },
-          $inc: {
-            typewriterInterventionsCount: 1
-          }
-        },
-        { new: true }
-      );
-      storytellerLockHeld = false;
-
-      const sessionTypewriterKeys = (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState);
-      const sessionStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
-      const sessionSlots = buildTypewriterStorytellerSlots(sessionStorytellers, nextFragment.length);
-
-      const continuationInsights = normalizeContinuationInsights(
-        {
-          meaning: [
-            `${firstDefinedString(updatedStoryteller?.name, lockedStoryteller?.name)} briefly entered the narrative.`
-          ],
-          contextual_strengthening: `The intervention surfaced ${firstDefinedString(savedEntity?.name)} as a fresh point of interest in the scene.`,
-          entities: [
-            {
-              entity_name: firstDefinedString(savedEntity?.name),
-              ner_category: firstDefinedString(savedEntity?.type),
-              ascope_pmesii: firstDefinedString(savedEntity?.subtype),
-              reuse: false
-            }
-          ],
-          style: metadata
-        },
-        continuation,
-        metadata
-      );
-
-      return res.status(200).json({
-        ...createTypewriterResponse(continuation, metadata, null, {
-          narrativeWordCount: countWords(fragmentText),
-          fadeTimingScale: requestedFadeTimingScale
-        }),
-        continuation_insights: continuationInsights,
-        sessionId,
-        fragment: nextFragment,
-        mocked: shouldMock,
-        storyteller: buildStorytellerListItem(updatedStoryteller || lockedStoryteller),
-        slots: sessionSlots,
-        typewriterKey: buildTypewriterKeyState(savedTypewriterKey),
-        typewriterKeys: sessionTypewriterKeys,
-        entityKey: buildTypewriterKeyState(savedTypewriterKey),
-        entityKeys: sessionTypewriterKeys,
-        runtime: {
-          pipeline: 'storyteller_intervention',
-          provider: interventionProvider,
-          model: interventionPipeline.model || '',
-          mocked: shouldMock
-        }
-      });
-    } finally {
-      if (storytellerLockHeld) {
-        await Storyteller.findOneAndUpdate(
-          { _id: lockedStoryteller._id },
-          { $set: { typewriterInterventionInFlight: false } }
-        );
-      }
-    }
-  } catch (error) {
-    console.error('Error in /api/send_storyteller_typewriter_text:', error);
-    return sendLlmAwareError(res, error, 'Internal Server Error', 'error');
-  }
-});
-
-app.post('/api/send_typewriter_text', async (req, res) => {
-  try {
-    const { sessionId, message } = req.body || {};
-    if (!sessionId || typeof message !== 'string' || !message.trim()) {
-      return res.status(400).json({ error: 'Missing sessionId or message' });
-    }
-    const requestedFadeTimingScale = toFiniteNumber(req.body?.fadeTimingScale);
-
-    await startTypewriterSession(sessionId);
-
-    const continuationPipeline = await getAiPipelineSettings('story_continuation');
-    const continuationProvider = typeof continuationPipeline?.provider === 'string'
-      ? continuationPipeline.provider
-      : 'openai';
-    const shouldMock = resolveMockMode(req.body, continuationPipeline.useMock);
-    if (shouldMock) {
-      const mockMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
-      const continuation = buildMockContinuation(message);
-      const nextFragment = mergeTypewriterFragment(message, continuation);
-      const narrativeWordCount = countWords(message);
-      const continuationInsights = normalizeContinuationInsights({}, continuation, mockMetadata);
-      await saveTypewriterSessionFragment(sessionId, nextFragment);
-      return res.status(200).json({
-        ...createTypewriterResponse(continuation, mockMetadata, null, {
-          narrativeWordCount,
-          fadeTimingScale: requestedFadeTimingScale
-        }),
-        continuation_insights: continuationInsights,
-        sessionId,
-        fragment: nextFragment,
-        mocked: true,
-        runtime: {
-          pipeline: 'story_continuation',
-          provider: continuationProvider,
-          model: continuationPipeline.model || '',
-          mocked: true
-        }
-      });
-    }
-
-    try {
-      const continuationPromptDoc = await getLatestPromptTemplate('story_continuation');
-      const prompt = buildTypewriterPromptMessages(message, continuationPromptDoc?.promptTemplate || '');
-      const aiResponse = await callJsonLlm({
-        prompts: prompt,
-        provider: continuationProvider,
-        model: continuationPipeline.model || '',
-        max_tokens: 2500,
-        explicitJsonObjectFormat: true
-      });
-      const continuation = typeof aiResponse?.continuation === 'string' && aiResponse.continuation.trim()
-        ? aiResponse.continuation.trim()
-        : '';
-      if (!continuation) {
-        return res.status(502).json({
-          error: 'Live typewriter continuation did not return valid content.',
-          runtime: {
-            pipeline: 'story_continuation',
-            provider: continuationProvider,
-            model: continuationPipeline.model || '',
-            mocked: false
-          }
-        });
-      }
-      const metadata = normalizeTypewriterMetadata(aiResponse?.style || aiResponse?.metadata)
-        || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
-        || TYPEWRITER_DEFAULT_FONTS[0];
-      const nextFragment = mergeTypewriterFragment(message, continuation);
-      const narrativeWordCount = countWords(message);
-      const continuationInsights = normalizeContinuationInsights(aiResponse, continuation, metadata);
-
-      await saveTypewriterSessionFragment(sessionId, nextFragment);
-
-      return res.status(200).json({
-        ...createTypewriterResponse(continuation, metadata, null, {
-          narrativeWordCount,
-          fadeTimingScale: requestedFadeTimingScale
-        }),
-        continuation_insights: continuationInsights,
-        sessionId,
-        fragment: nextFragment,
-        mocked: false,
-        runtime: {
-          pipeline: 'story_continuation',
-          provider: continuationProvider,
-          model: continuationPipeline.model || '',
-          mocked: false
-        }
-      });
-    } catch (aiError) {
-      console.error('Error in live /api/send_typewriter_text call:', aiError);
-      return res.status(502).json({
-        error: 'Live typewriter continuation failed.',
-        details: aiError?.message || 'Unknown error',
-        runtime: {
-          pipeline: 'story_continuation',
-          provider: continuationProvider,
-          model: continuationPipeline.model || '',
-          mocked: false
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Error in /api/send_typewriter_text:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-app.get('/api/openapi.json', (req, res) => {
-  return res.status(200).json(OPEN_API_SPEC);
-});
-
-app.get('/api/docs', (req, res) => {
-  const html = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Storyteller API Docs</title>
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
-    <style>
-      html, body { margin: 0; padding: 0; background: #f3f5f8; }
-      #swagger-ui { max-width: 1200px; margin: 0 auto; }
-      .topbar { background: #ffffff; border-bottom: 1px solid #d9e0ea; }
-      .swagger-ui .scheme-container { background: #ffffff; box-shadow: none; border-bottom: 1px solid #e4e8ef; }
-      .swagger-ui .opblock.opblock-post { border-color: #5c8ef3; background: rgba(92, 142, 243, 0.06); }
-      .swagger-ui .opblock.opblock-get { border-color: #35a56a; background: rgba(53, 165, 106, 0.06); }
-      .swagger-ui .opblock.opblock-put,
-      .swagger-ui .opblock.opblock-patch { border-color: #d39a2f; background: rgba(211, 154, 47, 0.06); }
-      .swagger-ui .opblock.opblock-delete { border-color: #d9534f; background: rgba(217, 83, 79, 0.06); }
-      .swagger-ui .opblock-tag { border-bottom: 1px solid #e4e8ef; }
-    </style>
-  </head>
-  <body>
-    <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-    <script>
-      window.ui = SwaggerUIBundle({
-        url: '/api/openapi.json',
-        dom_id: '#swagger-ui',
-        deepLinking: true,
-        presets: [SwaggerUIBundle.presets.apis],
-        layout: 'BaseLayout'
-      });
-    </script>
-  </body>
-</html>`;
-  return res.status(200).type('html').send(html);
+registerDocsRoutes(app, {
+  OPEN_API_SPEC
 });
 
 const MOCK_STORYTELLER = {
@@ -4307,6 +3621,43 @@ function applyOptionalPlayerId(query, playerId) {
     query.playerId = safePlayerId;
   }
   return query;
+}
+
+function buildEntityAccessQuery(sessionId, playerId) {
+  return {
+    $or: [
+      applyOptionalPlayerId({ session_id: sessionId }, playerId),
+      { privacy: 'public' }
+    ]
+  };
+}
+
+function dedupeNarrativeEntitiesForResponse(entities = []) {
+  const deduped = [];
+  const indexByKey = new Map();
+
+  for (const entity of Array.isArray(entities) ? entities : []) {
+    const externalId = firstDefinedString(entity?.externalId);
+    const key = externalId || String(entity?._id || '');
+    if (!key) {
+      deduped.push(entity);
+      continue;
+    }
+
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined) {
+      indexByKey.set(key, deduped.length);
+      deduped.push(entity);
+      continue;
+    }
+
+    const existing = deduped[existingIndex];
+    if (firstDefinedString(entity?.privacy) === 'public' && firstDefinedString(existing?.privacy) !== 'public') {
+      deduped[existingIndex] = entity;
+    }
+  }
+
+  return deduped;
 }
 
 function matchesOptionalPlayerId(actualPlayerId, expectedPlayerId) {
@@ -4562,15 +3913,23 @@ function buildTypewriterSessionEntityItem(entity) {
     name: firstDefinedString(source?.name, 'Unnamed'),
     description: firstDefinedString(source?.description),
     lore: firstDefinedString(source?.lore),
+    privacy: firstDefinedString(source?.privacy, 'session'),
     type: firstDefinedString(source?.type),
     subtype: firstDefinedString(source?.subtype),
     tags: normalizeLooseStringArray(source?.tags),
+    universalTraits: normalizeLooseStringArray(source?.universalTraits),
+    attributes: source?.attributes && typeof source.attributes === 'object' ? { ...source.attributes } : {},
+    connections: source?.connections || {},
     externalId: firstDefinedString(source?.externalId),
     worldId: firstDefinedString(source?.worldId),
     universeId: firstDefinedString(source?.universeId),
     canonicalStatus: firstDefinedString(source?.canonicalStatus),
     sourceReadingIds: Array.isArray(source?.sourceReadingIds) ? [...source.sourceReadingIds] : [],
     claimedFromCardIds: Array.isArray(source?.claimedFromCardIds) ? [...source.claimedFromCardIds] : [],
+    storytellingPointsCost: Number.isFinite(Number(source?.storytellingPointsCost)) ? Number(source.storytellingPointsCost) : null,
+    storytelling_points: Number.isFinite(Number(source?.storytelling_points)) ? Number(source.storytelling_points) : null,
+    hooks: source?.hooks || null,
+    specificity: source?.specificity || null,
     reuseCount: Number.isFinite(Number(source?.reuseCount)) ? Number(source.reuseCount) : 0,
     lastUsedAt: source?.lastUsedAt || null,
     mediaAssets: Array.isArray(source?.mediaAssets) ? [...source.mediaAssets] : [],
@@ -4627,54 +3986,32 @@ async function listTypewriterSlotStorytellers(sessionId, playerId = '') {
 
 async function listTypewriterStoryEntities(sessionId, playerId = '') {
   if (!sessionId) return [];
-  return NarrativeEntity.find(
-    applyOptionalPlayerId(
-      {
-        session_id: sessionId,
-        typewriterKeyText: { $exists: true, $ne: '' },
-        activeInTypewriter: true
-      },
-      playerId
-    )
-  )
+  const entities = await NarrativeEntity.find({
+    ...buildEntityAccessQuery(sessionId, playerId),
+    typewriterKeyText: { $exists: true, $ne: '' },
+    activeInTypewriter: true
+  })
     .sort({ createdAt: -1 })
-    .limit(8)
+    .limit(16)
     .exec();
+  return dedupeNarrativeEntitiesForResponse(entities).slice(0, 8);
 }
 
 async function ensureBuiltinTypewriterKeys(sessionId, playerId = '') {
   if (!sessionId) return [];
 
   const xerofagEntity = await upsertNarrativeEntity(
+    XEROFAG_ENTITY_PROFILE,
     {
-      session_id: sessionId,
-      sessionId,
-      playerId,
-      name: XEROFAG_CANDIDATE_TERM,
-      description: XEROFAG_LORE,
-      lore: XEROFAG_LORE,
-      type: 'creature',
-      subtype: 'undead canines',
-      tags: ['undead', 'canines', 'xerofag'],
-      externalId: XEROFAG_ENTITY_EXTERNAL_ID,
+      sessionId: PUBLIC_NARRATIVE_ENTITY_SESSION_ID,
+      playerId: '',
+      privacy: 'public',
       source: 'typewriter_builtin',
       sourceRoute: '/api/typewriter/session/start',
-      typewriterKeyText: XEROFAG_KEY_TEXT,
-      typewriterSource: 'builtin',
-      activeInTypewriter: true
-    },
-    {
-      sessionId,
-      playerId,
-      source: 'typewriter_builtin',
-      sourceRoute: '/api/typewriter/session/start',
-      lookup: applyOptionalPlayerId(
-        {
-          session_id: sessionId,
-          externalId: XEROFAG_ENTITY_EXTERNAL_ID
-        },
-        playerId
-      )
+      lookup: {
+        privacy: 'public',
+        externalId: XEROFAG_ENTITY_EXTERNAL_ID
+      }
     }
   );
 
@@ -4687,7 +4024,7 @@ async function ensureBuiltinTypewriterKeys(sessionId, playerId = '') {
       entityName: XEROFAG_CANDIDATE_TERM,
       keyText: XEROFAG_KEY_TEXT,
       insertText: XEROFAG_CANDIDATE_TERM,
-      description: XEROFAG_LORE,
+      description: XEROFAG_SUMMARY,
       sourceType: 'builtin',
       sourceRoute: '/api/shouldAllowXerofag',
       verificationKind: 'typewriter_key_verification',
@@ -8097,15 +7434,18 @@ async function findEntityById(sessionId, playerId, entityId) {
 
   const safeEntityId = String(entityId);
 
-  const byExternalId = await NarrativeEntity.findOne(
-    applyOptionalPlayerId(
-      {
-        session_id: sessionId,
-        externalId: safeEntityId
-      },
-      playerId
-    )
-  );
+  const publicByExternalId = await NarrativeEntity.findOne({
+    externalId: safeEntityId,
+    privacy: 'public'
+  });
+  if (publicByExternalId) {
+    return publicByExternalId;
+  }
+
+  const byExternalId = await NarrativeEntity.findOne({
+    ...buildEntityAccessQuery(sessionId, playerId),
+    externalId: safeEntityId
+  });
   if (byExternalId) {
     return byExternalId;
   }
@@ -8114,15 +7454,10 @@ async function findEntityById(sessionId, playerId, entityId) {
     return null;
   }
 
-  return NarrativeEntity.findOne(
-    applyOptionalPlayerId(
-      {
-        _id: safeEntityId,
-        session_id: sessionId
-      },
-      playerId
-    )
-  );
+  return NarrativeEntity.findOne({
+    ...buildEntityAccessQuery(sessionId, playerId),
+    _id: safeEntityId
+  });
 }
 
 async function upsertNarrativeEntityFromSeerClaim({
@@ -8334,7 +7669,9 @@ registerSeerRoutes(app, {
   buildSeerCardLayout,
   buildSeerOrchestratorEnvelope,
   synthesizeCharacterSheetFromSeerClaim,
-  toImmersiveRpgCharacterSheetPayload
+  toImmersiveRpgCharacterSheetPayload,
+  executeSeerCardClaimAction,
+  executeStorytellerMissionAction
 });
 
 registerSessionWorldRoutes(app, {
@@ -8359,6 +7696,8 @@ registerNarrativeRoutes(app, {
   Storyteller,
   NarrativeEntity,
   applyOptionalPlayerId,
+  buildEntityAccessQuery,
+  dedupeNarrativeEntitiesForResponse,
   matchesOptionalPlayerId,
   buildStorytellerListItem,
   parseOptionalBooleanQuery,
@@ -8392,7 +7731,8 @@ registerNarrativeRoutes(app, {
   updateNarrativeEntityAfterStorytellerMission,
   ensureImmersiveRpgCharacterSheet,
   buildStorytellerMissionCharacterSheetPatch,
-  toImmersiveRpgCharacterSheetPayload
+  toImmersiveRpgCharacterSheetPayload,
+  executeStorytellerMissionAction
 });
 
 registerArenaRoutes(app, {
