@@ -113,6 +113,11 @@ import {
   buildSeerOrchestratorEnvelope
 } from './services/seerReadingRuntimeService.js';
 import { generateSeerReadingCardDrafts } from './services/seerReadingCardGenerationService.js';
+import {
+  getPublicNarrativeEntityMockInspectionSignals,
+  getPublicNarrativeEntitySeed,
+  getPublicNarrativeEntitySessionId
+} from './services/publicNarrativeEntitySeedService.js';
 import { ensureMongoConnection } from './services/mongoConnectionService.js';
 import {
   appendStoredMessengerMessage,
@@ -420,130 +425,19 @@ const TYPEWRITER_DEFAULT_FONT_SIZE = '1.9rem';
 const TYPEWRITER_PREFERRED_FONT_SIZE_PX = 30;
 const TYPEWRITER_TEXT_KEY_TEXTURE_URL = '/textures/keys/blank_rect_horizontal_1.png';
 const TYPEWRITER_XEROFAG_KEY_IMAGE_URL = '/textures/keys/THE_XEROFAG_1.png';
-const PUBLIC_NARRATIVE_ENTITY_SESSION_ID = '__public__';
-const XEROFAG_CANDIDATE_TERM = 'The Xerofag';
-const XEROFAG_KEY_TEXT = 'THE XEROFAG';
-const XEROFAG_SUMMARY = 'A pack of eerie undead dogs trained to find storytellers and devour them.';
-const XEROFAG_LORE = [
-  'The Xerofag are a pack of eerie undead dogs. At a distance they can pass for stray dogs: dusty, bruised, limping, and worn down as if they have been running for far too long.',
-  'Closer attention reveals the truth. Some members of the pack are severely injured, with broken legs, open wounds, or exposed bone, yet they keep moving with the obedience and hunger of things that should no longer be alive.',
-  'The pack is led by a yellowish-grey dog with one missing eye, a cut tail, and scars across its body, some old and some fresh.',
-  'The Xerofag have been trained to find storytellers and devour them as a pack of undead dogs would: surrounding, exhausting, and consuming the target together.'
-].join('\n\n');
 const XEROFAG_ENTITY_EXTERNAL_ID = 'builtin:xerofag';
-const XEROFAG_ENTITY_PROFILE = Object.freeze({
-  session_id: PUBLIC_NARRATIVE_ENTITY_SESSION_ID,
-  sessionId: PUBLIC_NARRATIVE_ENTITY_SESSION_ID,
-  playerId: '',
-  name: XEROFAG_CANDIDATE_TERM,
-  description: XEROFAG_SUMMARY,
-  lore: XEROFAG_LORE,
-  privacy: 'public',
-  type: 'FAUNA',
-  subtype: 'Undead dog pack',
-  tags: ['xerofag', 'undead', 'dogs', 'canines', 'pack', 'storyteller-hunter', 'predator'],
-  universalTraits: [
-    'appears at first like a pack of stray dogs',
-    'dusty, bruised, injured, and unnaturally persistent',
-    'severe wounds do not stop the pack from moving',
-    'hunts storytellers by scent or story-signature',
-    'led by a yellowish-grey one-eyed dog'
-  ],
-  attributes: {
-    composition: 'A pack of undead dogs moving together like trained hunting animals.',
-    surfaceAppearance: 'Dusty, bruised stray dogs that look exhausted from endless running.',
-    closerInspection: 'Broken legs, exposed bones, deep wounds, and other injuries reveal that the dogs are undead.',
-    leader: {
-      description: 'A yellowish-grey dog with one missing eye, a cut tail, and scars across its body.',
-      scars: 'Some scars are old; some are fresh.'
-    },
-    purpose: 'Trained to find storytellers and devour them.',
-    huntingMethod: 'The pack surrounds, exhausts, and tears into its target together.',
-    threatLevel: 'high'
-  },
-  connections: [
-    'Storytellers',
-    'The Storytellers Society',
-    'Typewriter keys',
-    'Undead hunting packs'
-  ],
-  relevance: 'A recurring threat that can enter a narrative when the story has made room for undead canine danger.',
-  impact: 'Pressures storytellers, turns ordinary stray-dog imagery into a warning sign, and can force flight, concealment, or defensive storytelling.',
-  developmentCost: '6, 10, 15, 20',
-  storytellingPointsCost: 18,
-  storytelling_points: 14,
-  urgency: 'Immediate when detected',
-  hooks: {
-    firstHint: 'A stray pack appears dusty and badly bruised, running as if it cannot stop.',
-    reveal: 'One dog moves on a broken leg; another shows bone where flesh should cover it.',
-    leaderTell: 'The yellowish-grey leader has one missing eye, a cut tail, and fresh scars.',
-    escalation: 'The pack stops acting like strays once it catches a storyteller scent.'
-  },
-  specificity: {
-    familiarSurface: 'stray dogs',
-    hiddenTruth: 'trained undead storyteller-hunting pack',
-    leader: 'yellowish-grey one-eyed scarred dog'
-  },
-  externalId: XEROFAG_ENTITY_EXTERNAL_ID,
-  source: 'typewriter_builtin',
-  sourceRoute: '/api/typewriter/session/start',
-  typewriterKeyText: XEROFAG_KEY_TEXT,
-  typewriterSource: 'builtin',
-  activeInTypewriter: true,
-  canonicalStatus: 'canonical',
-  bankSource: {
-    sourceType: 'builtin_entity',
-    keyText: XEROFAG_KEY_TEXT
-  }
-});
-const XEROFAG_CANINE_KEYWORDS = [
-  'canine',
-  'dog',
-  'dogs',
-  'fang',
-  'fangs',
-  'hound',
-  'hounds',
-  'howl',
-  'howling',
-  'muzzle',
-  'pack',
-  'paw',
-  'paws',
-  'snout',
-  'tail',
-  'wolf',
-  'wolves'
-];
-const XEROFAG_UNDEAD_KEYWORDS = [
-  'ashen bones',
-  'bone',
-  'bones',
-  'carrion',
-  'corpse',
-  'corpses',
-  'crypt',
-  'crypts',
-  'death',
-  'ghoul',
-  'ghouls',
-  'ghost',
-  'ghosts',
-  'grave',
-  'graves',
-  'gravepit',
-  'haunted',
-  'necrotic',
-  'revenant',
-  'revenants',
-  'rot',
-  'rotting',
-  'skeletal',
-  'skeleton',
-  'undead',
-  'zombie',
-  'zombies'
-];
+const XEROFAG_ENTITY_SEED = getPublicNarrativeEntitySeed(XEROFAG_ENTITY_EXTERNAL_ID);
+if (!XEROFAG_ENTITY_SEED) {
+  throw new Error(`Missing public narrative entity seed: ${XEROFAG_ENTITY_EXTERNAL_ID}`);
+}
+const XEROFAG_INSPECTION_SIGNALS = getPublicNarrativeEntityMockInspectionSignals(XEROFAG_ENTITY_EXTERNAL_ID);
+const PUBLIC_NARRATIVE_ENTITY_SESSION_ID = getPublicNarrativeEntitySessionId();
+const XEROFAG_CANDIDATE_TERM = XEROFAG_ENTITY_SEED?.name || 'The Xerofag';
+const XEROFAG_KEY_TEXT = XEROFAG_ENTITY_SEED?.typewriterKeyText || 'THE XEROFAG';
+const XEROFAG_SUMMARY = XEROFAG_ENTITY_SEED?.description || 'A pack of eerie undead dogs trained to find storytellers and devour them.';
+const XEROFAG_LORE = XEROFAG_ENTITY_SEED?.lore || XEROFAG_SUMMARY;
+const XEROFAG_CANINE_KEYWORDS = XEROFAG_INSPECTION_SIGNALS.canine;
+const XEROFAG_UNDEAD_KEYWORDS = XEROFAG_INSPECTION_SIGNALS.undead;
 const SCENE_AUTHORING_STARTER_CONFIG = Object.freeze({
   sessionId: DEFAULT_QUEST_SESSION_ID,
   questId: DEFAULT_QUEST_ID,
@@ -4001,13 +3895,13 @@ async function ensureBuiltinTypewriterKeys(sessionId, playerId = '') {
   if (!sessionId) return [];
 
   const xerofagEntity = await upsertNarrativeEntity(
-    XEROFAG_ENTITY_PROFILE,
+    XEROFAG_ENTITY_SEED,
     {
       sessionId: PUBLIC_NARRATIVE_ENTITY_SESSION_ID,
       playerId: '',
       privacy: 'public',
-      source: 'typewriter_builtin',
-      sourceRoute: '/api/typewriter/session/start',
+      source: XEROFAG_ENTITY_SEED?.source || 'public_narrative_entity_seed',
+      sourceRoute: XEROFAG_ENTITY_SEED?.sourceRoute || 'seeds/public_narrative_entities.json',
       lookup: {
         privacy: 'public',
         externalId: XEROFAG_ENTITY_EXTERNAL_ID

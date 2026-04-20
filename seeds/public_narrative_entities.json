@@ -1,0 +1,120 @@
+{
+  "publicSessionId": "__public__",
+  "entities": [
+    {
+      "externalId": "builtin:xerofag",
+      "session_id": "__public__",
+      "sessionId": "__public__",
+      "playerId": "",
+      "name": "The Xerofag",
+      "description": "A pack of eerie undead dogs trained to find storytellers and devour them.",
+      "lore": "The Xerofag are a pack of eerie undead dogs. At a distance they can pass for stray dogs: dusty, bruised, limping, and worn down as if they have been running for far too long.\n\nCloser attention reveals the truth. Some members of the pack are severely injured, with broken legs, open wounds, or exposed bone, yet they keep moving with the obedience and hunger of things that should no longer be alive.\n\nThe pack is led by a yellowish-grey dog with one missing eye, a cut tail, and scars across its body, some old and some fresh.\n\nThe Xerofag have been trained to find storytellers and devour them as a pack of undead dogs would: surrounding, exhausting, and consuming the target together.",
+      "privacy": "public",
+      "type": "FAUNA",
+      "subtype": "Undead dog pack",
+      "tags": ["xerofag", "undead", "dogs", "canines", "pack", "storyteller-hunter", "predator"],
+      "universalTraits": [
+        "appears at first like a pack of stray dogs",
+        "dusty, bruised, injured, and unnaturally persistent",
+        "severe wounds do not stop the pack from moving",
+        "hunts storytellers by scent or story-signature",
+        "led by a yellowish-grey one-eyed dog"
+      ],
+      "attributes": {
+        "composition": "A pack of undead dogs moving together like trained hunting animals.",
+        "surfaceAppearance": "Dusty, bruised stray dogs that look exhausted from endless running.",
+        "closerInspection": "Broken legs, exposed bones, deep wounds, and other injuries reveal that the dogs are undead.",
+        "leader": {
+          "description": "A yellowish-grey dog with one missing eye, a cut tail, and scars across its body.",
+          "scars": "Some scars are old; some are fresh."
+        },
+        "purpose": "Trained to find storytellers and devour them.",
+        "huntingMethod": "The pack surrounds, exhausts, and tears into its target together.",
+        "threatLevel": "high"
+      },
+      "connections": [
+        "Storytellers",
+        "The Storytellers Society",
+        "Typewriter keys",
+        "Undead hunting packs"
+      ],
+      "relevance": "A recurring threat that can enter a narrative when the story has made room for undead canine danger.",
+      "impact": "Pressures storytellers, turns ordinary stray-dog imagery into a warning sign, and can force flight, concealment, or defensive storytelling.",
+      "developmentCost": "6, 10, 15, 20",
+      "storytellingPointsCost": 18,
+      "storytelling_points": 14,
+      "urgency": "Immediate when detected",
+      "hooks": {
+        "firstHint": "A stray pack appears dusty and badly bruised, running as if it cannot stop.",
+        "reveal": "One dog moves on a broken leg; another shows bone where flesh should cover it.",
+        "leaderTell": "The yellowish-grey leader has one missing eye, a cut tail, and fresh scars.",
+        "escalation": "The pack stops acting like strays once it catches a storyteller scent."
+      },
+      "specificity": {
+        "familiarSurface": "stray dogs",
+        "hiddenTruth": "trained undead storyteller-hunting pack",
+        "leader": "yellowish-grey one-eyed scarred dog"
+      },
+      "source": "public_narrative_entity_seed",
+      "sourceRoute": "seeds/public_narrative_entities.json",
+      "typewriterKeyText": "THE XEROFAG",
+      "typewriterSource": "builtin",
+      "activeInTypewriter": true,
+      "canonicalStatus": "canonical",
+      "bankSource": {
+        "sourceType": "builtin_entity",
+        "seedFile": "seeds/public_narrative_entities.json"
+      },
+      "mockInspectionSignals": {
+        "canine": [
+          "canine",
+          "dog",
+          "dogs",
+          "fang",
+          "fangs",
+          "hound",
+          "hounds",
+          "howl",
+          "howling",
+          "muzzle",
+          "pack",
+          "paw",
+          "paws",
+          "snout",
+          "tail",
+          "wolf",
+          "wolves"
+        ],
+        "undead": [
+          "ashen bones",
+          "bone",
+          "bones",
+          "carrion",
+          "corpse",
+          "corpses",
+          "crypt",
+          "crypts",
+          "death",
+          "ghoul",
+          "ghouls",
+          "ghost",
+          "ghosts",
+          "grave",
+          "graves",
+          "gravepit",
+          "haunted",
+          "necrotic",
+          "revenant",
+          "revenants",
+          "rot",
+          "rotting",
+          "skeletal",
+          "skeleton",
+          "undead",
+          "zombie",
+          "zombies"
+        ]
+      }
+    }
+  ]
+}
