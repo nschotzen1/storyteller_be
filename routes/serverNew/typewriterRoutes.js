@@ -52,6 +52,9 @@ export function registerTypewriterRoutes(app, deps) {
     buildMockStorytellerIntervention,
     resolveStorytellerInterventionPromptTemplate,
     buildStorytellerInterventionPromptMessages,
+    findStorytellerTaskAssignmentForRoute,
+    resolveTaskPromptText,
+    resolveTaskKnowledgeContext,
     normalizeTypewriterMetadata,
     mergeTypewriterFragment,
     saveTypewriterEntityFromIntervention,
@@ -513,9 +516,22 @@ export function registerTypewriterRoutes(app, deps) {
         slotIndex,
         resolvedPlayerId
       );
+      const taskId = firstDefinedString(body.taskId);
 
       if (!storyteller) {
         return res.status(404).json({ error: 'Storyteller not found for this session.' });
+      }
+
+      const { task, assignment: taskAssignment } = await findStorytellerTaskAssignmentForRoute({
+        sessionId,
+        storytellerId: String(storyteller._id || storytellerId || ''),
+        routePath: '/api/send_storyteller_typewriter_text',
+        explicitTaskId: taskId,
+        playerId: resolvedPlayerId
+      });
+
+      if (taskId && !task) {
+        return res.status(404).json({ error: 'Task not found for this session.' });
       }
 
       const currentFragmentLength = fragmentText.length;
@@ -544,15 +560,23 @@ export function registerTypewriterRoutes(app, deps) {
         : 'openai';
       const shouldMock = resolveMockMode(body, interventionPipeline.useMock);
       const requestedFadeTimingScale = toFiniteNumber(body?.fadeTimingScale);
+      const storytellerTask = resolveTaskPromptText(task);
+      const taskContext = await resolveTaskKnowledgeContext(task, sessionId, resolvedPlayerId);
 
       try {
         let interventionResponse;
         if (shouldMock) {
-          interventionResponse = buildMockStorytellerIntervention(lockedStoryteller, fragmentText);
+          interventionResponse = buildMockStorytellerIntervention(lockedStoryteller, fragmentText, storytellerTask);
         } else {
           const promptTemplate = await resolveStorytellerInterventionPromptTemplate();
           interventionResponse = await callJsonLlm({
-            prompts: buildStorytellerInterventionPromptMessages(lockedStoryteller, fragmentText, promptTemplate),
+            prompts: buildStorytellerInterventionPromptMessages(
+              lockedStoryteller,
+              fragmentText,
+              promptTemplate,
+              storytellerTask,
+              taskContext.knownContextText
+            ),
             provider: interventionProvider,
             model: interventionPipeline.model || '',
             max_tokens: 1800,
@@ -661,6 +685,23 @@ export function registerTypewriterRoutes(app, deps) {
           fragment: nextFragment,
           mocked: shouldMock,
           storyteller: buildStorytellerListItem(updatedStoryteller || lockedStoryteller),
+          task: task ? {
+            id: String(task._id),
+            taskId: firstDefinedString(task.taskId),
+            title: firstDefinedString(task.title),
+            brief: firstDefinedString(task.brief),
+            knownEntityIds: Array.isArray(task.knownEntityIds) ? task.knownEntityIds : [],
+            target: task.target || null
+          } : null,
+          taskContext: {
+            knownEntities: Array.isArray(taskContext?.knownEntities) ? taskContext.knownEntities : []
+          },
+          taskAssignment: taskAssignment ? {
+            id: String(taskAssignment._id),
+            status: firstDefinedString(taskAssignment.status),
+            assigneeType: firstDefinedString(taskAssignment.assigneeType),
+            assigneeId: firstDefinedString(taskAssignment.assigneeId)
+          } : null,
           slots: sessionSlots,
           typewriterKey: buildTypewriterKeyState(savedTypewriterKey),
           typewriterKeys: sessionTypewriterKeys,

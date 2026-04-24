@@ -17,6 +17,8 @@ import {
 import {
   ChatMessage,
   Storyteller,
+  Task,
+  TaskAssignment,
   SessionPlayer,
   Arena,
   SeerReading,
@@ -78,6 +80,7 @@ import { registerQuestRoutes } from './routes/serverNew/questRoutes.js';
 import { registerSeerRoutes } from './routes/serverNew/seerRoutes.js';
 import { registerSessionWorldRoutes } from './routes/serverNew/sessionWorldRoutes.js';
 import { registerNarrativeRoutes } from './routes/serverNew/narrativeRoutes.js';
+import { registerTaskRoutes } from './routes/serverNew/taskRoutes.js';
 import { registerArenaRoutes } from './routes/serverNew/arenaRoutes.js';
 import { registerBrewingRoutes } from './routes/serverNew/brewingRoutes.js';
 import { registerMessengerRoutes } from './routes/serverNew/messengerRoutes.js';
@@ -3422,6 +3425,9 @@ registerTypewriterRoutes(app, {
   buildMockStorytellerIntervention,
   resolveStorytellerInterventionPromptTemplate,
   buildStorytellerInterventionPromptMessages,
+  findStorytellerTaskAssignmentForRoute,
+  resolveTaskPromptText,
+  resolveTaskKnowledgeContext,
   normalizeTypewriterMetadata,
   mergeTypewriterFragment,
   saveTypewriterEntityFromIntervention,
@@ -3431,6 +3437,15 @@ registerTypewriterRoutes(app, {
   createTypewriterResponse,
   buildMockContinuation,
   buildTypewriterPromptMessages
+});
+
+registerTaskRoutes(app, {
+  Task,
+  TaskAssignment,
+  buildTaskAccessQuery,
+  findTaskById,
+  normalizeOptionalPlayerId,
+  sendLlmAwareError
 });
 
 registerDocsRoutes(app, {
@@ -3461,6 +3476,11 @@ const MOCK_STORYTELLER = {
   level: 9,
   illustration: MOCK_STORYTELLER_ILLUSTRATION_URL
 };
+
+const OPENING_TYPEWRITER_TASK_ID = 'first-xerofag-suspicion';
+const TYPEWRITER_INTERVENTION_ROUTE_PATH = '/api/send_storyteller_typewriter_text';
+const ACTIVE_TASK_ASSIGNMENT_STATUSES = ['assigned', 'active'];
+const DEFAULT_STORYTELLER_KNOWN_CONTEXT = 'No extra private entity context is provided beyond the task itself.';
 
 // --- State Management ---
 // Map<roomId, Set<Response>> for SSE clients (still needed for push)
@@ -3526,6 +3546,34 @@ function buildEntityAccessQuery(sessionId, playerId) {
   };
 }
 
+function buildTaskAccessQuery(sessionId, playerId) {
+  const safeSessionId = firstDefinedString(sessionId);
+  const safePlayerId = normalizeOptionalPlayerId(playerId);
+  const visibilityQuery = [{ privacy: 'public' }];
+
+  if (safeSessionId) {
+    visibilityQuery.push({ privacy: 'session', sessionId: safeSessionId });
+
+    const privateTaskQuery = {
+      privacy: 'private',
+      sessionId: safeSessionId,
+      $or: safePlayerId
+        ? [
+            { playerId: safePlayerId },
+            { playerId: '' },
+            { playerId: { $exists: false } }
+          ]
+        : [
+            { playerId: '' },
+            { playerId: { $exists: false } }
+          ]
+    };
+    visibilityQuery.push(privateTaskQuery);
+  }
+
+  return visibilityQuery.length === 1 ? visibilityQuery[0] : { $or: visibilityQuery };
+}
+
 function dedupeNarrativeEntitiesForResponse(entities = []) {
   const deduped = [];
   const indexByKey = new Map();
@@ -3560,6 +3608,209 @@ function matchesOptionalPlayerId(actualPlayerId, expectedPlayerId) {
     return true;
   }
   return normalizeOptionalPlayerId(actualPlayerId) === safeExpectedPlayerId;
+}
+
+async function findTaskById(sessionId, playerId, taskId) {
+  if (!taskId) {
+    return null;
+  }
+
+  const safeTaskId = String(taskId);
+
+  const publicByTaskId = await Task.findOne({
+    taskId: safeTaskId,
+    privacy: 'public'
+  });
+  if (publicByTaskId) {
+    return publicByTaskId;
+  }
+
+  const byExternalId = await Task.findOne({
+    ...buildTaskAccessQuery(sessionId, playerId),
+    taskId: safeTaskId
+  });
+  if (byExternalId) {
+    return byExternalId;
+  }
+
+  if (!mongoose.isValidObjectId(safeTaskId)) {
+    return null;
+  }
+
+  return Task.findOne({
+    ...buildTaskAccessQuery(sessionId, playerId),
+    _id: safeTaskId
+  });
+}
+
+async function ensureOpeningTypewriterTaskAssignment(sessionId, storyteller, playerId = '') {
+  const storytellerId = firstDefinedString(storyteller?._id ? String(storyteller._id) : '', storyteller?.id);
+  if (!sessionId || !storytellerId) {
+    return null;
+  }
+
+  const task = await findTaskById(sessionId, playerId, OPENING_TYPEWRITER_TASK_ID);
+  if (!task) {
+    return null;
+  }
+
+  const existingSessionAssignment = await TaskAssignment.findOne({
+    sessionId,
+    taskId: task._id
+  }).sort({ assignedAt: 1, createdAt: 1 });
+  if (existingSessionAssignment) {
+    return existingSessionAssignment;
+  }
+
+  return TaskAssignment.create({
+    taskId: task._id,
+    sessionId,
+    assigneeType: 'storyteller',
+    assigneeId: storytellerId,
+    status: 'assigned',
+    meta: {
+      routePath: TYPEWRITER_INTERVENTION_ROUTE_PATH,
+      openingTask: true,
+      taskId: task.taskId || OPENING_TYPEWRITER_TASK_ID
+    }
+  });
+}
+
+async function findStorytellerTaskAssignmentForRoute({
+  sessionId,
+  storytellerId,
+  routePath,
+  explicitTaskId = '',
+  playerId = ''
+} = {}) {
+  const safeStorytellerId = firstDefinedString(storytellerId);
+  const safeRoutePath = firstDefinedString(routePath);
+  const safeExplicitTaskId = firstDefinedString(explicitTaskId);
+  if (!sessionId || !safeStorytellerId) {
+    return { task: null, assignment: null };
+  }
+
+  if (safeExplicitTaskId) {
+    const task = await findTaskById(sessionId, playerId, safeExplicitTaskId);
+    if (!task) {
+      return { task: null, assignment: null };
+    }
+    const assignment = await TaskAssignment.findOne({
+      sessionId,
+      assigneeType: 'storyteller',
+      assigneeId: safeStorytellerId,
+      taskId: task._id,
+      status: { $in: ACTIVE_TASK_ASSIGNMENT_STATUSES }
+    }).sort({ assignedAt: 1, createdAt: 1 });
+    if (assignment?.status === 'assigned') {
+      const activatedAssignment = await TaskAssignment.findOneAndUpdate(
+        { _id: assignment._id, status: 'assigned' },
+        { $set: { status: 'active' } },
+        { new: true }
+      );
+      return { task, assignment: activatedAssignment || assignment };
+    }
+    return { task, assignment };
+  }
+
+  const assignments = await TaskAssignment.find({
+    sessionId,
+    assigneeType: 'storyteller',
+    assigneeId: safeStorytellerId,
+    status: { $in: ACTIVE_TASK_ASSIGNMENT_STATUSES }
+  }).sort({ assignedAt: 1, createdAt: 1 });
+
+  if (!assignments.length) {
+    return { task: null, assignment: null };
+  }
+
+  const tasks = await Task.find({
+    _id: { $in: assignments.map((assignment) => assignment.taskId) },
+    'target.type': 'route',
+    'target.id': safeRoutePath
+  });
+  const taskById = new Map(tasks.map((task) => [String(task._id), task]));
+  const matchedAssignment = assignments.find((assignment) => taskById.has(String(assignment.taskId)));
+
+  if (!matchedAssignment) {
+    return { task: null, assignment: null };
+  }
+
+  const task = taskById.get(String(matchedAssignment.taskId)) || null;
+  if (matchedAssignment.status === 'assigned') {
+    const activatedAssignment = await TaskAssignment.findOneAndUpdate(
+      { _id: matchedAssignment._id, status: 'assigned' },
+      { $set: { status: 'active' } },
+      { new: true }
+    );
+    return { task, assignment: activatedAssignment || matchedAssignment };
+  }
+
+  return { task, assignment: matchedAssignment };
+}
+
+function serializeTaskKnownEntity(entity = {}) {
+  return {
+    id: firstDefinedString(entity?._id ? String(entity._id) : '', entity?.id),
+    externalId: firstDefinedString(entity?.externalId),
+    name: firstDefinedString(entity?.name),
+    description: firstDefinedString(entity?.description),
+    lore: firstDefinedString(entity?.lore),
+    type: firstDefinedString(entity?.type),
+    subtype: firstDefinedString(entity?.subtype)
+  };
+}
+
+function buildTaskKnownContextText(knownEntities = []) {
+  const serializedEntities = Array.isArray(knownEntities) ? knownEntities : [];
+  if (!serializedEntities.length) {
+    return DEFAULT_STORYTELLER_KNOWN_CONTEXT;
+  }
+
+  return serializedEntities
+    .map((entity, index) => {
+      const typeLabel = [firstDefinedString(entity?.type), firstDefinedString(entity?.subtype)]
+        .filter(Boolean)
+        .join(' / ');
+      const segments = [
+        `${index + 1}. ${firstDefinedString(entity?.name, entity?.externalId, 'Unknown entity')}`,
+        typeLabel ? `(${typeLabel})` : '',
+        firstDefinedString(entity?.description),
+        firstDefinedString(entity?.lore) ? `Lore: ${firstDefinedString(entity?.lore)}` : ''
+      ].filter(Boolean);
+      return segments.join(' ');
+    })
+    .join('\n');
+}
+
+async function resolveTaskKnowledgeContext(task = null, sessionId = '', playerId = '') {
+  const knownEntityIds = normalizeLooseStringArray(task?.knownEntityIds);
+  if (!knownEntityIds.length) {
+    return { knownEntities: [], knownContextText: DEFAULT_STORYTELLER_KNOWN_CONTEXT };
+  }
+
+  const seenIds = new Set();
+  const resolvedEntities = [];
+
+  for (const knownEntityId of knownEntityIds) {
+    const entity = await findEntityById(sessionId, playerId, knownEntityId);
+    if (!entity) {
+      continue;
+    }
+
+    const serializedEntity = serializeTaskKnownEntity(entity);
+    const dedupeKey = firstDefinedString(serializedEntity.externalId, serializedEntity.id, knownEntityId);
+    if (!dedupeKey || seenIds.has(dedupeKey)) {
+      continue;
+    }
+    seenIds.add(dedupeKey);
+    resolvedEntities.push(serializedEntity);
+  }
+
+  return {
+    knownEntities: resolvedEntities,
+    knownContextText: buildTaskKnownContextText(resolvedEntities)
+  };
 }
 
 function parseOptionalBooleanQuery(value) {
@@ -4056,7 +4307,7 @@ async function generateTypewriterStorytellerForSlot({
     payload.keyImageLocalPath = keyImageResult?.localPath || '';
   }
 
-  return Storyteller.findOneAndUpdate(
+  const savedStoryteller = await Storyteller.findOneAndUpdate(
     applyOptionalPlayerId(
       {
         session_id: sessionId,
@@ -4067,6 +4318,10 @@ async function generateTypewriterStorytellerForSlot({
     payload,
     { new: true, upsert: true, setDefaultsOnInsert: true }
   );
+
+  await ensureOpeningTypewriterTaskAssignment(sessionId, savedStoryteller, playerId);
+
+  return savedStoryteller;
 }
 
 function buildStorytellerListItem(storyteller) {
@@ -4151,6 +4406,21 @@ async function buildTypewriterSessionInspectPayload(sessionId, playerId = '') {
 }
 
 function buildStorytellerInterventionPromptPayload(storyteller, fragmentText) {
+  return buildStorytellerInterventionPromptPayloadWithTask(storyteller, fragmentText, '');
+}
+
+const DEFAULT_STORYTELLER_INTERVENTION_TASK = 'Notice what most disturbs you in the scene, reveal it through one concrete clue, and leave room for later investigation.';
+
+function resolveTaskPromptText(task = null) {
+  return firstDefinedString(task?.brief, task?.title, DEFAULT_STORYTELLER_INTERVENTION_TASK);
+}
+
+function buildStorytellerInterventionPromptPayloadWithTask(
+  storyteller,
+  fragmentText,
+  storytellerTask = '',
+  storytellerKnownContext = ''
+) {
   const typewriterKey = storyteller?.typewriter_key && typeof storyteller.typewriter_key === 'object'
     ? storyteller.typewriter_key
     : {};
@@ -4169,17 +4439,23 @@ function buildStorytellerInterventionPromptPayload(storyteller, fragmentText) {
     storyteller_influences: normalizeLooseStringArray(storyteller?.influences).join(', '),
     storyteller_known_universes: normalizeLooseStringArray(storyteller?.known_universes).join(', '),
     storyteller_already_introduced: storyteller?.introducedInTypewriter ? 'true' : 'false',
+    storyteller_task: firstDefinedString(storytellerTask, DEFAULT_STORYTELLER_INTERVENTION_TASK),
+    storyteller_known_context: firstDefinedString(storytellerKnownContext, DEFAULT_STORYTELLER_KNOWN_CONTEXT),
     fragment_text: typeof fragmentText === 'string' ? fragmentText : ''
   };
 }
 
 async function resolveStorytellerInterventionPromptTemplate() {
   const latestPrompt = await getLatestPromptTemplate('storyteller_intervention');
-  if (latestPrompt?.promptTemplate) {
+  if (
+    latestPrompt?.promptTemplate
+    && latestPrompt.promptTemplate.includes('{{storyteller_task}}')
+    && latestPrompt.promptTemplate.includes('{{storyteller_known_context}}')
+  ) {
     return latestPrompt.promptTemplate;
   }
   const currentTemplates = await getCurrentTypewriterPromptTemplates();
-  return currentTemplates?.storyteller_intervention?.promptTemplate || '';
+  return currentTemplates?.storyteller_intervention?.promptTemplate || latestPrompt?.promptTemplate || '';
 }
 
 async function resolveTypewriterKeyVerificationPromptTemplate() {
@@ -4191,8 +4467,19 @@ async function resolveTypewriterKeyVerificationPromptTemplate() {
   return currentTemplates?.typewriter_key_verification?.promptTemplate || '';
 }
 
-function buildStorytellerInterventionPromptMessages(storyteller, fragmentText, promptTemplate) {
-  const payload = buildStorytellerInterventionPromptPayload(storyteller, fragmentText);
+function buildStorytellerInterventionPromptMessages(
+  storyteller,
+  fragmentText,
+  promptTemplate,
+  storytellerTask = '',
+  storytellerKnownContext = ''
+) {
+  const payload = buildStorytellerInterventionPromptPayloadWithTask(
+    storyteller,
+    fragmentText,
+    storytellerTask,
+    storytellerKnownContext
+  );
   const renderedPrompt = renderPromptTemplateString(promptTemplate, payload);
   return [
     { role: 'system', content: renderedPrompt },
@@ -4235,7 +4522,25 @@ function pickMockStoryEntitySeed(fragmentText = '') {
   };
 }
 
-function buildMockStorytellerIntervention(storyteller, fragmentText) {
+function buildMockStorytellerIntervention(storyteller, fragmentText, storytellerTask = '') {
+  const taskText = firstDefinedString(storytellerTask).toLowerCase();
+  if (taskText.includes('xerofag')) {
+    const storytellerName = firstDefinedString(storyteller?.name) || 'The hidden storyteller';
+    return {
+      continuation: `It was then that I, ${storytellerName}, took notice. "The thumb-wide crescent of dark wax already pressed into the latch is wrong; it makes me suspect the Xerofag, though I would not swear to it yet." The Wax Clerk looked up only once, and I stepped back before the room could turn toward me.`,
+      entity: {
+        name: 'Wax Clerk',
+        key_text: 'Wax Clerk',
+        summary: 'A quiet functionary marked by dark sealing wax and a habit of appearing where doors have been tested.',
+        type: 'person',
+        subtype: 'hidden functionary',
+        lore: 'They leave small, physical disturbances before anyone can prove they were present.',
+        tags: ['wax', 'latch', 'suspicion']
+      },
+      style: pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0]
+    };
+  }
+
   const entity = pickMockStoryEntitySeed(fragmentText);
   const storytellerName = firstDefinedString(storyteller?.name) || 'The hidden storyteller';
   const entityName = firstDefinedString(entity.name);

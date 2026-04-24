@@ -565,6 +565,8 @@ export async function getCurrentTypewriterPromptTemplates() {
         'storyteller_influences',
         'storyteller_known_universes',
         'storyteller_already_introduced',
+        'storyteller_task',
+        'storyteller_known_context',
         'fragment_text'
       ]
     },

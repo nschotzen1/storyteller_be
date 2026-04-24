@@ -248,6 +248,63 @@ StorytellerSchema.index({ session_id: 1, playerId: 1, name: 1 });
 
 export const Storyteller = mongoose.model('Storyteller', StorytellerSchema);
 
+const TaskTargetSchema = new mongoose.Schema({
+  type: { type: String, required: true, index: true },
+  id: { type: String, default: '', index: true },
+  label: { type: String, default: '' }
+}, { _id: false });
+
+const TaskSchema = new mongoose.Schema({
+  taskId: { type: String, default: () => randomUUID(), required: true, index: true, unique: true },
+  title: { type: String, required: true },
+  brief: { type: String, default: '' },
+  privacy: { type: String, enum: ['public', 'session', 'private'], default: 'session', index: true },
+  sessionId: { type: String, default: '', index: true },
+  playerId: { type: String, default: '', index: true },
+  target: { type: TaskTargetSchema, required: true },
+  knownEntityIds: { type: [String], default: [] },
+  tags: { type: [String], default: [] },
+  meta: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { timestamps: true, strict: true });
+
+TaskSchema.pre('validate', function validateTaskScope(next) {
+  if (this.privacy !== 'public' && !this.sessionId) {
+    next(new Error('Task sessionId is required when privacy is session or private.'));
+    return;
+  }
+  next();
+});
+
+TaskSchema.index({ privacy: 1, sessionId: 1, createdAt: -1 });
+TaskSchema.index({ sessionId: 1, playerId: 1, createdAt: -1 });
+TaskSchema.index({ 'target.type': 1, 'target.id': 1 });
+
+export const Task = mongoose.model('Task', TaskSchema);
+
+const TaskAssignmentSchema = new mongoose.Schema({
+  taskId: { type: mongoose.Schema.Types.ObjectId, ref: 'Task', required: true, index: true },
+  sessionId: { type: String, default: '', index: true },
+  assigneeType: { type: String, required: true, default: 'storyteller', index: true },
+  assigneeId: { type: String, required: true, index: true },
+  status: {
+    type: String,
+    enum: ['assigned', 'active', 'completed', 'failed', 'canceled'],
+    default: 'assigned',
+    index: true
+  },
+  assignedAt: { type: Date, default: Date.now },
+  completedAt: { type: Date, default: null },
+  resultSummary: { type: String, default: '' },
+  gmNote: { type: String, default: '' },
+  meta: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { timestamps: true, strict: true });
+
+TaskAssignmentSchema.index({ taskId: 1, status: 1 });
+TaskAssignmentSchema.index({ assigneeType: 1, assigneeId: 1, status: 1, assignedAt: -1 });
+TaskAssignmentSchema.index({ sessionId: 1, status: 1, assignedAt: -1 });
+
+export const TaskAssignment = mongoose.model('TaskAssignment', TaskAssignmentSchema);
+
 const typewriterKeySchemaDefinition = {
   session_id: { type: String, required: true, index: true },
   sessionId: { type: String, index: true },

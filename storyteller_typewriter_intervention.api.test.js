@@ -5,6 +5,8 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 
 let app;
 let Storyteller;
+let Task;
+let TaskAssignment;
 let NarrativeFragment;
 let TypewriterKey;
 let NarrativeEntity;
@@ -27,7 +29,7 @@ beforeAll(async () => {
   const mongoUri = mongoServer.getUri();
 
   ({ app } = await import('./server_new.js'));
-  ({ Storyteller, NarrativeFragment, TypewriterKey } = await import('./models/models.js'));
+  ({ Storyteller, Task, TaskAssignment, NarrativeFragment, TypewriterKey } = await import('./models/models.js'));
   ({ NarrativeEntity } = await import('./storyteller/utils.js'));
 
   if (mongoose.connection.readyState !== 0) {
@@ -42,6 +44,12 @@ beforeAll(async () => {
 afterEach(async () => {
   if (Storyteller) {
     await Storyteller.deleteMany({});
+  }
+  if (Task) {
+    await Task.deleteMany({});
+  }
+  if (TaskAssignment) {
+    await TaskAssignment.deleteMany({});
   }
   if (NarrativeFragment) {
     await NarrativeFragment.deleteMany({});
@@ -173,6 +181,153 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
         pressLockedReason: 'growth_required'
       })
     );
+  });
+
+  test('loads a task from Mongo and applies it to the storyteller intervention route', async () => {
+    const sessionId = 'storyteller-intervention-tasked';
+
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({
+        sessionId,
+        fragment: buildNarrative(36)
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/shouldCreateStorytellerKey')
+      .send({ sessionId, mocked_api_calls: true })
+      .expect(200);
+
+    const storyteller = await Storyteller.findOne({ session_id: sessionId, keySlotIndex: 0 }).lean();
+    expect(storyteller).toBeTruthy();
+
+    const taskRes = await request(app)
+      .post('/api/tasks')
+      .send({
+        title: 'Suspect Xerofag',
+        brief: 'You suspect this scene may connect to the Xerofag. Reveal one subtle physical clue that makes you suspect them, utter the words "the Xerofag" exactly once, and show through your action or phrasing that this is only a suspicion requiring further investigation. Do not explain what the Xerofag are.',
+        privacy: 'session',
+        sessionId,
+        knownEntityIds: ['builtin:xerofag'],
+        target: {
+          type: 'route',
+          id: '/api/send_storyteller_typewriter_text',
+          label: 'Storyteller intervention'
+        }
+      })
+      .expect(201);
+
+    const interventionResponse = await request(app)
+      .post('/api/send_storyteller_typewriter_text')
+      .send({
+        sessionId,
+        storytellerId: String(storyteller._id),
+        taskId: taskRes.body.task.taskId,
+        mocked_api_calls: true
+      })
+      .expect(200);
+
+    const interventionText = interventionResponse.body?.writing_sequence?.[0]?.text || '';
+    const xerofagMentions = interventionText.match(/the Xerofag/g) || [];
+
+    expect(interventionResponse.body.task).toEqual(
+      expect.objectContaining({
+        taskId: taskRes.body.task.taskId,
+        title: 'Suspect Xerofag',
+        knownEntityIds: ['builtin:xerofag']
+      })
+    );
+    expect(interventionResponse.body.taskContext).toEqual(
+      expect.objectContaining({
+        knownEntities: expect.arrayContaining([
+          expect.objectContaining({
+            externalId: 'builtin:xerofag'
+          })
+        ])
+      })
+    );
+    expect(xerofagMentions).toHaveLength(1);
+    expect(interventionText).toContain('suspect');
+  });
+
+  test('auto-assigns the opening task to the first typewriter storyteller and resolves it on press', async () => {
+    const sessionId = 'storyteller-opening-task-assignment';
+
+    const task = await Task.create({
+      taskId: 'first-xerofag-suspicion',
+      title: 'First Xerofag Suspicion',
+      brief: 'Something in what is happening in the scene makes you suspect that the Xerofag have found their way into this world. Reveal one subtle physical clue that makes you suspect them. Utter the words "the Xerofag" exactly once. Show through your action or phrasing that this is only a suspicion requiring further investigation. Do not explain what the Xerofag are.',
+      privacy: 'public',
+      knownEntityIds: ['builtin:xerofag'],
+      target: {
+        type: 'route',
+        id: '/api/send_storyteller_typewriter_text',
+        label: 'Storyteller intervention'
+      }
+    });
+
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({
+        sessionId,
+        fragment: buildNarrative(36)
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/shouldCreateStorytellerKey')
+      .send({ sessionId, mocked_api_calls: true })
+      .expect(200);
+
+    const storyteller = await Storyteller.findOne({ session_id: sessionId, keySlotIndex: 0 }).lean();
+    expect(storyteller).toBeTruthy();
+
+    const assignment = await TaskAssignment.findOne({
+      sessionId,
+      assigneeType: 'storyteller',
+      assigneeId: String(storyteller._id)
+    }).lean();
+    expect(assignment).toEqual(
+      expect.objectContaining({
+        taskId: task._id,
+        status: 'assigned'
+      })
+    );
+
+    const interventionResponse = await request(app)
+      .post('/api/send_storyteller_typewriter_text')
+      .send({
+        sessionId,
+        storytellerId: String(storyteller._id),
+        mocked_api_calls: true
+      })
+      .expect(200);
+
+    const refreshedAssignment = await TaskAssignment.findById(assignment._id).lean();
+    expect(interventionResponse.body.task).toEqual(
+      expect.objectContaining({
+        taskId: 'first-xerofag-suspicion',
+        title: 'First Xerofag Suspicion',
+        knownEntityIds: ['builtin:xerofag']
+      })
+    );
+    expect(interventionResponse.body.taskContext).toEqual(
+      expect.objectContaining({
+        knownEntities: expect.arrayContaining([
+          expect.objectContaining({
+            externalId: 'builtin:xerofag'
+          })
+        ])
+      })
+    );
+    expect(interventionResponse.body.taskAssignment).toEqual(
+      expect.objectContaining({
+        id: String(assignment._id),
+        status: 'active'
+      })
+    );
+    expect(refreshedAssignment.status).toBe('active');
   });
 
   test('blocks repeated storyteller presses until the persisted fragment grows by more than ten percent', async () => {

@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-04-11T18:47:45.347Z",
-  "updatedBy": "immersive-rpg-test-reset",
+  "updatedAt": "2026-04-23T23:02:18.592Z",
+  "updatedBy": "story-admin-ui",
   "pipelines": {
     "story_continuation": {
       "key": "story_continuation",
