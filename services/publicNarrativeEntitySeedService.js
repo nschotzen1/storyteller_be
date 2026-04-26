@@ -11,6 +11,8 @@ const PUBLIC_NARRATIVE_ENTITY_SEED_PATH = path.join(
   'seeds',
   'public_narrative_entities.json'
 );
+const DEFAULT_PUBLIC_NARRATIVE_ENTITY_SOURCE = 'public_narrative_entity_seed';
+const DEFAULT_PUBLIC_NARRATIVE_ENTITY_SOURCE_ROUTE = 'seeds/public_narrative_entities.json';
 
 let publicNarrativeEntitySeedCache = null;
 
@@ -31,8 +33,23 @@ function normalizePublicEntitySeed(entity = {}, publicSessionId = '') {
     session_id: seed.session_id || publicSessionId,
     sessionId: seed.sessionId || publicSessionId,
     playerId: seed.playerId || '',
-    privacy: 'public'
+    privacy: 'public',
+    source: seed.source || DEFAULT_PUBLIC_NARRATIVE_ENTITY_SOURCE,
+    sourceRoute: seed.sourceRoute || DEFAULT_PUBLIC_NARRATIVE_ENTITY_SOURCE_ROUTE,
+    canonicalStatus: seed.canonicalStatus || 'canonical'
   };
+}
+
+function assertUniqueExternalIds(seeds = []) {
+  const seenExternalIds = new Set();
+  for (const seed of seeds) {
+    const externalId = typeof seed.externalId === 'string' ? seed.externalId.trim() : '';
+    if (!externalId) continue;
+    if (seenExternalIds.has(externalId)) {
+      throw new Error(`Duplicate public narrative entity externalId in seed file: ${externalId}`);
+    }
+    seenExternalIds.add(externalId);
+  }
 }
 
 export function getPublicNarrativeEntitySessionId() {
@@ -45,9 +62,11 @@ export function getPublicNarrativeEntitySessionId() {
 export function listPublicNarrativeEntitySeeds() {
   const seedFile = loadPublicNarrativeEntitySeedFile();
   const publicSessionId = getPublicNarrativeEntitySessionId();
-  return (Array.isArray(seedFile.entities) ? seedFile.entities : [])
+  const seeds = (Array.isArray(seedFile.entities) ? seedFile.entities : [])
     .map((entity) => normalizePublicEntitySeed(entity, publicSessionId))
     .filter((entity) => typeof entity.externalId === 'string' && entity.externalId.trim());
+  assertUniqueExternalIds(seeds);
+  return seeds;
 }
 
 export function getPublicNarrativeEntitySeed(externalId = '') {
