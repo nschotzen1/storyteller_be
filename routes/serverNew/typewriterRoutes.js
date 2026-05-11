@@ -36,6 +36,10 @@ export function registerTypewriterRoutes(app, deps) {
     buildTypewriterSessionPayload,
     buildTypewriterSessionInspectPayload,
     getTypewriterSessionFragment,
+    normalizeTypewriterWorldState,
+    normalizeTypewriterWorldStateUpdate,
+    buildMockTypewriterWorldStateUpdate,
+    buildTypewriterTurnRecord,
     listTypewriterSlotStorytellers,
     filterAssignedTypewriterStorytellers,
     findNextAvailableTypewriterStorytellerSlot,
@@ -387,7 +391,8 @@ export function registerTypewriterRoutes(app, deps) {
             session.sessionId,
             seededSession.fragment,
             seededSession.initialFragment,
-            resolvedPlayerId
+            resolvedPlayerId,
+            seededSession
           )
         );
       }
@@ -396,7 +401,8 @@ export function registerTypewriterRoutes(app, deps) {
           session.sessionId,
           session.fragment,
           session.initialFragment,
-          resolvedPlayerId
+          resolvedPlayerId,
+          session
         )
       );
     } catch (error) {
@@ -568,6 +574,7 @@ export function registerTypewriterRoutes(app, deps) {
         if (shouldMock) {
           interventionResponse = buildMockStorytellerIntervention(lockedStoryteller, fragmentText, storytellerTask);
         } else {
+          const continuationPromptDoc = await getLatestPromptTemplate('story_continuation');
           const promptTemplate = await resolveStorytellerInterventionPromptTemplate();
           interventionResponse = await callJsonLlm({
             prompts: buildStorytellerInterventionPromptMessages(
@@ -575,7 +582,8 @@ export function registerTypewriterRoutes(app, deps) {
               fragmentText,
               promptTemplate,
               storytellerTask,
-              taskContext.knownContextText
+              taskContext.knownContextText,
+              continuationPromptDoc?.promptTemplate || ''
             ),
             provider: interventionProvider,
             model: interventionPipeline.model || '',
@@ -730,31 +738,64 @@ export function registerTypewriterRoutes(app, deps) {
 
   app.post('/api/send_typewriter_text', async (req, res) => {
     try {
-      const { sessionId, message } = req.body || {};
+      const body = req.body || {};
+      const { sessionId, message } = body;
       if (!sessionId || typeof message !== 'string' || !message.trim()) {
         return res.status(400).json({ error: 'Missing sessionId or message' });
       }
-      const requestedFadeTimingScale = toFiniteNumber(req.body?.fadeTimingScale);
+      const requestedFadeTimingScale = toFiniteNumber(body?.fadeTimingScale);
 
-      await startTypewriterSession(sessionId);
+      const session = await startTypewriterSession(sessionId);
+      const previousWorldState = normalizeTypewriterWorldState(session?.worldState);
+      const requestWorldState = body.worldState || body.world_state;
+      const promptWorldState = requestWorldState !== undefined
+        ? normalizeTypewriterWorldState(requestWorldState)
+        : previousWorldState;
+      const userBeat = firstDefinedString(
+        body.userBeat,
+        body.user_beat,
+        body.latestAddition,
+        body.latest_addition
+      );
 
       const continuationPipeline = await getAiPipelineSettings('story_continuation');
       const continuationProvider = typeof continuationPipeline?.provider === 'string'
         ? continuationPipeline.provider
         : 'openai';
-      const shouldMock = resolveMockMode(req.body, continuationPipeline.useMock);
+      const shouldMock = resolveMockMode(body, continuationPipeline.useMock);
       if (shouldMock) {
         const mockMetadata = pickRandomItem(TYPEWRITER_DEFAULT_FONTS) || TYPEWRITER_DEFAULT_FONTS[0];
         const continuation = buildMockContinuation(message);
         const nextFragment = mergeTypewriterFragment(message, continuation);
         const narrativeWordCount = countWords(message);
         const continuationInsights = normalizeContinuationInsights({}, continuation, mockMetadata);
-        await saveTypewriterSessionFragment(sessionId, nextFragment);
+        const worldStateUpdate = buildMockTypewriterWorldStateUpdate(promptWorldState, continuation);
+        const irreversible = 'The mock continuation has been appended to the typewriter fragment.';
+        const systemPressure = 'Mocked continuation path; no live PMESII pressure was inferred.';
+        const typewriterTurn = buildTypewriterTurnRecord({
+          userBeat,
+          fullNarrative: message,
+          continuation,
+          irreversible,
+          systemPressure,
+          worldStateBefore: promptWorldState,
+          worldStateAfter: worldStateUpdate,
+          continuationInsights,
+          mocked: true
+        });
+        await saveTypewriterSessionFragment(sessionId, nextFragment, {
+          worldState: worldStateUpdate,
+          typewriterTurn
+        });
         return res.status(200).json({
           ...createTypewriterResponse(continuation, mockMetadata, null, {
             narrativeWordCount,
             fadeTimingScale: requestedFadeTimingScale
           }),
+          irreversible,
+          system_pressure: systemPressure,
+          world_state: worldStateUpdate,
+          world_state_update: worldStateUpdate,
           continuation_insights: continuationInsights,
           sessionId,
           fragment: nextFragment,
@@ -792,20 +833,47 @@ export function registerTypewriterRoutes(app, deps) {
             }
           });
         }
-        const metadata = normalizeTypewriterMetadata(aiResponse?.style || aiResponse?.metadata)
+        const rawResponseStyle = aiResponse?.style && !Array.isArray(aiResponse.style)
+          ? aiResponse.style
+          : aiResponse?.metadata;
+        const metadata = normalizeTypewriterMetadata(rawResponseStyle)
           || pickRandomItem(TYPEWRITER_DEFAULT_FONTS)
           || TYPEWRITER_DEFAULT_FONTS[0];
         const nextFragment = mergeTypewriterFragment(message, continuation);
         const narrativeWordCount = countWords(message);
         const continuationInsights = normalizeContinuationInsights(aiResponse, continuation, metadata);
+        const irreversible = firstDefinedString(aiResponse?.irreversible);
+        const systemPressure = firstDefinedString(aiResponse?.system_pressure, aiResponse?.systemPressure);
+        const worldStateUpdate = normalizeTypewriterWorldStateUpdate(
+          aiResponse?.world_state_update || aiResponse?.worldStateUpdate,
+          promptWorldState
+        );
+        const typewriterTurn = buildTypewriterTurnRecord({
+          userBeat,
+          fullNarrative: message,
+          continuation,
+          irreversible,
+          systemPressure,
+          worldStateBefore: promptWorldState,
+          worldStateAfter: worldStateUpdate,
+          continuationInsights,
+          mocked: false
+        });
 
-        await saveTypewriterSessionFragment(sessionId, nextFragment);
+        await saveTypewriterSessionFragment(sessionId, nextFragment, {
+          worldState: worldStateUpdate,
+          typewriterTurn
+        });
 
         return res.status(200).json({
           ...createTypewriterResponse(continuation, metadata, null, {
             narrativeWordCount,
             fadeTimingScale: requestedFadeTimingScale
           }),
+          irreversible,
+          system_pressure: systemPressure,
+          world_state: worldStateUpdate,
+          world_state_update: worldStateUpdate,
           continuation_insights: continuationInsights,
           sessionId,
           fragment: nextFragment,

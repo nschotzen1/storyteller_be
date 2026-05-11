@@ -4,7 +4,6 @@ import {
   savePromptTemplateVersion
 } from './typewriterPromptConfigService.js';
 import {
-  generateTypewriterPrompt,
   generate_entities_by_fragment,
   getNArchetypes
 } from '../ai/openai/promptsUtils.js';
@@ -16,7 +15,9 @@ const DEFAULT_ENTITY_COUNT = 4;
 const DEFAULT_MAX_ENTITIES = 8;
 
 function buildStoryContinuationPromptTemplate() {
-  return generateTypewriterPrompt('{{current_narrative}}')?.[0]?.content || '';
+  return `{{current_fragment}}
+
+what is the first image that comes to your mind reading this fragment? what do you see? what do you hear? I want it blurry, a glimpse. then continue the story seamlessly {{max_words}} words max and no less than {{min_words}} words. (of course the story has to feel integral, cohesive) return in JSON format: {"glimpse":"Str","style":["inspired by"],"genre":"Str","surprising":1,"grounded":1,"ascope/pmessi_awareness":1,"pivotal":1,"are_you_being_generic_on_me":1,"dare_to_name_names?":1,"specificity":1,"are_the_surroundings_clear":1,"are_you_imposing_cultural_references":1,"new_named_entities":[],"readable":1,"easy_to_follow":1,"narration_style":["First-person"],"itchy_fingers":1,"continuation":"Str","are_you_proud_of_yourself":1}`;
 }
 
 export function getDefaultXerofagInspectionPromptTemplate() {
@@ -234,11 +235,6 @@ You are:
 - Influences: {{storyteller_influences}}
 - Known universes: {{storyteller_known_universes}}
 - Already introduced in this typewriter session: {{storyteller_already_introduced}}
-
-Current narrative fragment:
-"""
-{{fragment_text}}
-"""
 
 Your role in this intervention:
 - Enter as an added observer with your own narrative voice, as if you had been nearby all along.
@@ -488,13 +484,11 @@ export async function getCurrentTypewriterPromptTemplates() {
     story_continuation: {
       pipelineKey: 'story_continuation',
       promptTemplate: buildStoryContinuationPromptTemplate(),
-      source: 'ai/openai/promptsUtils.js:generateTypewriterPrompt',
+      source: 'services/typewriterDefaultPromptSeedService.js:buildStoryContinuationPromptTemplate',
       variables: [
-        'current_narrative',
+        'current_fragment',
         'min_words',
-        'max_words',
-        'word_count',
-        'preferred_font_size_px'
+        'max_words'
       ]
     },
     xerofag_inspection: {

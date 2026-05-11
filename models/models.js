@@ -39,6 +39,9 @@ const narrativeFragmentSchema = new mongoose.Schema({
   session_id: { type: String, required: true },
   fragment: { type: mongoose.Schema.Types.Mixed, required: true },
   initialFragment: { type: mongoose.Schema.Types.Mixed, default: '' },
+  worldState: { type: mongoose.Schema.Types.Mixed, default: {} },
+  typewriterTurns: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  lastTypewriterTurn: { type: mongoose.Schema.Types.Mixed, default: null },
   turn: { type: Number },
 });
 

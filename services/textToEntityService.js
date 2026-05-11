@@ -108,11 +108,25 @@ export function buildDesiredEntityCategoryPromptVariables(rawCategories) {
 }
 
 function buildFrontPrompt(entity, texturePrompt, fragmentText) {
-  const nerType = entity.ner_type || 'ENTITY';
-  const nerSubtype = entity.ner_subtype || 'General';
-  const description = entity.description || 'No description provided.';
-  const relevance = entity.relevance || 'No narrative context provided.';
-  const connections = normalizeConnections(entity.connections);
+  const nerType = entity.ner_type || entity.type || entity.category || 'ENTITY';
+  const nerSubtype = entity.ner_subtype || entity.subtype || entity.scholar_discipline || entity.scholarDiscipline || 'General';
+  const description = entity.description
+    || entity.observed_appearance
+    || entity.observedAppearance
+    || entity.what_we_know_so_far
+    || entity.whatWeKnowSoFar
+    || entity.world_utility
+    || entity.worldUtility
+    || 'No description provided.';
+  const relevance = entity.relevance
+    || entity.world_utility
+    || entity.worldUtility
+    || entity.what_we_know_so_far
+    || entity.whatWeKnowSoFar
+    || 'No narrative context provided.';
+  const connections = normalizeConnections(entity.connections || entity.related_entities || entity.relatedEntities);
+  const observedAppearance = entity.observed_appearance || entity.observedAppearance || '';
+  const unresolvedMysteries = entity.unresolved_mysteries || entity.unresolvedMysteries || '';
   const textureLine = texturePrompt
     ? `Use the following texture as inspiration: ${texturePrompt}.`
     : `Use this fragment to set the tone: "${fragmentText}".`;
@@ -121,6 +135,8 @@ function buildFrontPrompt(entity, texturePrompt, fragmentText) {
 The entity is categorized as "${nerType}" with a subtype of "${nerSubtype}".
 The entity is described as: "${description}". Expand upon this description to craft vivid, concrete imagery for the illustration.
 Narrative context: "${relevance}". ${entity.evolution_notes ? `On closer inspection: "${entity.evolution_notes}".` : ''}
+${observedAppearance ? `Observed appearance: "${observedAppearance}".` : ''}
+${unresolvedMysteries ? `Unresolved pressure: "${unresolvedMysteries}".` : ''}
 ${connections ? `Connections to consider: "${connections}".` : ''}
 ${textureLine}
 Full-frame, cinematic quality, detailed, immersive, and cohesive. Include tasteful embellishments and flourishes that make it feel like a collector card.
@@ -134,12 +150,29 @@ function buildFrontPromptWithTemplate(entity, texturePrompt, fragmentText, promp
 
   return renderPromptTemplateString(promptTemplate, {
     entity_name: entity?.name || 'Unnamed entity',
-    ner_type: entity?.ner_type || 'ENTITY',
-    ner_subtype: entity?.ner_subtype || 'General',
-    description: entity?.description || 'No description provided.',
-    relevance: entity?.relevance || 'No narrative context provided.',
+    ner_type: entity?.ner_type || entity?.type || entity?.category || 'ENTITY',
+    ner_subtype: entity?.ner_subtype || entity?.subtype || entity?.scholar_discipline || entity?.scholarDiscipline || 'General',
+    category: entity?.category || '',
+    description: entity?.description || entity?.observed_appearance || entity?.observedAppearance || entity?.what_we_know_so_far || entity?.whatWeKnowSoFar || 'No description provided.',
+    relevance: entity?.relevance || entity?.world_utility || entity?.worldUtility || entity?.what_we_know_so_far || entity?.whatWeKnowSoFar || 'No narrative context provided.',
     evolution_notes: entity?.evolution_notes || '',
-    connections: normalizeConnections(entity?.connections),
+    connections: normalizeConnections(entity?.connections || entity?.related_entities || entity?.relatedEntities),
+    prominence_score: entity?.prominence_score || entity?.prominenceScore || '',
+    interaction_verbs: Array.isArray(entity?.interaction_verbs)
+      ? entity.interaction_verbs.join(', ')
+      : Array.isArray(entity?.interactionVerbs)
+        ? entity.interactionVerbs.join(', ')
+        : '',
+    scholar_discipline: entity?.scholar_discipline || entity?.scholarDiscipline || '',
+    what_we_know_so_far: entity?.what_we_know_so_far || entity?.whatWeKnowSoFar || '',
+    observed_appearance: entity?.observed_appearance || entity?.observedAppearance || '',
+    unresolved_mysteries: entity?.unresolved_mysteries || entity?.unresolvedMysteries || '',
+    world_utility: entity?.world_utility || entity?.worldUtility || '',
+    related_entities: Array.isArray(entity?.related_entities)
+      ? entity.related_entities.join(', ')
+      : Array.isArray(entity?.relatedEntities)
+        ? entity.relatedEntities.join(', ')
+        : '',
     texture_prompt: texturePrompt || '',
     fragmentText: fragmentText || ''
   });
@@ -334,6 +367,91 @@ function deriveMockType(kind = '') {
     default:
       return { ner_type: 'LOCATION', ner_subtype: 'Watchpoint' };
   }
+}
+
+function inferStoryMachineCategory(entity = {}) {
+  const category = typeof entity.category === 'string' ? entity.category.trim().toUpperCase() : '';
+  if (category) return category;
+
+  switch (String(entity.ner_type || entity.type || '').trim().toUpperCase()) {
+    case 'LOCATION':
+      return 'PLACE';
+    case 'PERSON':
+    case 'NPC':
+      return 'PERSON';
+    case 'ORGANIZATION':
+    case 'FACTION':
+      return 'GROUP';
+    case 'FAUNA':
+    case 'CREATURE':
+      return 'CREATURE';
+    case 'ITEM':
+      return 'ITEM';
+    case 'DEITY':
+      return 'DEITY';
+    case 'ROUTE':
+      return 'ROUTE';
+    case 'RULE':
+    case 'SKILL':
+    case 'EVENT':
+    case 'CONCEPT':
+    default:
+      return 'CUSTOM';
+  }
+}
+
+function getStoryMachineVerbs(category = '') {
+  switch (category) {
+    case 'PLACE':
+      return ['visit', 'explore', 'return to'];
+    case 'PERSON':
+      return ['meet', 'question', 'follow'];
+    case 'GROUP':
+      return ['join', 'oppose', 'fear'];
+    case 'CREATURE':
+      return ['encounter', 'evade', 'bargain with'];
+    case 'ITEM':
+      return ['carry', 'steal', 'activate'];
+    case 'DEITY':
+      return ['invoke', 'serve', 'offend'];
+    case 'ROUTE':
+      return ['travel', 'block', 'escape through'];
+    case 'CUSTOM':
+    default:
+      return ['obey', 'break', 'misunderstand'];
+  }
+}
+
+function decorateMockStoryMachineEntity(entity = {}, index = 0) {
+  const category = inferStoryMachineCategory(entity);
+  const description = entity.description || entity.summary || `${entity.name || 'This entity'} has enough texture to stand alone.`;
+  const relevance = entity.relevance || entity.impact || description;
+  const connections = normalizeConnections(entity.connections)
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return {
+    internal_quality_audit: {
+      is_it_modular: '8',
+      concrete: '8',
+      grounded: '7',
+      can_i_imagine_it_in_other_scenarios: '8',
+      do_i_dare_give_it_a_specific_name: 'Yes',
+      can_i_locate_it: category === 'PLACE' ? 'Borderlands' : 'Settled routes',
+      am_i_proud_of_this_entity: '4'
+    },
+    prominence_score: Math.max(6, 14 - index),
+    category,
+    interaction_verbs: getStoryMachineVerbs(category),
+    scholar_discipline: category === 'ITEM' ? 'Occult Materialist' : 'Socio-Economist',
+    what_we_know_so_far: relevance,
+    observed_appearance: description,
+    unresolved_mysteries: `What pressure keeps ${entity.name || 'this entity'} active beyond the first scene?`,
+    world_utility: entity.impact || relevance,
+    related_entities: connections,
+    ...entity
+  };
 }
 
 function buildSeerContextMockEntities(text = '', count = 3) {
@@ -555,7 +673,8 @@ export async function textToEntityFromText({
   const normalizedDesiredEntityCategories = normalizeDesiredEntityCategories(desiredEntityCategories);
 
   if (debug) {
-    const entities = buildMockEntities(text, safeEntityCount, normalizedDesiredEntityCategories);
+    const entities = buildMockEntities(text, safeEntityCount, normalizedDesiredEntityCategories)
+      .map((entity, index) => decorateMockStoryMachineEntity(entity, index));
     if (mainEntityId) {
       entities.forEach((entity) => {
         entity.mainEntityId = mainEntityId;

@@ -6,6 +6,7 @@ import Ajv from 'ajv';
 import { LlmRouteConfigVersion } from '../models/models.js';
 import { FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA } from '../contracts/fragmentMemoryContract.js';
 import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
+import { generate_entities_by_fragment } from '../ai/openai/promptsUtils.js';
 import { ensureMongoConnection } from './mongoConnectionService.js';
 import { getDefaultImmersiveRpgGmPromptTemplate } from './immersiveRpgService.js';
 
@@ -428,8 +429,32 @@ const SEER_CARD_GENERATION_RESPONSE_SCHEMA = {
 
 const TEXT_TO_ENTITY_ENTITY_SCHEMA = {
   type: 'object',
-  required: ['name', 'ner_type', 'description', 'relevance'],
+  required: ['name'],
   properties: {
+    internal_quality_audit: {
+      type: 'object',
+      additionalProperties: true
+    },
+    prominence_score: {
+      anyOf: [
+        { type: 'number' },
+        { type: 'string' }
+      ]
+    },
+    category: { type: 'string', minLength: 1 },
+    interaction_verbs: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    scholar_discipline: { type: 'string' },
+    what_we_know_so_far: { type: 'string' },
+    observed_appearance: { type: 'string' },
+    unresolved_mysteries: { type: 'string' },
+    world_utility: { type: 'string' },
+    related_entities: {
+      type: 'array',
+      items: { type: 'string' }
+    },
     familiarity_level: { type: 'number' },
     reusability_level: {
       anyOf: [
@@ -560,62 +585,51 @@ name, description, tags (array), traits (array), hooks (array).`,
     method: 'POST',
     description: 'Generate reusable narrative entities from a fragment.',
     promptMode: 'manual',
-    promptTemplate: `You are generating reusable narrative entities for a storytelling universe.
-
-Narrative fragment:
-"""
-{{fragmentText}}
-"""
-
-Existing entities:
-{{existingEntities}}
-
-Requested maximum entities: {{maxEntities}}
-Preferred entity categories: {{desiredEntityCategories}}
-
-Rules:
-- Bias strongly toward the preferred entity categories when the fragment supports them.
-- Default categories are LOCATION, ITEM, NPC, FLORA, FAUNA, EVENT, and FACTION.
-- If the preferred list includes extra categories, treat them as valid additions.
-- Do not recreate existing entities unless they are clearly returning in a more developed form.
-- Each entity should feel reusable beyond this one fragment.
-- For typing, map NPC to PERSON and FACTION to ORGANIZATION unless another ner_type is more precise.
-
-Return JSON only with key "entities".`,
+    promptTemplate: generate_entities_by_fragment(
+      '{{fragmentText}}',
+      '{{maxEntities}}',
+      '{{existingEntities}}',
+      '{{desiredEntityCategories}}'
+    )?.[0]?.content || '',
     promptCore: '',
     fieldDocs: {
       entities: 'Generated entity list.',
-      'entities[].name': 'Concrete, evocative entity name.',
-      'entities[].ner_type': 'Broad NER-aligned type such as PERSON, LOCATION, ITEM, ORGANIZATION, EVENT, FLORA, or FAUNA.',
-      'entities[].relevance': 'Why this entity matters to the fragment and the wider world.',
-      'entities[].storytelling_points_cost': 'Approximate storytelling cost for acquiring or activating the entity.'
+      'entities[].name': 'Specific, world-native standalone identity.',
+      'entities[].category': 'Story-machine category: PLACE, PERSON, GROUP, CREATURE, ITEM, DEITY, CUSTOM, or ROUTE.',
+      'entities[].prominence_score': 'Node gravity from 2-20, aligned with fragment prominence.',
+      'entities[].what_we_know_so_far': 'Grounded ASCOPE/PMESII facts that prove the entity functions in the world.',
+      'entities[].world_utility': 'How the entity generates pressure, choices, consequences, or repeatable play.'
     },
     examplePayload: {
       entities: [
         {
-          familiarity_level: 3,
-          reusability_level: 'broad dark fantasy',
-          ner_type: 'LOCATION',
-          ner_subtype: 'Monastery',
-          description: 'A weather-cut riverside monastery whose lower stones hold old flood lines.',
-          name: 'Flood Court of Saint Vey',
-          relevance: 'The fragment points to it as the place where memory, ritual, and weather all meet.',
-          impact: 'Can anchor later scenes, NPC ties, and ritual discoveries.',
-          skills_and_rolls: ['Lore', 'Observation'],
-          development_cost: '5, 10, 15, 20',
-          storytelling_points_cost: 12,
-          urgency: 'Immediate',
-          connections: ['Saint Vey', 'storm rites'],
-          tile_distance: 0,
-          evolution_state: 'New',
-          evolution_notes: 'Introduced as a durable location thread.'
+          internal_quality_audit: {
+            is_it_modular: '8',
+            concrete: '9',
+            grounded: '8',
+            can_i_imagine_it_in_other_scenarios: '8',
+            do_i_dare_give_it_a_specific_name: 'Yes',
+            can_i_locate_it: 'Riverside court',
+            am_i_proud_of_this_entity: '4'
+          },
+          prominence_score: 15,
+          category: 'PLACE',
+          interaction_verbs: ['visit', 'explore', 'return to'],
+          scholar_discipline: 'Socio-Economist',
+          what_we_know_so_far: 'A flood-marked court implies recurring water rights, repair labor, and witnesses who understand seasonal danger.',
+          observed_appearance: 'Soot-dark blocks, wet lime seams, rope-scarred posts, and old mud polished into the lower steps.',
+          unresolved_mysteries: 'Who controls passage when the river rises, and what debt is hidden in the repair records?',
+          world_utility: 'Forces choices around access, debt, weather, and jurisdiction whenever characters need a crossing.',
+          related_entities: ['Toll Ledger', 'Flood Wardens'],
+          name: 'Flood Court of Saint Vey'
         }
       ]
     },
     outputRules: [
       'Return JSON only.',
       'Output must be an object with key "entities".',
-      'Each entity should be specific, sensory-rich, and reusable in later worldbuilding.'
+      'Each entity must be standalone: it should still make sense and generate stories without the original fragment.',
+      'Do not impose entities merely because a detail was mentioned.'
     ],
     responseSchema: TEXT_TO_ENTITY_RESPONSE_SCHEMA
   },
@@ -703,11 +717,6 @@ Storyteller:
 - Already introduced: {{storyteller_already_introduced}}
 - Task: {{storyteller_task}}
 - Known private context: {{storyteller_known_context}}
-
-Current fragment:
-"""
-{{fragment_text}}
-"""
 
 Write one brief in-world intervention.
 
@@ -1843,7 +1852,9 @@ function toRouteConfigPayload(source, defaultConfig) {
   }, defaults);
   const fieldDocs = compatibleConfig.fieldDocs;
   const outputRules = compatibleConfig.outputRules;
-  const responseSchema = compatibleConfig.responseSchema;
+  const responseSchema = defaults.routeKey === 'text_to_entity'
+    ? ensureTextToEntityResponseSchemaCompatibility(compatibleConfig.responseSchema)
+    : compatibleConfig.responseSchema;
   const examplePayload = normalizeJsonValue(doc?.examplePayload, defaults.examplePayload);
   const storedPromptTemplate = normalizeString(doc?.promptTemplate ?? defaults.promptTemplate);
   const compiledPromptTemplate = promptMode === 'contract'
@@ -1920,6 +1931,47 @@ function validateExamplePayloadAgainstSchema(examplePayload, schema) {
     error.code = 'INVALID_EXAMPLE_PAYLOAD';
     throw error;
   }
+}
+
+function ensureTextToEntityResponseSchemaCompatibility(schema) {
+  const baseSchema = schema && typeof schema === 'object' && !Array.isArray(schema)
+    ? schema
+    : TEXT_TO_ENTITY_RESPONSE_SCHEMA;
+  const baseProperties = baseSchema.properties && typeof baseSchema.properties === 'object'
+    ? baseSchema.properties
+    : {};
+  const entitiesSchema = baseProperties.entities && typeof baseProperties.entities === 'object'
+    ? baseProperties.entities
+    : {};
+  const entityItemSchema = entitiesSchema.items && typeof entitiesSchema.items === 'object'
+    ? entitiesSchema.items
+    : {};
+
+  return {
+    ...baseSchema,
+    required: Array.isArray(baseSchema.required) && baseSchema.required.includes('entities')
+      ? baseSchema.required
+      : ['entities'],
+    properties: {
+      ...baseProperties,
+      entities: {
+        ...entitiesSchema,
+        type: entitiesSchema.type || 'array',
+        minItems: entitiesSchema.minItems || 1,
+        items: {
+          ...TEXT_TO_ENTITY_ENTITY_SCHEMA,
+          ...entityItemSchema,
+          required: ['name'],
+          properties: {
+            ...TEXT_TO_ENTITY_ENTITY_SCHEMA.properties,
+            ...(entityItemSchema.properties || {})
+          },
+          additionalProperties: true
+        }
+      }
+    },
+    additionalProperties: true
+  };
 }
 
 async function findLatestRouteDoc(routeKey) {

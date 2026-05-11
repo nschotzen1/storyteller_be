@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-04-23T23:02:18.592Z",
-  "updatedBy": "story-admin-ui",
+  "updatedAt": "2026-05-11T21:56:35.325Z",
+  "updatedBy": "story-admin-control-center",
   "pipelines": {
     "story_continuation": {
       "key": "story_continuation",
