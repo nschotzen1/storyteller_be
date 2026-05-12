@@ -58,6 +58,31 @@ function normalizeEntityStringArray(value) {
     .filter(Boolean);
 }
 
+function normalizeEntityFlexibleStringArray(value) {
+  if (Array.isArray(value)) {
+    return normalizeEntityStringArray(value);
+  }
+  if (typeof value !== 'string') {
+    return [];
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return [];
+  }
+  return normalized.includes(',')
+    ? normalized.split(',').map((entry) => entry.trim()).filter(Boolean)
+    : [normalized];
+}
+
+function firstEntityString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
 function normalizeEntityNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -96,6 +121,30 @@ function normalizeEntityPrivacy(value, fallback = 'session') {
   return ['session', 'public', 'private'].includes(normalized) ? normalized : fallback;
 }
 
+function normalizeStoryMachineCategory(value) {
+  const rawValue = Array.isArray(value) ? value.find((entry) => typeof entry === 'string') : value;
+  const normalized = normalizeEntityString(rawValue, '').toUpperCase();
+  return normalized;
+}
+
+function mapStoryMachineCategoryToType(category) {
+  switch (category) {
+    case 'PLACE':
+      return 'LOCATION';
+    case 'GROUP':
+      return 'ORGANIZATION';
+    case 'PERSON':
+    case 'CREATURE':
+    case 'ITEM':
+    case 'DEITY':
+    case 'CUSTOM':
+    case 'ROUTE':
+      return category;
+    default:
+      return '';
+  }
+}
+
 export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
   const sourceEntity = rawEntity && typeof rawEntity === 'object' ? rawEntity : {};
   const sessionId = normalizeEntityString(
@@ -122,6 +171,68 @@ export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
     sourceEntity.externalId || sourceEntity.id || options.externalId,
     randomUUID()
   );
+  const storyMachineCategory = normalizeStoryMachineCategory(sourceEntity.category);
+  const storyMachineType = mapStoryMachineCategoryToType(storyMachineCategory);
+  const relatedEntities = normalizeEntityFlexibleStringArray(
+    sourceEntity.relatedEntities || sourceEntity.related_entities
+  );
+  const interactionVerbs = normalizeEntityFlexibleStringArray(
+    sourceEntity.interactionVerbs || sourceEntity.interaction_verbs
+  );
+  const scholarDiscipline = normalizeEntityString(
+    sourceEntity.scholarDiscipline || sourceEntity.scholar_discipline,
+    ''
+  );
+  const whatWeKnowSoFar = normalizeEntityString(
+    sourceEntity.whatWeKnowSoFar || sourceEntity.what_we_know_so_far,
+    ''
+  );
+  const observedAppearance = normalizeEntityString(
+    sourceEntity.observedAppearance || sourceEntity.observed_appearance,
+    ''
+  );
+  const unresolvedMysteries = normalizeEntityString(
+    sourceEntity.unresolvedMysteries || sourceEntity.unresolved_mysteries,
+    ''
+  );
+  const worldUtility = normalizeEntityString(
+    sourceEntity.worldUtility || sourceEntity.world_utility,
+    ''
+  );
+  const description = firstEntityString(
+    sourceEntity.description,
+    sourceEntity.summary,
+    observedAppearance,
+    whatWeKnowSoFar,
+    worldUtility,
+    options.defaultDescription
+  );
+  const relevance = firstEntityString(
+    sourceEntity.relevance,
+    worldUtility,
+    whatWeKnowSoFar
+  );
+  const impact = firstEntityString(sourceEntity.impact, worldUtility);
+  const archiveAttributes = {
+    ...(sourceEntity.internalQualityAudit || sourceEntity.internal_quality_audit
+      ? { internal_quality_audit: sourceEntity.internalQualityAudit || sourceEntity.internal_quality_audit }
+      : {}),
+    ...(interactionVerbs.length ? { interaction_verbs: interactionVerbs } : {}),
+    ...(scholarDiscipline ? { scholar_discipline: scholarDiscipline } : {}),
+    ...(whatWeKnowSoFar ? { what_we_know_so_far: whatWeKnowSoFar } : {}),
+    ...(observedAppearance ? { observed_appearance: observedAppearance } : {}),
+    ...(unresolvedMysteries ? { unresolved_mysteries: unresolvedMysteries } : {}),
+    ...(worldUtility ? { world_utility: worldUtility } : {}),
+    ...(relatedEntities.length ? { related_entities: relatedEntities } : {})
+  };
+  const attributes = sourceEntity.attributes && typeof sourceEntity.attributes === 'object' && !Array.isArray(sourceEntity.attributes)
+    ? { ...sourceEntity.attributes, ...archiveAttributes }
+    : Object.keys(archiveAttributes).length
+      ? {
+        ...(sourceEntity.attributes !== undefined ? { legacy_attributes: sourceEntity.attributes } : {}),
+        ...archiveAttributes
+      }
+      : sourceEntity.attributes || {};
 
   const normalized = {
     session_id: sessionId,
@@ -130,24 +241,21 @@ export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
     mainEntityId: normalizeEntityString(sourceEntity.mainEntityId || options.mainEntityId, ''),
     isSubEntity: Boolean(sourceEntity.isSubEntity ?? options.isSubEntity),
     name: normalizeEntityString(sourceEntity.name || sourceEntity.entity_name, 'Unnamed'),
-    description: normalizeEntityString(
-      sourceEntity.description || sourceEntity.summary || options.defaultDescription,
-      ''
-    ),
+    description,
     lore: normalizeEntityString(sourceEntity.lore, ''),
     privacy: normalizeEntityPrivacy(sourceEntity.privacy || options.privacy, 'session'),
-    type: normalizeEntityString(sourceEntity.type || sourceEntity.ner_type, ''),
+    type: normalizeEntityString(sourceEntity.type || sourceEntity.ner_type, storyMachineType),
     subtype: normalizeEntityString(sourceEntity.subtype || sourceEntity.ner_subtype, ''),
     tags,
     universalTraits: traits,
-    attributes: sourceEntity.attributes || {},
-    connections: sourceEntity.connections || {},
+    attributes,
+    connections: sourceEntity.connections || relatedEntities,
     clusterName: normalizeEntityString(sourceEntity.clusterName || sourceEntity.cluster_name, ''),
     category: Array.isArray(sourceEntity.category)
       ? sourceEntity.category.filter((entry) => typeof entry === 'string' && entry.trim()).join(',')
       : normalizeEntityString(sourceEntity.category, ''),
-    relevance: normalizeEntityString(sourceEntity.relevance, ''),
-    impact: normalizeEntityString(sourceEntity.impact, ''),
+    relevance,
+    impact,
     developmentCost: normalizeEntityString(
       sourceEntity.developmentCost || sourceEntity.development_cost,
       ''
@@ -167,6 +275,17 @@ export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
       sourceEntity.skillsAndRolls || sourceEntity.skills_and_rolls,
       null
     ),
+    internalQualityAudit: normalizeEntityMixed(
+      sourceEntity.internalQualityAudit || sourceEntity.internal_quality_audit,
+      null
+    ),
+    interactionVerbs,
+    scholarDiscipline,
+    whatWeKnowSoFar,
+    observedAppearance,
+    unresolvedMysteries,
+    worldUtility,
+    relatedEntities,
     evolutionState: normalizeEntityString(sourceEntity.evolutionState || sourceEntity.evolution_state, ''),
     evolutionNotes: normalizeEntityString(sourceEntity.evolutionNotes || sourceEntity.evolution_notes, ''),
     typewriterKeyText,
@@ -213,8 +332,10 @@ export function normalizeNarrativeEntityDocument(rawEntity = {}, options = {}) {
     activeInTypewriter: Boolean(sourceEntity.activeInTypewriter ?? options.activeInTypewriter)
   };
 
-  const importance = normalizeEntityNumber(sourceEntity.importance);
+  const importance = normalizeEntityNumber(sourceEntity.importance ?? sourceEntity.prominence_score);
   if (importance !== null) normalized.importance = importance;
+  const prominenceScore = normalizeEntityNumber(sourceEntity.prominenceScore ?? sourceEntity.prominence_score);
+  if (prominenceScore !== null) normalized.prominenceScore = prominenceScore;
   const xp = normalizeEntityNumber(sourceEntity.xp);
   if (xp !== null) normalized.xp = xp;
   const tileDistance = normalizeEntityNumber(sourceEntity.tileDistance || sourceEntity.tile_distance);
@@ -278,6 +399,7 @@ const entitySchemaDefinition = {
   
   // Metrics & Costs
   importance: { type: Number },
+  prominenceScore: { type: Number },
   xp: { type: Number },
   tileDistance: { type: Number },   // from tile_distance
   familiarityLevel: { type: Number },
@@ -298,6 +420,14 @@ const entitySchemaDefinition = {
   sourceRoute: { type: String },
   turn: { type: mongoose.Schema.Types.Mixed },
   skillsAndRolls: { type: mongoose.Schema.Types.Mixed },
+  internalQualityAudit: { type: mongoose.Schema.Types.Mixed },
+  interactionVerbs: { type: [String], default: [] },
+  scholarDiscipline: { type: String },
+  whatWeKnowSoFar: { type: String },
+  observedAppearance: { type: String },
+  unresolvedMysteries: { type: String },
+  worldUtility: { type: String },
+  relatedEntities: { type: [String], default: [] },
   evolutionState: { type: String },
   evolutionNotes: { type: String },
   worldId: { type: String, index: true },

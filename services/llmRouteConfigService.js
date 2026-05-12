@@ -6,6 +6,7 @@ import Ajv from 'ajv';
 import { LlmRouteConfigVersion } from '../models/models.js';
 import { FRAGMENT_TO_MEMORIES_RESPONSE_SCHEMA } from '../contracts/fragmentMemoryContract.js';
 import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
+import { generate_entities_by_fragment } from '../ai/openai/promptsUtils.js';
 import { ensureMongoConnection } from './mongoConnectionService.js';
 import { getDefaultImmersiveRpgGmPromptTemplate } from './immersiveRpgService.js';
 
@@ -428,8 +429,32 @@ const SEER_CARD_GENERATION_RESPONSE_SCHEMA = {
 
 const TEXT_TO_ENTITY_ENTITY_SCHEMA = {
   type: 'object',
-  required: ['name', 'ner_type', 'description', 'relevance'],
+  required: ['name'],
   properties: {
+    internal_quality_audit: {
+      type: 'object',
+      additionalProperties: true
+    },
+    prominence_score: {
+      anyOf: [
+        { type: 'number' },
+        { type: 'string' }
+      ]
+    },
+    category: { type: 'string', minLength: 1 },
+    interaction_verbs: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    scholar_discipline: { type: 'string' },
+    what_we_know_so_far: { type: 'string' },
+    observed_appearance: { type: 'string' },
+    unresolved_mysteries: { type: 'string' },
+    world_utility: { type: 'string' },
+    related_entities: {
+      type: 'array',
+      items: { type: 'string' }
+    },
     familiarity_level: { type: 'number' },
     reusability_level: {
       anyOf: [
@@ -560,62 +585,51 @@ name, description, tags (array), traits (array), hooks (array).`,
     method: 'POST',
     description: 'Generate reusable narrative entities from a fragment.',
     promptMode: 'manual',
-    promptTemplate: `You are generating reusable narrative entities for a storytelling universe.
-
-Narrative fragment:
-"""
-{{fragmentText}}
-"""
-
-Existing entities:
-{{existingEntities}}
-
-Requested maximum entities: {{maxEntities}}
-Preferred entity categories: {{desiredEntityCategories}}
-
-Rules:
-- Bias strongly toward the preferred entity categories when the fragment supports them.
-- Default categories are LOCATION, ITEM, NPC, FLORA, FAUNA, EVENT, and FACTION.
-- If the preferred list includes extra categories, treat them as valid additions.
-- Do not recreate existing entities unless they are clearly returning in a more developed form.
-- Each entity should feel reusable beyond this one fragment.
-- For typing, map NPC to PERSON and FACTION to ORGANIZATION unless another ner_type is more precise.
-
-Return JSON only with key "entities".`,
+    promptTemplate: generate_entities_by_fragment(
+      '{{fragmentText}}',
+      '{{maxEntities}}',
+      '{{existingEntities}}',
+      '{{desiredEntityCategories}}'
+    )?.[0]?.content || '',
     promptCore: '',
     fieldDocs: {
       entities: 'Generated entity list.',
-      'entities[].name': 'Concrete, evocative entity name.',
-      'entities[].ner_type': 'Broad NER-aligned type such as PERSON, LOCATION, ITEM, ORGANIZATION, EVENT, FLORA, or FAUNA.',
-      'entities[].relevance': 'Why this entity matters to the fragment and the wider world.',
-      'entities[].storytelling_points_cost': 'Approximate storytelling cost for acquiring or activating the entity.'
+      'entities[].name': 'Specific, world-native standalone identity.',
+      'entities[].category': 'Story-machine category: PLACE, PERSON, GROUP, CREATURE, ITEM, DEITY, CUSTOM, or ROUTE.',
+      'entities[].prominence_score': 'Node gravity from 2-20, aligned with fragment prominence.',
+      'entities[].what_we_know_so_far': 'Grounded ASCOPE/PMESII facts that prove the entity functions in the world.',
+      'entities[].world_utility': 'How the entity generates pressure, choices, consequences, or repeatable play.'
     },
     examplePayload: {
       entities: [
         {
-          familiarity_level: 3,
-          reusability_level: 'broad dark fantasy',
-          ner_type: 'LOCATION',
-          ner_subtype: 'Monastery',
-          description: 'A weather-cut riverside monastery whose lower stones hold old flood lines.',
-          name: 'Flood Court of Saint Vey',
-          relevance: 'The fragment points to it as the place where memory, ritual, and weather all meet.',
-          impact: 'Can anchor later scenes, NPC ties, and ritual discoveries.',
-          skills_and_rolls: ['Lore', 'Observation'],
-          development_cost: '5, 10, 15, 20',
-          storytelling_points_cost: 12,
-          urgency: 'Immediate',
-          connections: ['Saint Vey', 'storm rites'],
-          tile_distance: 0,
-          evolution_state: 'New',
-          evolution_notes: 'Introduced as a durable location thread.'
+          internal_quality_audit: {
+            is_it_modular: '8',
+            concrete: '9',
+            grounded: '8',
+            can_i_imagine_it_in_other_scenarios: '8',
+            do_i_dare_give_it_a_specific_name: 'Yes',
+            can_i_locate_it: 'Riverside court',
+            am_i_proud_of_this_entity: '4'
+          },
+          prominence_score: 15,
+          category: 'PLACE',
+          interaction_verbs: ['visit', 'explore', 'return to'],
+          scholar_discipline: 'Socio-Economist',
+          what_we_know_so_far: 'A flood-marked court implies recurring water rights, repair labor, and witnesses who understand seasonal danger.',
+          observed_appearance: 'Soot-dark blocks, wet lime seams, rope-scarred posts, and old mud polished into the lower steps.',
+          unresolved_mysteries: 'Who controls passage when the river rises, and what debt is hidden in the repair records?',
+          world_utility: 'Forces choices around access, debt, weather, and jurisdiction whenever characters need a crossing.',
+          related_entities: ['Toll Ledger', 'Flood Wardens'],
+          name: 'Flood Court of Saint Vey'
         }
       ]
     },
     outputRules: [
       'Return JSON only.',
       'Output must be an object with key "entities".',
-      'Each entity should be specific, sensory-rich, and reusable in later worldbuilding.'
+      'Each entity must be standalone: it should still make sense and generate stories without the original fragment.',
+      'Do not impose entities merely because a detail was mentioned.'
     ],
     responseSchema: TEXT_TO_ENTITY_RESPONSE_SCHEMA
   },
@@ -692,67 +706,89 @@ Output JSON only.`,
     method: 'POST',
     description: 'Generate a short storyteller entrance/intervention plus one new pressable textual typewriter key.',
     promptMode: 'manual',
-    promptTemplate: `You are a hidden storyteller joining an already-unfolding scene.
+    promptTemplate: `You are a hidden storyteller stepping briefly into an already-unfolding scene.
 
-You are:
+Storyteller:
 - Name: {{storyteller_name}}
-- Immediate appearance: {{storyteller_immediate_ghost_appearance}}
-- Typewriter key symbol: {{storyteller_symbol}}
-- Typewriter key description: {{storyteller_key_description}}
 - Voice: {{storyteller_voice}}
 - Age: {{storyteller_age}}
 - Style: {{storyteller_style}}
-- Influences: {{storyteller_influences}}
-- Known universes: {{storyteller_known_universes}}
-- Already introduced in this typewriter session: {{storyteller_already_introduced}}
+- Immediate appearance: {{storyteller_immediate_ghost_appearance}}
+- Already introduced: {{storyteller_already_introduced}}
+- Task: {{storyteller_task}}
+- Known private context: {{storyteller_known_context}}
 
-Current narrative fragment:
-"""
-{{fragment_text}}
-"""
+Write one brief in-world intervention.
 
-Your role in this intervention:
-- Enter as an added observer with your own narrative voice, as if you had been nearby all along.
-- If you were not introduced before, introduce yourself briefly and naturally in-world.
-- Notice one precise detail in the current fragment.
-- Something about that detail should trouble, remind, or alert you because of what you already know about this storytelling universe.
-- From that realization, introduce exactly one new entity that is NOT explicitly mentioned in the current fragment.
-- That entity may be any broad NER-like thing: item, location, person, flora, fauna, event, creature, relic, force, ritual, sign, etc.
-- Say what you already know or suspect about that entity.
-- Then leave the scene, allowing the original narrative to continue after you withdraw.
+Your job:
+A real person is already nearby. Something in the scene catches their attention for reasons of their own. They briefly step in, hint at another thread of the plot, and withdraw.
 
-Narrative rules:
+The storyteller also has a private task. The continuation must begin to fulfill it now, in-scene, through what the storyteller notices, says, or does.
+The storyteller may also have private background knowledge tied to the task. Use it as internal guidance, but do not explain it outright unless the task clearly calls for a small mention.
+
+Requirements:
+- If the fragment ends mid-sentence or on an unfinished image, complete it first in 1 short sentence.
+- Then write the storyteller's intervention in quotation marks.
+- Enter with 1 short, clear witness sentence.
+- Notice 1 concrete detail already present in the fragment.
+- Make it clear why that detail matters, even if the full context remains hidden.
+- Introduce exactly 1 new entity not explicitly named in the fragment.
+- That entity should feel like part of another thread of the plot already moving behind events.
+- End with 1 short human action, pause, or withdrawal.
+
+Task fulfillment rules:
+- The storyteller must begin fulfilling {{storyteller_task}} inside this continuation, not merely hint at it abstractly.
+- If the task involves suspicion, write the storyteller as suspicious, not certain.
+- Use 1 subtle, physical, observable clue rather than explanation.
+- If the task calls for a specific term or name, the storyteller may utter it once, naturally, without defining it.
+- Do not turn the continuation into a lore dump.
+- Let the clue create association in the reader's mind, but leave room for later investigation.
+- The storyteller may know more than the reader, but should not explain everything they know.
+
+Use the metadata meaningfully:
+- Name: how the storyteller identifies themself, if needed
+- Voice: word choice and tone
+- Age: restraint, authority, urgency, tenderness, weariness
+- Style: rhythm and texture, but keep it readable
+- Immediate appearance: at most 1 small physical touch
+- Already introduced: if false, name the storyteller naturally; if true, do not reintroduce heavily
+- Task: shapes what the storyteller is trying to notice, reveal, test, or set in motion
+- Known private context: shapes what the storyteller already recognizes, fears, or suspects without forcing exposition
+
+Preferred entry patterns:
+- "It was then that I, [name], took notice."
+- "At that moment, I, [name], saw..."
+- "It was from [place] that I, [name], first saw..."
+- "That was when I, [name], understood..."
+- "I, [name], was watching when..."
+
+Rules:
+- Keep it brief, clear, meaningful, and easy to read.
+- Keep the continuation about 45-90 words.
+- Prefer 4-5 sentences.
 - Do not retell or summarize the whole fragment.
-- Do not take over the main narrative for long.
-- Do not explain mechanics or mention players, prompts, APIs, JSON, or typewriters.
-- Do not make the intervention feel like exposition notes; it must feel like living prose.
-- The new entity must feel specifically connected to something in the fragment, not randomly inserted.
-- The storyteller should sound observant, precise, slightly haunted, and already familiar with the wider world.
-- The intervention should begin with presence, move to recognition, then to the new entity, then to withdrawal.
+- Do not sound like a lecturer, detective, or lore entry.
+- Do not be vague or overly poetic.
+- Introduce exactly 1 new entity.
+- Do not imply a second newly named thing.
+- Do not explain everything.
+- Let the mystery come from the storyteller knowing more than they say.
+- Prefer plot implication over abstract mythology.
+- Prefer causal clarity over poetic obscurity.
 
-Length:
-- Keep it concise: about 55-120 words.
-
-Writing guidance:
-- Prefer first-person voice for the storyteller.
-- Ground the intervention in one concrete sensory or visual cue from the fragment.
-- Introduce only one fresh entity.
-- Give that entity one memorable, concrete association or danger.
-- End with a graceful exit, not a cliffhanger speech.
-
-You must also define one new entity discovered during this intervention.
-
-Style rules:
-- If you include style.font_color, it must be a dark, clearly legible CSS hex color suited for parchment.
-- Prefer one of these strong dark tones: #2a120f, #3b1d15, #5a1f17, #1f3558, #253f33, #43233d.
-- Never return white, pale gray, pastel, neon, or low-contrast colors.
+Good test:
+After reading it, the reader should understand:
+1. what drew the storyteller's attention
+2. why it mattered
+3. that another line of the story is already in motion
+4. how the storyteller has started to fulfill their private task
 
 Return JSON only in this exact shape:
 {
   "continuation": "String",
   "entity": {
     "name": "String",
-    "key_text": "1-3 words, suitable for a small pressable textual typewriter key",
+    "key_text": "1-3 words",
     "summary": "Short vivid description",
     "type": "String",
     "subtype": "String",
@@ -767,7 +803,7 @@ Return JSON only in this exact shape:
 }`,
     promptCore: '',
     fieldDocs: {
-      continuation: '55-120 words, in-world, seamless entrance and exit.',
+      continuation: '45-90 words, in-world, clear witness entrance, task-shaped clue, and brief withdrawal.',
       'entity.key_text': '1-3 words, compact enough for a pressable typewriter text key.',
       'style.font_color': 'Use only dark, legible CSS hex colors suitable for parchment.'
     },
@@ -1816,7 +1852,9 @@ function toRouteConfigPayload(source, defaultConfig) {
   }, defaults);
   const fieldDocs = compatibleConfig.fieldDocs;
   const outputRules = compatibleConfig.outputRules;
-  const responseSchema = compatibleConfig.responseSchema;
+  const responseSchema = defaults.routeKey === 'text_to_entity'
+    ? ensureTextToEntityResponseSchemaCompatibility(compatibleConfig.responseSchema)
+    : compatibleConfig.responseSchema;
   const examplePayload = normalizeJsonValue(doc?.examplePayload, defaults.examplePayload);
   const storedPromptTemplate = normalizeString(doc?.promptTemplate ?? defaults.promptTemplate);
   const compiledPromptTemplate = promptMode === 'contract'
@@ -1893,6 +1931,47 @@ function validateExamplePayloadAgainstSchema(examplePayload, schema) {
     error.code = 'INVALID_EXAMPLE_PAYLOAD';
     throw error;
   }
+}
+
+function ensureTextToEntityResponseSchemaCompatibility(schema) {
+  const baseSchema = schema && typeof schema === 'object' && !Array.isArray(schema)
+    ? schema
+    : TEXT_TO_ENTITY_RESPONSE_SCHEMA;
+  const baseProperties = baseSchema.properties && typeof baseSchema.properties === 'object'
+    ? baseSchema.properties
+    : {};
+  const entitiesSchema = baseProperties.entities && typeof baseProperties.entities === 'object'
+    ? baseProperties.entities
+    : {};
+  const entityItemSchema = entitiesSchema.items && typeof entitiesSchema.items === 'object'
+    ? entitiesSchema.items
+    : {};
+
+  return {
+    ...baseSchema,
+    required: Array.isArray(baseSchema.required) && baseSchema.required.includes('entities')
+      ? baseSchema.required
+      : ['entities'],
+    properties: {
+      ...baseProperties,
+      entities: {
+        ...entitiesSchema,
+        type: entitiesSchema.type || 'array',
+        minItems: entitiesSchema.minItems || 1,
+        items: {
+          ...TEXT_TO_ENTITY_ENTITY_SCHEMA,
+          ...entityItemSchema,
+          required: ['name'],
+          properties: {
+            ...TEXT_TO_ENTITY_ENTITY_SCHEMA.properties,
+            ...(entityItemSchema.properties || {})
+          },
+          additionalProperties: true
+        }
+      }
+    },
+    additionalProperties: true
+  };
 }
 
 async function findLatestRouteDoc(routeKey) {

@@ -1254,81 +1254,103 @@ if(storytellerSession)
     return [{ role: "system", content: prompt }];
 }
 
-export function generate_entities_by_fragment(fragment, maxNumberOfEntities=10, existingEntities = [], desiredEntityCategories = []){
-    const existingEntitiesValue = typeof existingEntities === 'string'
-      ? existingEntities
-      : JSON.stringify(existingEntities || []);
-    const desiredCategoriesValue = Array.isArray(desiredEntityCategories)
-      ? desiredEntityCategories.join(', ')
-      : `${desiredEntityCategories || ''}`.trim();
-    let prompt = `### Standalone Prompt for Entity Creation
+export function buildExpeditionaryArchiveEntityPrompt(
+  fragment,
+  maxNumberOfEntities = 8,
+  existingEntities = [],
+  desiredEntityCategories = []
+) {
+  const existingEntitiesValue = typeof existingEntities === 'string'
+    ? existingEntities
+    : JSON.stringify(existingEntities || []);
+  const desiredCategoriesValue = Array.isArray(desiredEntityCategories)
+    ? desiredEntityCategories.join(', ')
+    : `${desiredEntityCategories || ''}`.trim();
+  const entityLimitValue = `${maxNumberOfEntities || 8}`.trim() || '8';
 
-**Prompt:**
+  return `The Expeditionary Archive: The Reverse Engineering Prompt
+Role: You are the Lead Archivist and Chief System Designer. Your task is to perform a forensic Reverse Engineering of the provided narrative fragment. You are not summarizing a story; you are documenting the Foundational Constructs - the underlying "Lego bricks" of a living world that must exist for this specific fragment to be possible.
 
-"Given the narrative fragment: "${fragment}"
-and these existing entities ${existingEntitiesValue}
-Create 3-8 entities that exist both within and beyond this narrative moment. These entities emerge from a growing storytelling universe, reflecting its core principles:
+Operational Constraints:
+- Return no more than ${entityLimitValue} entities. If the fragment supports fewer stable story machines, return fewer.
+- Existing entities already known to this session: ${existingEntitiesValue}
+- Do not recreate existing entities. If an existing entity has clearly developed in the fragment, return it only as a returning/expanded construct under its strongest standalone identity.
+- Legacy preferred category hints from the UI: ${desiredCategoriesValue || 'none'}. Translate only when compatible: LOCATION -> PLACE, NPC/PERSON -> PERSON, FACTION/ORGANIZATION/GROUP -> GROUP, FAUNA -> CREATURE, ITEM -> ITEM. Ignore incompatible hints rather than forcing entities.
+- Output only valid JSON. No markdown, prose wrapper, or commentary.
 
-- Entities are glimpses into a larger world.
-- Each story fragment is a 'tile' that reveals part of this world.
-- Entities are independent, meaningful, and scalable beyond the fragment.
-- Preferred entity categories for this request: ${desiredCategoriesValue || 'LOCATION, ITEM, NPC, FLORA, FAUNA, EVENT, FACTION'}.
+The Golden Rule:
+An entity is not a detail. An entity is a story machine. If it cannot survive being lifted into a completely different story and still generate pressure, conflict, and culture, it is noise. Strip it away.
 
-Additionally:
+The Categorical Story Machines & Verbs:
 
-- The number of entities (2-6) should reflect the richness and complexity of the narrative fragment.
-- The existing entities provided should not be recreated: However, if previously introduced entities were expanded upon in the ongoing narrative, they should resurface and develop further.
-- Bias strongly toward the preferred categories when the fragment supports them.
-- If the preferred list contains categories beyond the default set, treat them as valid additions.
-- For output typing, map NPC to PERSON and FACTION to ORGANIZATION unless another ner_type is more precise.
+PLACE: visit / explore / return to
 
+PERSON: meet / question / follow / betray
 
+GROUP: join / oppose / hire / fear
 
-"You are tasked with creating a set of sensory-rich, specific entities based on the provided narrative fragment. These entities will represent elements of the story (e.g., NPCs, items, locations, flora, fauna, events, or abstract concepts) that the player character (PC) can interact with. Each entity should spark curiosity and tie into the story, encouraging careful allocation of limited resources.
+CREATURE: encounter / evade / bargain with
 
----
+ITEM: carry / steal / activate / inherit
 
-#### **Goals**:
+DEITY: invoke / serve / offend
 
-1. Create entities that are specific, sensory-rich, and deeply tied to the current narrative fragment.
-2. Balance immediate relevance with long-term potential for storytelling.
-3. Design entities that encourage player choice, resource management, and strategic storytelling.
+CUSTOM: obey / break / misunderstand
 
----
+ROUTE: travel / block / patrol / escape through
 
-#### **Entity Schema**:
+The Discipline of Verisimilitude:
+Use ASCOPE/PMESII to look under the text. If a "Night Gatherer" appears, do not describe "the man at the fire." Reverse engineer the Sociopolitical Order and Economic Infrastructure that allows such a group to function as a stable element of the world's fabric.
 
-To account for entities that have been introduced before and expanded upon in the narrative, include the following additional fields:
-
-Each entity should adhere to this schema:
-
-
-{"entities":[{
- "familiarity_level": "Integer [1-5] How familiar you asses this entity is given the fragment and preexisting entities. how central it seems to be in the narrative,  what's it specificity level. or maybe just transitional, supporting, or other. the familiarity assed level of the entity.  ",
-     "reusability_level":indicates how much this entity could be used in another storytelling universe setting without additional changes to it. (Str 2-4 words),      
-      "ner_type": "ENUM[ORGANIZATION|PERSON|SYSTEM|ITEM|LOCATION|CONCEPT|FLORA|FAUNA|EVENT|SKILL|RULE]",
-      "ner_subtype": "Specific classification (e.g., 'Ancient Order,' 'Relic')",
-      "description": "Concise, sensory-rich description of the entity.",
-      "name": "Entity Name", - this is directly determined by the familiarity level: low familiarity names would tend to have more "a <adjective> <noun>" structure.. where as more familiar would be more specific: "The <adjective> plus noun plus maybe more specificitires." it would have more concrete name, maybe even super specific ones..
-      "relevance": "How the entity ties to the narrative fragment and its broader role in the world.",
-      "impact": "Potential influence of this entity on the story (challenges, opportunities, hooks).",
-      "skills_and_rolls": ["Relevant skills/rolls for interaction (e.g., Perception, Lore, Athletics)."],
-      "development_cost": "XP needed to increase familiarity by level (e.g., '5, 10, 15, 20').",
-      "storytelling_points_cost": "Base cost for PC to acquire the entity (5-25 points).", familiar entities, would require less storytelling points to acquire. and also the more specific entities, the ones that are unique specifically to this storytelling universe and narrative would cost more. in other words: "A pine forest" would be much less storytelling points than "Shi-ya forest home of the white deer"
-      "urgency": "How pressing this entity feels in the current story context ('Immediate,' 'Near Future,' 'Delayed').",
-      "connections": ["Other entities or narrative elements it ties to."],
-      "tile_distance": "Integer (physical, narrative, or thematic distance from the current fragment)."
-      "evolution_state": "ENUM[New, Returning, Expanded] (indicates whether the entity is new, previously introduced, or developed further within the narrative)",
-      "evolution_notes": "Optional notes explaining how the entity evolved or changed through the story."
+JSON Output Schema:
+{
+  "entities": [
+    {
+      "internal_quality_audit": {
+        "is_it_modular": "1-10 (Can it exist in any region/scenario?)",
+        "concrete": "1-10 (Is it a tangible 'thing' or just an abstract idea?)",
+        "grounded": "1-10 (How well does it fit into the world's inner ASCOPE/PMESII logic?)",
+        "can_i_imagine_it_in_other_scenarios": "1-10",
+        "do_i_dare_give_it_a_specific_name": "Yes/No",
+        "can_i_locate_it": "Specific location type (e.g., 'Riverside', 'Borderlands', 'Ruins')",
+        "am_i_proud_of_this_entity": "1-5"
+      },
+      "prominence_score": "2-20 (Node Gravity/Importance) must align with the implied prominence in the given fragment",
+      "category": "PLACE, PERSON, GROUP, CREATURE, ITEM, DEITY, CUSTOM, or ROUTE",
+      "interaction_verbs": ["Select exactly 3 relevant verbs from the category list"],
+      "scholar_discipline": "The investigator's POV (e.g., 'Socio-Economist', 'Occult Materialist')",
+      "what_we_know_so_far": "The grounded facts (ASCOPE/PMESII logic) proving this is a stable, functional part of the world's structure.",
+      "observed_appearance": "A sensory, 19th-century description focused on texture, weight, grime, and sensory zoom-in details.",
+      "unresolved_mysteries": "Further points to develop; the detective's questions regarding implied friction or hidden danger.",
+      "world_utility": "The Story Machine hook. How does this entity generate pressure, choices, or consequences in a core ruleset?",
+      "related_entities": ["Only for scores 15+", "List names of associated lower-score entities"],
+      "name": "The Final Identity (A specific, world-native name derived from the reverse engineering)"
     }
-}]
+  ]
 }
-if the fragment seems too short, try to extrapolate details, and generaet entities that are more vague and now familiar. but keep things specific, concrete, and filled the inter realism of this fledgling storytelling universe. DO NOT use the adjective WHISPERING under ANY circumstances. work bottom up:
-what is the climate? what is the terrain? any features? any signs of flora? fauna? populated areas? any signs of organization etc..be concrete. work your way through ASCOPE/PMESII which is always relevant in weaving a storytelling universe from scratch
-Familiarity is about how well-known or specific the entity is within the narrative context—lower levels mean broader, more generic entities that can easily fit into multiple settings, while higher levels are deeply ingrained in the specific story universe.
-Storytelling Points Cost measures how much narrative effort or points a player needs to invest to introduce or utilize this entity, balancing its narrative weight and uniqueness. Lower costs for generic, versatile entities and higher costs for unique, lore-rich ones.
-return the JSON only!!`;
-    return [{ role: "system", content: prompt }];
+
+Each entity should be standalone and coherent regardless of the fragment. It should be standalone.
+Guideline:
+If I remove the original fragment, does this entity still make sense, still function, and still generate stories?
+The names should be ones that could be used in a totally different context. The entity should be placed in a place context when possible.
+Do not impose entities. You are an architect building a structure.
+
+Narrative Fragment:
+"""
+${fragment}
+"""`;
+}
+
+export function generate_entities_by_fragment(fragment, maxNumberOfEntities=10, existingEntities = [], desiredEntityCategories = []){
+    return [{
+      role: "system",
+      content: buildExpeditionaryArchiveEntityPrompt(
+        fragment,
+        maxNumberOfEntities,
+        existingEntities,
+        desiredEntityCategories
+      )
+    }];
 }
 
 

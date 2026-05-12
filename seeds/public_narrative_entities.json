@@ -1,0 +1,649 @@
+{
+  "publicSessionId": "__public__",
+  "entities": [
+    {
+      "externalId": "builtin:xerofag",
+      "session_id": "__public__",
+      "sessionId": "__public__",
+      "playerId": "",
+      "name": "The Xerofag",
+      "description": "A pack of eerie undead dogs trained to find storytellers and devour them.",
+      "lore": "The Xerofag are an undead pack of dogs that appear when a storytelling universe has been touched by corruption. At a distance they may pass for dusty, bruised strays limping through roads, alleys, fields, slopes, ruins, forests, deserts, or abandoned thresholds as if they have been running for far too long.\n\nCloser attention reveals the wrongness. Some drag broken legs that should make movement impossible. Some show exposed bone. Some carry wounds that do not bleed properly. Some run without breath, sound, or fatigue.\n\nThey are not random monsters. They behave like trained hunting animals. They search, circle, wait, exhaust, and close in. Their prey is not ordinary flesh alone. They are trained to find storytellers and devour them, and they are drawn toward active stories and places where narrative corruption has gained a scent.\n\nThe pack is led by a yellowish-grey dog with one missing eye, a cut tail, and scars across its body, some old and some fresh. Their arrival is often the first sign that corruption has already found the world.",
+      "privacy": "public",
+      "type": "FAUNA",
+      "subtype": "Undead dog pack",
+      "tags": [
+        "xerofag",
+        "undead",
+        "dogs",
+        "canines",
+        "pack",
+        "storyteller-hunter",
+        "predator",
+        "corruption"
+      ],
+      "universalTraits": [
+        "appears at first like a pack of wounded stray dogs",
+        "moves despite injuries that should make movement impossible",
+        "hunts with disciplined pack behavior rather than random frenzy",
+        "is drawn toward storytellers and active story-worlds",
+        "often signals that corruption has already touched the narrative"
+      ],
+      "attributes": {
+        "coreFunction": "Predatory consequence of corruption inside a story-world.",
+        "appearance": {
+          "surface": "Dusty, bruised stray dogs that look exhausted from endless running.",
+          "closerInspection": "Broken legs, exposed bones, deep wounds, and other impossible injuries reveal that the dogs are undead.",
+          "leader": "A yellowish-grey dog with one missing eye, a cut tail, and scars across its body."
+        },
+        "leader": {
+          "description": "A yellowish-grey dog with one missing eye, a cut tail, and scars across its body.",
+          "role": "Leads the pack and is often seen watching before the others move."
+        },
+        "behavior": {
+          "huntPattern": "The pack searches, circles, waits, exhausts the target, and closes in together.",
+          "prey": "Storytellers, active stories, and narrative spaces carrying corruption.",
+          "firstFunction": "Create dread and pressure before open attack."
+        },
+        "typewriterBehavior": "The Xerofag key should become true only after the story contains enough evidence of undead canine danger.",
+        "playGuidance": {
+          "bestUse": "Use them first as a sign that the world has been found, then as a pursuing threat that forces concrete action.",
+          "avoid": "Do not reveal every answer about their link to the Defilers too early.",
+          "pressure": [
+            "flight",
+            "hiding",
+            "defending the typewriter",
+            "writing faster and more concretely"
+          ]
+        },
+        "threatLevel": "high"
+      },
+      "connections": {
+        "associatedWith": [
+          "The Defilers",
+          "Corrupted story-worlds"
+        ],
+        "hunts": [
+          "A Storyteller",
+          "Storytellers",
+          "Active stories"
+        ],
+        "opposedBy": [
+          "The Storytellers' Society",
+          "The Deck of Cards"
+        ]
+      },
+      "evidence": [
+        {
+          "kind": "scene_signs",
+          "items": [
+            "a dog moving on a broken leg",
+            "many eyes opening low in the dark",
+            "no breath in cold air",
+            "a pack that makes no normal dog sounds",
+            "a yellowish-grey leader watching from behind the others"
+          ]
+        },
+        {
+          "kind": "narrative_triggers",
+          "items": [
+            "a Defiler has touched the world",
+            "corruption has created a trail",
+            "the player named them too early or too carelessly",
+            "the story has become vivid enough to attract danger"
+          ]
+        }
+      ],
+      "relevance": "A recurring threat that can enter a narrative when corruption, naming, or vivid storytelling has made undead canine danger true.",
+      "impact": "Turns ordinary stray-dog imagery into a warning sign and pressures the cast toward concealment, flight, defense, and sharper storytelling.",
+      "developmentCost": "6, 10, 15, 20",
+      "storytellingPointsCost": 18,
+      "storytelling_points": 14,
+      "urgency": "Immediate when detected",
+      "hooks": {
+        "firstHint": "A wounded stray keeps pace with the scene longer than any living dog should.",
+        "reveal": "One dog moves on a broken leg while another shows exposed bone where flesh should cover it.",
+        "leaderTell": "The yellowish-grey leader has one missing eye, a cut tail, and fresh scars.",
+        "escalation": "The pack stops acting like strays once it catches a storyteller scent."
+      },
+      "specificity": {
+        "familiarSurface": "wounded stray dogs",
+        "hiddenTruth": "an undead storyteller-hunting pack",
+        "coreTension": "familiar animal imagery becoming proof that the story has been found"
+      },
+      "source": "public_narrative_entity_seed",
+      "sourceRoute": "seeds/public_narrative_entities.json",
+      "typewriterKeyText": "THE XEROFAG",
+      "typewriterSource": "builtin",
+      "activeInTypewriter": true,
+      "canonicalStatus": "canonical",
+      "bankSource": {
+        "sourceType": "builtin_entity",
+        "seedFile": "seeds/public_narrative_entities.json"
+      },
+      "mockInspectionSignals": {
+        "canine": [
+          "canine",
+          "dog",
+          "dogs",
+          "fang",
+          "fangs",
+          "hound",
+          "hounds",
+          "howl",
+          "howling",
+          "muzzle",
+          "pack",
+          "paw",
+          "paws",
+          "snout",
+          "tail",
+          "wolf",
+          "wolves"
+        ],
+        "undead": [
+          "ashen bones",
+          "bone",
+          "bones",
+          "carrion",
+          "corpse",
+          "corpses",
+          "crypt",
+          "crypts",
+          "death",
+          "ghoul",
+          "ghouls",
+          "ghost",
+          "ghosts",
+          "grave",
+          "graves",
+          "gravepit",
+          "haunted",
+          "necrotic",
+          "revenant",
+          "revenants",
+          "rot",
+          "rotting",
+          "skeletal",
+          "skeleton",
+          "undead",
+          "zombie",
+          "zombies"
+        ]
+      }
+    },
+    {
+      "externalId": "builtin:defilers",
+      "session_id": "__public__",
+      "sessionId": "__public__",
+      "playerId": "",
+      "name": "The Defilers",
+      "description": "A secret order of anti-storytellers who corrupt stories by making the concrete vague, the named unnamed, and the connected disconnected.",
+      "lore": "The Defilers are a secret order of anti-storytellers. They enter storytelling universes under borrowed faces, pretending to be guides, scholars, patrons, witnesses, messengers, collectors, or even storytellers. Their purpose is not merely to kill or destroy. Their deeper purpose is to make stories lose themselves.\n\nThey corrupt by loosening specificity. A named river becomes a river. A gate sergeant becomes a guard. A meaningful object becomes a thing. A cause becomes somehow. A place becomes there. They are enemies of story because they make everything interchangeable.\n\nTheir true forms are almost human but unfinished: pale, hairless, smooth-faced, and difficult to remember clearly. Their disguises are convincing at first, but too curated, too assembled, and always marked by a feline trace. Cat-shaped jewelry, claw-like rings, leopard lining, slit-like pupils, velvet movement, or a habit of watching too still can betray them.\n\nWhen physically present, Defilers corrupt matter as well as language. Weak ones dull ink and bruise fruit. Stronger ones crack books, dry leaves, and fade written names. Powerful ones can make rooms generic, memories weaker, and stories rewrite themselves into vague summaries.",
+      "privacy": "public",
+      "type": "FACTION",
+      "subtype": "Anti-storyteller order",
+      "tags": [
+        "defilers",
+        "corruption",
+        "anti-storyteller",
+        "disguise",
+        "feline-sign",
+        "specificity-decay",
+        "vagueness",
+        "secret-order"
+      ],
+      "universalTraits": [
+        "corrupts stories by flattening detail and stripping names",
+        "prefers infiltration and substitution over direct spectacle",
+        "true form is pale, hairless, nearly featureless, and hard to remember",
+        "borrowed disguises always carry some feline trace",
+        "presence can wither matter, language, and memory at once"
+      ],
+      "attributes": {
+        "coreFunction": "Personalized corruption system that attacks story specificity, causality, and memory.",
+        "appearance": {
+          "trueForm": "Almost human but unfinished: pale, hairless, smooth-faced, and nearly featureless.",
+          "disguiseRule": "Disguises are vivid but not lived-in; they feel designed rather than grown from a life.",
+          "felineTrace": "Every disguise carries some cat-like sign, manner, accessory, or physical tell."
+        },
+        "methods": {
+          "linguistic": "Turns proper nouns into common nouns, concrete actions into bland summaries, and linked facts into loose impressions.",
+          "physical": "Dulls ink, bruises fruit, dries leaves, cracks books, fades names, and can make whole rooms feel generic.",
+          "sonic": "Uses the gathered sounds of local animals as one wrong throat."
+        },
+        "typewriterBehavior": "The Defiler should not have a usable key; it manifests through fading ink, word substitution, stuttering over names, and helpful-sounding vague continuations.",
+        "playGuidance": {
+          "bestUse": "Introduce them first through textual corruption and suspicious helpfulness before revealing a disguised person or true form.",
+          "avoid": "Do not settle their ultimate origin or exact relationship to the Xerofag too early.",
+          "pressure": [
+            "loss of names",
+            "generic replacement",
+            "weakened relationships",
+            "flattened causality"
+          ]
+        },
+        "threatLevel": "severe"
+      },
+      "connections": {
+        "opposes": [
+          "The Storytellers' Society",
+          "A Storyteller",
+          "The Deck of Cards"
+        ],
+        "attractsOrUses": [
+          "The Xerofag"
+        ],
+        "corrupts": [
+          "Story-world entities",
+          "Written names",
+          "Memory objects",
+          "Places",
+          "Causality"
+        ]
+      },
+      "evidence": [
+        {
+          "kind": "textual_signs",
+          "items": [
+            "proper nouns becoming common nouns",
+            "concrete phrases becoming vague phrases",
+            "the typewriter offering bland continuations",
+            "names fading or being skipped"
+          ]
+        },
+        {
+          "kind": "world_signs",
+          "items": [
+            "fruit bruising after touch",
+            "book spines cracking",
+            "maps becoming unreadable",
+            "animal sounds gathering unnaturally around one presence"
+          ]
+        }
+      ],
+      "relevance": "Primary corruptive antagonist force that explains why stories decay into vagueness instead of simply ending.",
+      "impact": "Threatens every named entity, every remembered relation, and every concrete fact in the world. The Defilers turn the whole game logic into a struggle over specificity.",
+      "developmentCost": "8, 12, 18, 24",
+      "storytellingPointsCost": 24,
+      "storytelling_points": 18,
+      "urgency": "Escalates whenever specificity begins to decay",
+      "hooks": {
+        "firstHint": "A concrete sentence returns from the page weaker, flatter, or less named than before.",
+        "falseHelp": "A voice suggests that the reader already understands and that the details do not matter.",
+        "physicalTell": "Objects touched by the intruder dull, dry, bruise, or lose color.",
+        "reveal": "The disguise proves too curated to be lived-in and carries a distinct feline sign.",
+        "escalation": "Written names fade, rooms become interchangeable, and the story starts summarizing itself."
+      },
+      "specificity": {
+        "surface": "helpful guide, patron, scholar, witness, or collector",
+        "hiddenTruth": "anti-storyteller infiltrator that feeds corruption by erasing particulars",
+        "coreTension": "the thing that sounds helpful is actively making the story easier to erase"
+      },
+      "source": "public_narrative_entity_seed",
+      "sourceRoute": "seeds/public_narrative_entities.json",
+      "activeInTypewriter": false,
+      "canonicalStatus": "canonical",
+      "bankSource": {
+        "sourceType": "builtin_entity",
+        "seedFile": "seeds/public_narrative_entities.json"
+      }
+    },
+    {
+      "externalId": "builtin:storytellers_society",
+      "session_id": "__public__",
+      "sessionId": "__public__",
+      "playerId": "",
+      "name": "The Storytellers' Society",
+      "description": "A hidden order that protects storytelling universes by preserving names, detail, consequence, memory, and relation.",
+      "lore": "The Storytellers' Society is a hidden order that protects storytelling universes from collapse, corruption, forgetting, and defilement. Its members are sent into emerging or endangered stories to observe, reinforce, and sometimes intervene.\n\nThey are not simply writers. They are guardians of specificity. To the Society, a story survives through names, places, sensory detail, consequence, memory, cause and effect, recurring symbols, meaningful objects, and relationships between entities. A story does not die when its hero fails. A story dies when it becomes interchangeable.\n\nThe Society often first appears through absurdly ordinary channels: customer support, deliveries, forms, labels, clerks, bureaucratic messages, or sealed packages. This contrast matters. They are mythic, but they work through mundane systems.\n\nThe Society identifies people who can host, grow, or defend storytelling universes. It sends typewriters, blank cards, sealed boxes, letters, travel instructions, emergency objects, and Storytellers into endangered narratives. It is organized, old, resourceful, and very far from all-powerful.",
+      "privacy": "public",
+      "type": "FACTION",
+      "subtype": "Hidden protective order",
+      "tags": [
+        "storytellers-society",
+        "guardians",
+        "specificity",
+        "hidden-order",
+        "delivery",
+        "typewriter",
+        "cards",
+        "preservation"
+      ],
+      "universalTraits": [
+        "protects stories by preserving particulars rather than imposing control",
+        "uses ordinary systems as a mask for mythic logistics",
+        "sends tools and agents into endangered narratives",
+        "treats genericness and forgetting as existential threats",
+        "is powerful but stretched thin"
+      ],
+      "attributes": {
+        "coreFunction": "Framework that justifies the game system and organizes resistance against narrative collapse.",
+        "philosophy": {
+          "doctrine": "A story dies first by losing its particulars.",
+          "values": [
+            "names",
+            "sensory detail",
+            "memory",
+            "consequence",
+            "relationships",
+            "cause and effect"
+          ]
+        },
+        "methods": {
+          "indirectAction": "Asks strange questions in chat, sends impossible packages, hides objects in described places, and awakens useful tools without full explanation.",
+          "fieldTools": "Typewriters, blank cards, sealed boxes, travel instructions, emergency objects, and Storytellers.",
+          "missionStyle": "Observe, reinforce, preserve, and intervene lightly rather than dominate the story."
+        },
+        "playGuidance": {
+          "bestUse": "Present the Society as competent but partial help: reliable enough to matter, limited enough to keep pressure on the player.",
+          "avoid": "Do not make the Society omniscient or able to solve the whole problem off-screen.",
+          "pressure": [
+            "delayed answers",
+            "cryptic logistics",
+            "support arriving through mundane channels"
+          ]
+        },
+        "threatLevel": "protective institution under strain"
+      },
+      "connections": {
+        "sends": [
+          "A Storyteller",
+          "The Deck of Cards",
+          "Typewriter systems"
+        ],
+        "opposes": [
+          "The Defilers",
+          "The Xerofag"
+        ],
+        "protects": [
+          "Storytelling universes",
+          "Named entities",
+          "Meaningful relationships",
+          "Player-writers"
+        ]
+      },
+      "evidence": [
+        {
+          "kind": "contact_signs",
+          "items": [
+            "a mundane message that knows too much",
+            "an impossible delivery",
+            "a package seal or form with hidden significance",
+            "travel instructions arriving before the need is understood"
+          ]
+        },
+        {
+          "kind": "operational_signs",
+          "items": [
+            "a tool appears where the player described it",
+            "a blank key awakens",
+            "a named entity becomes easier to preserve",
+            "a Storyteller enters an endangered scene"
+          ]
+        }
+      ],
+      "relevance": "The main protective institution behind the player's tools, missions, and access to Storytellers.",
+      "impact": "Turns the game from isolated haunting into an organized struggle over whether stories stay vivid enough to survive.",
+      "developmentCost": "5, 9, 13, 17",
+      "storytellingPointsCost": 20,
+      "storytelling_points": 16,
+      "urgency": "Rises when a story nears corruption or collapse",
+      "hooks": {
+        "firstContact": "A mundane support channel or delivery system behaves as if it already knows the player has crossed into story-work.",
+        "materialSign": "A package, seal, label, or handwritten note carries an authority the player cannot explain.",
+        "doctrine": "The Society frames survival as a battle over particulars, not only over plot.",
+        "escalation": "The Society starts sending agents or tools instead of messages."
+      },
+      "specificity": {
+        "surface": "bureaucratic support channel or strange delivery network",
+        "hiddenTruth": "a mythic order preserving names, relation, and consequence across story-worlds",
+        "coreTension": "ordinary logistics carrying impossible protection"
+      },
+      "source": "public_narrative_entity_seed",
+      "sourceRoute": "seeds/public_narrative_entities.json",
+      "activeInTypewriter": false,
+      "canonicalStatus": "canonical",
+      "bankSource": {
+        "sourceType": "builtin_entity",
+        "seedFile": "seeds/public_narrative_entities.json"
+      }
+    },
+    {
+      "externalId": "builtin:storyteller_archetype",
+      "session_id": "__public__",
+      "sessionId": "__public__",
+      "playerId": "",
+      "name": "A Storyteller",
+      "description": "A field agent of the Storytellers' Society who enters written scenes to witness danger, reinforce specificity, and intervene lightly.",
+      "lore": "A Storyteller is a field agent of the Storytellers' Society. Each Storyteller is a distinct persona with their own voice, age, history, style, fears, methods, and specialty. They are sent into storytelling universes to witness, protect, repair, and sometimes warn.\n\nA Storyteller is not a narrator-god. They do not own the story and they cannot simply fix everything. They are watchers, investigators, guardians, and emergency weavers who enter at pressure points.\n\nIn the game, a Storyteller appears when a previously blank key on the typewriter develops a glyph. The glyph does not spell a word. When the player presses it, the Storyteller enters the written scene as a hidden witness: behind a wall, above a ledge, in the reflection of a window, among trees, at the edge of firelight, inside a crowd, or behind the text itself.\n\nA Storyteller's job is threefold. They witness hidden danger, reinforce specificity by restoring names and causality, and intervene physically but lightly. They leave clues, warnings, objects, and small changes that help the world hold together without solving the entire problem.",
+      "privacy": "public",
+      "type": "ARCHETYPE",
+      "subtype": "Storytellers' Society field agent",
+      "tags": [
+        "storyteller",
+        "field-agent",
+        "witness",
+        "intervention",
+        "specificity",
+        "glyph-key",
+        "guardian",
+        "observer"
+      ],
+      "universalTraits": [
+        "enters scenes through a glyph-key rather than a normal typed word",
+        "witnesses hidden danger before most characters do",
+        "reinforces names, causality, relation, and sensory grounding",
+        "intervenes lightly instead of resolving the whole story",
+        "exists as a distinct vulnerable person, not an omnipotent narrator"
+      ],
+      "attributes": {
+        "coreFunction": "Field agent archetype that turns improved writing into in-world assistance.",
+        "appearance": {
+          "entryStyle": "Appears as a hidden witness in reflections, edges, crowds, treelines, ledges, or firelight.",
+          "visibilityRule": "The reader or player notices them more readily than the main cast does.",
+          "identityRule": "Each Storyteller should still become a distinct person with name, style, fear, specialty, and voice."
+        },
+        "functions": {
+          "witness": "Notices inconsistencies, clues, corruption signs, weakened entities, and danger the scene has not yet named.",
+          "reinforce": "Restores proper nouns, causality, relationships, and sensory grounding.",
+          "intervene": "Leaves a clue, warning, mark, object, delay, protection, or single sentence-strengthening action."
+        },
+        "typewriterBehavior": "A Storyteller enters through a glyph on a previously blank key rather than through a typed lexical key.",
+        "playGuidance": {
+          "bestUse": "Use Storytellers to reward stronger narrative specificity with sharper in-world noticing and limited help.",
+          "avoid": "Do not let them replace the player's agency or flatten the danger by explaining everything.",
+          "pressure": [
+            "partial warnings",
+            "small interventions with cost",
+            "evidence that someone else sees the hidden pattern"
+          ]
+        },
+        "threatLevel": "ally under pressure"
+      },
+      "connections": {
+        "serves": [
+          "The Storytellers' Society"
+        ],
+        "opposes": [
+          "The Defilers",
+          "The Xerofag"
+        ],
+        "protects": [
+          "Named entities",
+          "The Deck of Cards",
+          "The player-writer's story-world"
+        ]
+      },
+      "evidence": [
+        {
+          "kind": "entry_signs",
+          "items": [
+            "a blank key gains a glyph",
+            "a hidden observer appears at the edge of the scene",
+            "a reflection or background figure becomes meaningful",
+            "the scene gains a clue no one should have placed there"
+          ]
+        },
+        {
+          "kind": "reinforcement_signs",
+          "items": [
+            "a proper noun is restored",
+            "a causal chain becomes legible",
+            "an object or place becomes more concrete",
+            "one connection between entities becomes visible again"
+          ]
+        }
+      ],
+      "relevance": "Primary allied archetype that demonstrates how the Society intervenes inside a living scene instead of from outside it.",
+      "impact": "Makes the story feel observed, supported, and threatened at once by adding limited in-world intelligence and repair.",
+      "developmentCost": "4, 8, 12, 16",
+      "storytellingPointsCost": 16,
+      "storytelling_points": 12,
+      "urgency": "Situational; rises at pressure points and during corruption events",
+      "hooks": {
+        "firstAppearance": "A background witness appears where no one in the scene should have time to stand and watch.",
+        "witnessAction": "The Storyteller notices what the protagonist overlooked.",
+        "reinforcement": "A name, cause, or relation is restored with quiet precision.",
+        "interventionLimit": "The Storyteller helps, but only by one clue, one warning, one object, or one strengthened thread at a time.",
+        "departure": "They leave behind evidence of attention rather than a full explanation."
+      },
+      "specificity": {
+        "surface": "ghostly observer or hidden witness",
+        "hiddenTruth": "trained field agent preserving the story from inside",
+        "coreTension": "help is present, but it is limited and costly"
+      },
+      "source": "public_narrative_entity_seed",
+      "sourceRoute": "seeds/public_narrative_entities.json",
+      "activeInTypewriter": false,
+      "canonicalStatus": "canonical",
+      "bankSource": {
+        "sourceType": "builtin_entity",
+        "seedFile": "seeds/public_narrative_entities.json"
+      }
+    },
+    {
+      "externalId": "builtin:deck_of_cards",
+      "session_id": "__public__",
+      "sessionId": "__public__",
+      "playerId": "",
+      "name": "The Deck of Cards",
+      "description": "A living archive of blank cards that awaken when story entities become specific, meaningful, and relational enough to matter again.",
+      "lore": "The Deck of Cards is a strange collection of blank cards delivered with the typewriter. At first the cards appear empty, made from an unfamiliar material that is neither paper, leather, bone, nor wood. They are smooth but fibrous, pale but not white, and faintly warm after being held.\n\nThe cards become meaningful only as the player writes. When an entity in the story gains enough specificity, relationship, and narrative weight, it may claim a card. A person, place, object, creature, ritual, organization, memory, or symbol can become a card.\n\nThe deck is not decoration. It is the story's memory system. When something becomes a card, it becomes harder for Defilers to erase or genericize it. A card can hold a name, image, type, subtype, traits, relationships, first appearance, clues, unresolved hooks, emotional charge, risk of corruption, Storyteller attachment, and player discoveries.\n\nThe typewriter writes forward and the deck remembers backward. Together they let the player build a world that can resist forgetting.",
+      "privacy": "public",
+      "type": "ARTIFACT",
+      "subtype": "Living archive deck",
+      "tags": [
+        "deck-of-cards",
+        "cards",
+        "archive",
+        "memory",
+        "specificity",
+        "preservation",
+        "artifact",
+        "defense"
+      ],
+      "universalTraits": [
+        "begins as a deck of blank but physically strange cards",
+        "awakens only when an entity becomes specific and meaningful enough",
+        "preserves names, traits, relations, and clues against corruption",
+        "can be damaged, blurred, or decayed by Defiler influence",
+        "acts as both magical defense and practical world-memory"
+      ],
+      "attributes": {
+        "coreFunction": "Portable memory and preservation system for the story-world.",
+        "material": {
+          "surface": "Smooth but fibrous, pale but not white, warm after being held.",
+          "ambiguity": "Not clearly paper, leather, bone, or wood."
+        },
+        "cardBehavior": {
+          "awakeningRule": "A card claims an entity only after the entity becomes specific, relational, and narratively reusable.",
+          "front": "Shows the entity as a significant illustrated memory or witness record.",
+          "back": "Reflects the current storytelling universe through motifs, textures, symbols, weather, architecture, flora, fauna, or seals.",
+          "corruptionState": "A damaged card may blur names, warp subtypes, lose relation lines, or show decay marks."
+        },
+        "playGuidance": {
+          "bestUse": "Use the deck as both collectible memory and as a defense layer that makes entities harder to flatten or forget.",
+          "avoid": "Do not let every named thing instantly claim a card; only recurring, meaningful entities should do so.",
+          "pressure": [
+            "which entity deserves preservation",
+            "which card is fading",
+            "what the story has forgotten",
+            "what relation is worth protecting"
+          ]
+        },
+        "threatLevel": "protective artifact vulnerable to corruption"
+      },
+      "connections": {
+        "pairedWith": [
+          "Typewriter systems"
+        ],
+        "strengthenedBy": [
+          "A Storyteller",
+          "Concrete writing",
+          "The Storytellers' Society"
+        ],
+        "resists": [
+          "The Defilers"
+        ],
+        "canPreserve": [
+          "The Xerofag",
+          "People",
+          "Places",
+          "Objects",
+          "Organizations",
+          "Rituals",
+          "Memories",
+          "Symbols"
+        ]
+      },
+      "evidence": [
+        {
+          "kind": "awakening_signs",
+          "items": [
+            "a blank card warms after a strong scene",
+            "an image or name blooms onto the surface",
+            "the deck presents a new preserved entity after repeated specificity",
+            "the back of a card starts carrying world motifs"
+          ]
+        },
+        {
+          "kind": "corruption_signs",
+          "items": [
+            "a card name fades",
+            "the image blurs",
+            "relationship lines break",
+            "generic replacement text creeps in",
+            "a card edge rots or carries a scratch-like mark"
+          ]
+        }
+      ],
+      "relevance": "Primary archive, inventory, clue system, and anti-corruption memory tool for the whole narrative framework.",
+      "impact": "Makes the world's important entities visible, collectible, protectable, and reusable while giving Defiler corruption a concrete surface to attack.",
+      "developmentCost": "5, 8, 11, 15",
+      "storytellingPointsCost": 17,
+      "storytelling_points": 13,
+      "urgency": "Persistent; becomes urgent when preserved cards start to blur or decay",
+      "hooks": {
+        "blankState": "The cards begin empty and materially strange.",
+        "awakening": "A strong scene causes an entity to claim a card.",
+        "frontMeaning": "The front shows the preserved entity as a significant memory or witness record.",
+        "corruptionState": "A damaged card loses names, detail, or relation clarity.",
+        "repair": "Strong concrete continuation or Storyteller attention can restore a threatened card."
+      },
+      "specificity": {
+        "surface": "blank collectible cards",
+        "hiddenTruth": "portable archive preserving story entities against forgetting and corruption",
+        "coreTension": "memory can be saved, but only if the story has made it matter enough"
+      },
+      "source": "public_narrative_entity_seed",
+      "sourceRoute": "seeds/public_narrative_entities.json",
+      "activeInTypewriter": false,
+      "canonicalStatus": "canonical",
+      "bankSource": {
+        "sourceType": "builtin_entity",
+        "seedFile": "seeds/public_narrative_entities.json"
+      }
+    }
+  ]
+}

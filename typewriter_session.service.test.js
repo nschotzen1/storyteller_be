@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { NarrativeFragment } from './models/models.js';
 import {
+  normalizeTypewriterWorldState,
   saveTypewriterSessionFragment,
   startTypewriterSession
 } from './services/typewriterSessionService.js';
@@ -53,5 +54,41 @@ describe('typewriterSessionService', () => {
 
     expect(stored.fragment).toBe('one two three four five');
     expect(stored.initialFragment).toBe('one two three');
+  });
+
+  test('persists typewriter world state and bounded turn metadata with the fragment', async () => {
+    const worldState = normalizeTypewriterWorldState({
+      entities: [{ name: 'Market Gate', status: 'closed' }],
+      active_tension: 'A checkpoint has noticed the writer.',
+      established_facts: ['The gate is locked.']
+    });
+    const typewriterTurn = {
+      userBeat: 'A guard looked up.',
+      continuation: 'The guard slid the bolt home.',
+      irreversible: 'The gate is now locked.',
+      systemPressure: 'Infrastructure pressure manifested through the locked gate.'
+    };
+
+    const saved = await saveTypewriterSessionFragment('world-state-session', 'A guard looked up. The guard slid the bolt home.', {
+      worldState,
+      typewriterTurn
+    });
+
+    expect(saved.worldState).toEqual(worldState);
+    expect(saved.lastTypewriterTurn).toEqual(expect.objectContaining(typewriterTurn));
+    expect(saved.typewriterTurns).toEqual([
+      expect.objectContaining(typewriterTurn)
+    ]);
+
+    const stored = await NarrativeFragment.findOne({
+      session_id: 'world-state-session',
+      turn: 0
+    }).lean();
+
+    expect(stored.worldState).toEqual(worldState);
+    expect(stored.lastTypewriterTurn).toEqual(expect.objectContaining(typewriterTurn));
+    expect(stored.typewriterTurns).toEqual([
+      expect.objectContaining(typewriterTurn)
+    ]);
   });
 });
