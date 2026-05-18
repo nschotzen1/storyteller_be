@@ -133,3 +133,27 @@ This is implemented in:
 - `timing` is now surfaced in both a toggleable debug panel and optional "Last Ghostwrite" timing chips.
 - `continuation_insights` is safe for both live and mock responses.
 - `word_count` is now explicit in the story continuation prompt payload contract.
+
+## 7) Storyteller Key Policy
+
+Storyteller key behavior is controlled by `config/typewriter_storyteller_policy.json`.
+
+The policy controls:
+- key emergence cadence: `keyEmergence.checkIntervalWords`
+- key unlock thresholds: `keyEmergence.wordThresholds`
+- repeated press growth lock: `progression.repressGrowthFactor`
+- per-press stages: `progression.stages`
+- entity/substance budget: `substanceBudget`
+- slot archetypes: `archetypes`
+
+The default stage ladder is:
+- press 1: `signature`, no first person, no current-scene intervention
+- press 2: `pattern`, no first person, no current-scene intervention
+- press 3: `witness`, first person allowed, no current-scene intervention
+- press 4+: `intervention`, first person allowed, current-scene intervention allowed
+
+`GET /api/typewriter/storyteller-policy` returns the normalized live policy.
+`POST /api/typewriter/storyteller-policy` accepts a replacement policy and writes it back to the config file.
+
+Each `/api/shouldCreateStorytellerKey` response includes the policy and each slot's next `pressPolicy`.
+Each `/api/send_storyteller_typewriter_text` response includes `storytellerPressPolicy` and mirrors the stage in `continuation_insights.storyteller_press`.

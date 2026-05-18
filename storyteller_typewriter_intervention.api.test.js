@@ -105,6 +105,26 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
     expect(interventionResponse.body).toHaveProperty('typewriterKey');
     expect(interventionResponse.body).toHaveProperty('typewriterKeys');
     expect(interventionResponse.body).toHaveProperty('entityKey');
+    expect(interventionResponse.body.storytellerPressPolicy).toEqual(
+      expect.objectContaining({
+        stageId: 'signature',
+        stageLabel: 'Signature Entry',
+        pressNumber: 1,
+        firstPersonAllowed: false,
+        currentSceneInterventionAllowed: false,
+        archetype: expect.objectContaining({
+          id: 'cartographer',
+          label: 'The Cartographer'
+        })
+      })
+    );
+    expect(interventionResponse.body.continuation_insights.storyteller_press).toEqual(
+      expect.objectContaining({
+        stage_id: 'signature',
+        stage_label: 'Signature Entry',
+        press_number: 1
+      })
+    );
     expect(interventionResponse.body.typewriterKey).toEqual(
       expect.objectContaining({
         entityId: expect.any(String),
@@ -178,7 +198,11 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
     expect(refreshedSlotsResponse.body.slots[0]).toEqual(
       expect.objectContaining({
         canPress: false,
-        pressLockedReason: 'growth_required'
+        pressLockedReason: 'growth_required',
+        pressPolicy: expect.objectContaining({
+          stageId: 'pattern',
+          pressNumber: 2
+        })
       })
     );
   });
@@ -397,5 +421,87 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
       .expect(200);
 
     expect(retryAfterGrowth.body.fragment.length).toBeGreaterThan(grownFragment.length);
+    expect(retryAfterGrowth.body.storytellerPressPolicy).toEqual(
+      expect.objectContaining({
+        stageId: 'pattern',
+        pressNumber: 2,
+        firstPersonAllowed: false,
+        currentSceneInterventionAllowed: false
+      })
+    );
+  });
+
+  test('escalates a storyteller key to first-person witness and current-scene intervention stages', async () => {
+    const sessionId = 'storyteller-stage-policy';
+
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({
+        sessionId,
+        fragment: buildNarrative(36)
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/shouldCreateStorytellerKey')
+      .send({ sessionId, mocked_api_calls: true })
+      .expect(200);
+
+    const storyteller = await Storyteller.findOneAndUpdate(
+      { session_id: sessionId, keySlotIndex: 0 },
+      {
+        $set: {
+          typewriterInterventionsCount: 2,
+          lastTypewriterPressFragmentLength: null
+        }
+      },
+      { new: true }
+    ).lean();
+    expect(storyteller).toBeTruthy();
+
+    const witnessResponse = await request(app)
+      .post('/api/send_storyteller_typewriter_text')
+      .send({
+        sessionId,
+        storytellerId: String(storyteller._id),
+        mocked_api_calls: true
+      })
+      .expect(200);
+
+    expect(witnessResponse.body.storytellerPressPolicy).toEqual(
+      expect.objectContaining({
+        stageId: 'witness',
+        pressNumber: 3,
+        firstPersonAllowed: true,
+        currentSceneInterventionAllowed: false
+      })
+    );
+
+    const grownFragment = growNarrativeBeyondTenPercent(witnessResponse.body.fragment);
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({
+        sessionId,
+        fragment: grownFragment
+      })
+      .expect(200);
+
+    const interventionResponse = await request(app)
+      .post('/api/send_storyteller_typewriter_text')
+      .send({
+        sessionId,
+        storytellerId: String(storyteller._id),
+        mocked_api_calls: true
+      })
+      .expect(200);
+
+    expect(interventionResponse.body.storytellerPressPolicy).toEqual(
+      expect.objectContaining({
+        stageId: 'intervention',
+        pressNumber: 4,
+        firstPersonAllowed: true,
+        currentSceneInterventionAllowed: true
+      })
+    );
   });
 });

@@ -47,6 +47,42 @@ afterAll(async () => {
 });
 
 describe('POST /api/shouldCreateStorytellerKey', () => {
+  test('exposes the configurable storyteller key policy', async () => {
+    const response = await request(app)
+      .get('/api/typewriter/storyteller-policy')
+      .expect(200);
+
+    expect(response.body.policy).toEqual(
+      expect.objectContaining({
+        keyEmergence: expect.objectContaining({
+          checkIntervalWords: 5,
+          wordThresholds: [30, 50, 100]
+        }),
+        progression: expect.objectContaining({
+          mode: 'per_storyteller',
+          stages: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'signature',
+              firstPersonAllowed: false,
+              currentSceneInterventionAllowed: false
+            }),
+            expect.objectContaining({
+              id: 'intervention',
+              firstPersonAllowed: true,
+              currentSceneInterventionAllowed: true
+            })
+          ])
+        }),
+        archetypes: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'cartographer',
+            label: 'The Cartographer'
+          })
+        ])
+      })
+    );
+  });
+
   test('creates and assigns storyteller keys into fixed typewriter slots at the expected thresholds', async () => {
     const sessionId = 'typewriter-storyteller-session';
 

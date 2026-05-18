@@ -200,6 +200,16 @@ import {
   resetWellSceneConfig,
   saveWellSceneConfig
 } from './services/wellSceneConfigService.js';
+import {
+  buildStorytellerArchetypeState,
+  getTypewriterStorytellerArchetypeForSlot,
+  getTypewriterStorytellerCheckIntervalWords,
+  getTypewriterStorytellerRepressGrowthFactor,
+  getTypewriterStorytellerWordThresholds,
+  loadTypewriterStorytellerPolicyConfig,
+  resolveTypewriterStorytellerPressPolicy,
+  saveTypewriterStorytellerPolicyConfig
+} from './services/typewriterStorytellerPolicyService.js';
 
 
 const app = express();
@@ -320,8 +330,6 @@ const MOCK_STORYTELLER_KEY_URLS = [
   '/assets/mocks/storyteller_keys/veil_cartographer_key.png'
 ];
 const MOCK_STORYTELLER_ILLUSTRATION_URL = MOCK_STORYTELLER_ILLUSTRATION_URLS[0];
-const TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS = 5;
-const TYPEWRITER_STORYTELLER_WORD_THRESHOLDS = [30, 50, 100];
 const TYPEWRITER_STORYTELLER_KEY_SLOTS = [
   {
     slotIndex: 0,
@@ -3593,14 +3601,17 @@ registerTypewriterRoutes(app, {
   normalizeTypewriterWorldStateUpdate,
   buildMockTypewriterWorldStateUpdate,
   buildTypewriterTurnRecord,
+  loadTypewriterStorytellerPolicyConfig,
+  saveTypewriterStorytellerPolicyConfig,
+  getTypewriterStorytellerCheckIntervalWords,
   listTypewriterSlotStorytellers,
   filterAssignedTypewriterStorytellers,
   findNextAvailableTypewriterStorytellerSlot,
   getTypewriterStorytellerThreshold,
-  TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS,
   generateTypewriterStorytellerForSlot,
   buildStorytellerListItem,
   buildTypewriterStorytellerSlots,
+  resolveTypewriterStorytellerPressPolicy,
   listTypewriterKeysForSession,
   findTypewriterStorytellerForIntervention,
   acquireTypewriterStorytellerInterventionLock,
@@ -4061,11 +4072,12 @@ async function resolveWorldContextForSession(sessionId, playerId = '', requested
   };
 }
 
-function getTypewriterStorytellerThreshold(activeCount = 0) {
+function getTypewriterStorytellerThreshold(activeCount = 0, policyConfig = null) {
   if (!Number.isInteger(activeCount) || activeCount < 0) {
     return null;
   }
-  return TYPEWRITER_STORYTELLER_WORD_THRESHOLDS[activeCount] ?? null;
+  const thresholds = getTypewriterStorytellerWordThresholds(policyConfig || undefined);
+  return thresholds[activeCount] ?? null;
 }
 
 function buildTypewriterStorytellerKeyPayload(typewriterKey, slotDefinition) {
@@ -4116,8 +4128,6 @@ function getTypewriterStorytellerSlotDefinition(slotIndex) {
   return TYPEWRITER_STORYTELLER_KEY_SLOTS.find((slot) => slot.slotIndex === slotIndex) || null;
 }
 
-const STORYTELLER_REPRESS_GROWTH_FACTOR = 1.1;
-
 function normalizeTypewriterFragmentLength(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -4129,17 +4139,20 @@ function getStorytellerLastPressFragmentLength(storyteller) {
   return normalized > 0 ? normalized : null;
 }
 
-function getStorytellerRequiredFragmentLength(storyteller) {
+function getStorytellerRequiredFragmentLength(storyteller, policyConfig = null) {
   const lastPressFragmentLength = getStorytellerLastPressFragmentLength(storyteller);
   if (lastPressFragmentLength === null) return 0;
-  return Math.floor(lastPressFragmentLength * STORYTELLER_REPRESS_GROWTH_FACTOR) + 1;
+  return Math.floor(lastPressFragmentLength * getTypewriterStorytellerRepressGrowthFactor(policyConfig || undefined)) + 1;
 }
 
-function buildTypewriterStorytellerPressState(storyteller, currentFragmentLength = 0) {
+function buildTypewriterStorytellerPressState(storyteller, currentFragmentLength = 0, policyConfig = null) {
   const safeFragmentLength = normalizeTypewriterFragmentLength(currentFragmentLength);
   const lastPressFragmentLength = getStorytellerLastPressFragmentLength(storyteller);
-  const requiredFragmentLength = getStorytellerRequiredFragmentLength(storyteller);
+  const requiredFragmentLength = getStorytellerRequiredFragmentLength(storyteller, policyConfig);
   const typewriterInterventionInFlight = Boolean(storyteller?.typewriterInterventionInFlight);
+  const pressPolicy = storyteller
+    ? resolveTypewriterStorytellerPressPolicy(storyteller, policyConfig || undefined)
+    : null;
   const canPressByGrowth = !requiredFragmentLength || safeFragmentLength >= requiredFragmentLength;
   return {
     currentFragmentLength: safeFragmentLength,
@@ -4153,13 +4166,14 @@ function buildTypewriterStorytellerPressState(storyteller, currentFragmentLength
       : canPressByGrowth
         ? ''
         : 'growth_required',
-    canPress: Boolean(storyteller) && !typewriterInterventionInFlight && canPressByGrowth
+    canPress: Boolean(storyteller) && !typewriterInterventionInFlight && canPressByGrowth,
+    pressPolicy
   };
 }
 
-function buildTypewriterStorytellerSlotState(slotDefinition, storyteller = null, currentFragmentLength = 0) {
+function buildTypewriterStorytellerSlotState(slotDefinition, storyteller = null, currentFragmentLength = 0, policyConfig = null) {
   const keyImageUrl = firstDefinedString(storyteller?.keyImageLocalUrl, storyteller?.keyImageUrl);
-  const pressState = buildTypewriterStorytellerPressState(storyteller, currentFragmentLength);
+  const pressState = buildTypewriterStorytellerPressState(storyteller, currentFragmentLength, policyConfig);
   return {
     slotIndex: slotDefinition.slotIndex,
     slotKey: slotDefinition.slotKey,
@@ -4179,11 +4193,13 @@ function buildTypewriterStorytellerSlotState(slotDefinition, storyteller = null,
     requiredFragmentLength: pressState.requiredFragmentLength,
     fragmentGrowthNeeded: pressState.fragmentGrowthNeeded,
     lastTypewriterPressAt: pressState.lastTypewriterPressAt,
-    typewriterInterventionInFlight: pressState.typewriterInterventionInFlight
+    typewriterInterventionInFlight: pressState.typewriterInterventionInFlight,
+    archetype: pressState.pressPolicy?.archetype || null,
+    pressPolicy: pressState.pressPolicy
   };
 }
 
-function buildTypewriterStorytellerSlots(storytellers = [], currentFragmentLength = 0) {
+function buildTypewriterStorytellerSlots(storytellers = [], currentFragmentLength = 0, policyConfig = null) {
   const storytellerBySlot = new Map();
   for (const storyteller of storytellers) {
     if (!Number.isInteger(storyteller?.keySlotIndex)) continue;
@@ -4196,7 +4212,8 @@ function buildTypewriterStorytellerSlots(storytellers = [], currentFragmentLengt
     buildTypewriterStorytellerSlotState(
       slotDefinition,
       storytellerBySlot.get(slotDefinition.slotIndex) || null,
-      currentFragmentLength
+      currentFragmentLength,
+      policyConfig
     )
   );
 }
@@ -4401,13 +4418,15 @@ async function generateTypewriterStorytellerForSlot({
   fragmentText,
   slotDefinition,
   req,
-  body = {}
+  body = {},
+  policyConfig = null
 }) {
   const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
   const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
   const storytellerProvider = typeof storytellerPipeline?.provider === 'string' ? storytellerPipeline.provider : 'openai';
   const storytellerPromptDoc = await getLatestPromptTemplate('storyteller_creation');
   const shouldMockStorytellers = resolveMockMode(body, storytellerPipeline.useMock);
+  const archetype = getTypewriterStorytellerArchetypeForSlot(slotDefinition.slotIndex, policyConfig || undefined);
 
   let storytellerDataArray;
   if (shouldMockStorytellers) {
@@ -4417,13 +4436,21 @@ async function generateTypewriterStorytellerForSlot({
     if (storytellerPromptDoc?.promptTemplate) {
       prompt = renderPromptTemplateString(storytellerPromptDoc.promptTemplate, {
         fragmentText,
-        storytellerCount: 1
+        storytellerCount: 1,
+        storytellerArchetype: archetype.label,
+        storytellerArchetypeStyle: archetype.style,
+        storytellerArchetypeRole: archetype.narrativeRole,
+        storytellerArchetypeSubstanceBias: archetype.substanceBias.join(', ')
       });
     } else {
       const routeConfig = await getRouteConfig('text_to_storyteller');
       prompt = renderPrompt(routeConfig.promptTemplate, {
         fragmentText,
-        storytellerCount: 1
+        storytellerCount: 1,
+        storytellerArchetype: archetype.label,
+        storytellerArchetypeStyle: archetype.style,
+        storytellerArchetypeRole: archetype.narrativeRole,
+        storytellerArchetypeSubstanceBias: archetype.substanceBias.join(', ')
       });
     }
     storytellerDataArray = await callJsonLlm({
@@ -4466,6 +4493,9 @@ async function generateTypewriterStorytellerForSlot({
   payload.keyShape = slotDefinition.keyShape;
   payload.keyBlankTextureUrl = slotDefinition.blankTextureUrl;
   payload.keySlotIndex = slotDefinition.slotIndex;
+  payload.typewriterArchetypeId = archetype.id;
+  payload.typewriterArchetypeLabel = archetype.label;
+  payload.typewriterArchetype = buildStorytellerArchetypeState(archetype);
 
   if (shouldMockStorytellers) {
     payload.keyImageUrl = pickMockStorytellerKeyUrl(slotDefinition.slotIndex);
@@ -4524,6 +4554,14 @@ function buildStorytellerListItem(storyteller) {
     iconUrl: keyImageUrl || illustration,
     keyShape: firstDefinedString(storyteller?.keyShape, storyteller?.typewriter_key?.key_shape),
     keySlotIndex: Number.isInteger(storyteller?.keySlotIndex) ? storyteller.keySlotIndex : null,
+    archetype: storyteller?.typewriterArchetype && typeof storyteller.typewriterArchetype === 'object'
+      ? buildStorytellerArchetypeState(storyteller.typewriterArchetype)
+      : storyteller?.typewriterArchetypeId || storyteller?.typewriterArchetypeLabel
+        ? {
+            id: firstDefinedString(storyteller?.typewriterArchetypeId),
+            label: firstDefinedString(storyteller?.typewriterArchetypeLabel)
+          }
+        : null,
     keyBlankTextureUrl: firstDefinedString(
       storyteller?.keyBlankTextureUrl,
       storyteller?.typewriter_key?.blank_texture_url,
@@ -4533,10 +4571,11 @@ function buildStorytellerListItem(storyteller) {
   };
 }
 
-function buildTypewriterSessionStorytellerItem(storyteller) {
-  const pressState = buildTypewriterStorytellerPressState(storyteller, 0);
+function buildTypewriterSessionStorytellerItem(storyteller, policyConfig = null) {
+  const pressState = buildTypewriterStorytellerPressState(storyteller, 0, policyConfig);
   return {
     ...buildStorytellerListItem(storyteller),
+    pressPolicy: pressState.pressPolicy,
     introducedInTypewriter: Boolean(storyteller?.introducedInTypewriter),
     typewriterInterventionsCount: Number.isFinite(Number(storyteller?.typewriterInterventionsCount))
       ? Number(storyteller.typewriterInterventionsCount)
@@ -4568,7 +4607,8 @@ async function buildTypewriterSessionInspectPayload(sessionId, playerId = '') {
   const entities = (await listTypewriterStoryEntities(sessionId, playerId)).map(buildTypewriterSessionEntityItem);
   const narrativeText = firstDefinedString(fragmentDoc?.fragment);
   const narrativeLength = narrativeText.length;
-  const slots = buildTypewriterStorytellerSlots(storytellers, narrativeLength);
+  const policyConfig = await loadTypewriterStorytellerPolicyConfig();
+  const slots = buildTypewriterStorytellerSlots(storytellers, narrativeLength, policyConfig);
 
   return {
     sessionId,
@@ -4580,10 +4620,11 @@ async function buildTypewriterSessionInspectPayload(sessionId, playerId = '') {
     typewriterTurns: Array.isArray(fragmentDoc?.typewriterTurns) ? fragmentDoc.typewriterTurns : [],
     currentFragmentLength: narrativeLength,
     narrativeWordCount: countWords(narrativeText),
+    storytellerPolicy: policyConfig,
     slots,
     typewriterKeys,
     entityKeys: typewriterKeys,
-    storytellers: storytellers.map(buildTypewriterSessionStorytellerItem),
+    storytellers: storytellers.map((storyteller) => buildTypewriterSessionStorytellerItem(storyteller, policyConfig)),
     entities,
     counts: {
       storytellerCount: storytellers.length,
@@ -4608,7 +4649,8 @@ function buildStorytellerInterventionPromptPayloadWithTask(
   storyteller,
   fragmentText,
   storytellerTask = '',
-  storytellerKnownContext = ''
+  storytellerKnownContext = '',
+  pressPolicy = null
 ) {
   const typewriterKey = storyteller?.typewriter_key && typeof storyteller.typewriter_key === 'object'
     ? storyteller.typewriter_key
@@ -4616,6 +4658,9 @@ function buildStorytellerInterventionPromptPayloadWithTask(
   const voiceCreation = storyteller?.voice_creation && typeof storyteller.voice_creation === 'object'
     ? storyteller.voice_creation
     : {};
+  const resolvedPolicy = pressPolicy || resolveTypewriterStorytellerPressPolicy(storyteller);
+  const archetype = resolvedPolicy?.archetype || {};
+  const budget = resolvedPolicy?.substanceBudget || {};
   return {
     storyteller_name: firstDefinedString(storyteller?.name) || 'Unnamed storyteller',
     storyteller_immediate_ghost_appearance: firstDefinedString(storyteller?.immediate_ghost_appearance),
@@ -4630,6 +4675,26 @@ function buildStorytellerInterventionPromptPayloadWithTask(
     storyteller_already_introduced: storyteller?.introducedInTypewriter ? 'true' : 'false',
     storyteller_task: firstDefinedString(storytellerTask, DEFAULT_STORYTELLER_INTERVENTION_TASK),
     storyteller_known_context: firstDefinedString(storytellerKnownContext, DEFAULT_STORYTELLER_KNOWN_CONTEXT),
+    storyteller_archetype_id: firstDefinedString(archetype.id),
+    storyteller_archetype_label: firstDefinedString(archetype.label),
+    storyteller_archetype_style: firstDefinedString(archetype.style),
+    storyteller_archetype_role: firstDefinedString(archetype.narrativeRole),
+    storyteller_archetype_substance_bias: normalizeLooseStringArray(archetype.substanceBias).join(', '),
+    storyteller_archetype_intervention_style: firstDefinedString(archetype.interventionStyle),
+    storyteller_press_count: String(resolvedPolicy.pressCount ?? 0),
+    storyteller_press_number: String(resolvedPolicy.pressNumber ?? 1),
+    storyteller_stage_id: firstDefinedString(resolvedPolicy.stageId),
+    storyteller_stage_label: firstDefinedString(resolvedPolicy.stageLabel),
+    storyteller_stage_instruction: firstDefinedString(resolvedPolicy.stageInstruction),
+    storyteller_proximity: firstDefinedString(resolvedPolicy.proximity),
+    storyteller_narrative_authority: firstDefinedString(resolvedPolicy.narrativeAuthority),
+    storyteller_first_person_allowed: resolvedPolicy.firstPersonAllowed ? 'true' : 'false',
+    storyteller_current_scene_intervention_allowed: resolvedPolicy.currentSceneInterventionAllowed ? 'true' : 'false',
+    storyteller_output_word_min: String(resolvedPolicy.outputWordMin || 45),
+    storyteller_output_word_max: String(resolvedPolicy.outputWordMax || 90),
+    storyteller_max_new_entities: String(budget.maxNewEntities ?? 1),
+    storyteller_min_reused_entities: String(budget.minReusedEntities ?? 1),
+    storyteller_allow_major_plot_change: budget.allowMajorPlotChange ? 'true' : 'false',
     fragment_text: typeof fragmentText === 'string' ? fragmentText : ''
   };
 }
@@ -4686,17 +4751,29 @@ function buildStorytellerInterventionCompositePrompt({
     .join('\n\n');
 }
 
+function hasStorytellerPolicyPromptPlaceholders(promptTemplate = '') {
+  const prompt = typeof promptTemplate === 'string' ? promptTemplate : '';
+  return [
+    '{{storyteller_task}}',
+    '{{storyteller_known_context}}',
+    '{{storyteller_stage_id}}',
+    '{{storyteller_first_person_allowed}}',
+    '{{storyteller_current_scene_intervention_allowed}}',
+    '{{storyteller_archetype_label}}'
+  ].every((placeholder) => prompt.includes(placeholder));
+}
+
 async function resolveStorytellerInterventionPromptTemplate() {
   const latestPrompt = await getLatestPromptTemplate('storyteller_intervention');
-  if (
-    latestPrompt?.promptTemplate
-    && latestPrompt.promptTemplate.includes('{{storyteller_task}}')
-    && latestPrompt.promptTemplate.includes('{{storyteller_known_context}}')
-  ) {
+  if (hasStorytellerPolicyPromptPlaceholders(latestPrompt?.promptTemplate)) {
     return latestPrompt.promptTemplate;
   }
   const currentTemplates = await getCurrentTypewriterPromptTemplates();
-  return currentTemplates?.storyteller_intervention?.promptTemplate || latestPrompt?.promptTemplate || '';
+  if (hasStorytellerPolicyPromptPlaceholders(currentTemplates?.storyteller_intervention?.promptTemplate)) {
+    return currentTemplates.storyteller_intervention.promptTemplate;
+  }
+  const routeConfig = await getRouteConfig('storyteller_typewriter_intervention');
+  return routeConfig?.promptTemplate || currentTemplates?.storyteller_intervention?.promptTemplate || latestPrompt?.promptTemplate || '';
 }
 
 async function resolveTypewriterKeyVerificationPromptTemplate() {
@@ -4719,13 +4796,15 @@ function buildStorytellerInterventionPromptMessages(
   promptTemplate,
   storytellerTask = '',
   storytellerKnownContext = '',
-  continuationPromptTemplate = ''
+  continuationPromptTemplate = '',
+  pressPolicy = null
 ) {
   const payload = buildStorytellerInterventionPromptPayloadWithTask(
     storyteller,
     fragmentText,
     storytellerTask,
-    storytellerKnownContext
+    storytellerKnownContext,
+    pressPolicy
   );
   const renderedPrompt = buildStorytellerInterventionCompositePrompt({
     fragmentText,
@@ -4774,12 +4853,20 @@ function pickMockStoryEntitySeed(fragmentText = '') {
   };
 }
 
-function buildMockStorytellerIntervention(storyteller, fragmentText, storytellerTask = '') {
+function buildMockStorytellerIntervention(storyteller, fragmentText, storytellerTask = '', pressPolicy = null) {
   const taskText = firstDefinedString(storytellerTask).toLowerCase();
+  const policy = pressPolicy || resolveTypewriterStorytellerPressPolicy(storyteller);
+  const archetypeLabel = firstDefinedString(policy?.archetype?.label, 'The storyteller');
+  const stageId = firstDefinedString(policy?.stageId, 'signature');
+  const canUseFirstPerson = Boolean(policy?.firstPersonAllowed);
+  const canIntervene = Boolean(policy?.currentSceneInterventionAllowed);
   if (taskText.includes('xerofag')) {
     const storytellerName = firstDefinedString(storyteller?.name) || 'The hidden storyteller';
+    const xerofagContinuation = canUseFirstPerson
+      ? `It was then that I, ${storytellerName}, drew near enough to read the thumb-wide crescent of dark wax pressed into the latch. "That mark makes me suspect the Xerofag, though certainty would be a dangerous vanity." The Wax Clerk looked up only once, and the room seemed to remember another door.`
+      : `${archetypeLabel} entered the prose as pressure around the latch, not yet as a body. A thumb-wide crescent of dark wax had been pressed into the metal, too deliberate to be weather and too quiet to be warning. "That mark makes the scene suspect the Xerofag," came the storyteller's low restraint, and the Wax Clerk became a name the room had almost hidden.`;
     return {
-      continuation: `It was then that I, ${storytellerName}, took notice. "The thumb-wide crescent of dark wax already pressed into the latch is wrong; it makes me suspect the Xerofag, though I would not swear to it yet." The Wax Clerk looked up only once, and I stepped back before the room could turn toward me.`,
+      continuation: xerofagContinuation,
       entity: {
         name: 'Wax Clerk',
         key_text: 'Wax Clerk',
@@ -4796,10 +4883,16 @@ function buildMockStorytellerIntervention(storyteller, fragmentText, storyteller
   const entity = pickMockStoryEntitySeed(fragmentText);
   const storytellerName = firstDefinedString(storyteller?.name) || 'The hidden storyteller';
   const entityName = firstDefinedString(entity.name);
-  const alreadyIntroduced = Boolean(storyteller?.introducedInTypewriter);
-  const continuation = alreadyIntroduced
-    ? `I returned only for a moment, long enough to follow the drift around ${entityName}. It was there, half-seen beside the scene, taking shape in the weather of what had already begun. I watched it gather its meaning, marked the disturbance it left in the air, and withdrew before anyone could decide I had always been standing there.`
-    : `It was then that I, ${storytellerName}, admitted myself to the margin of the scene. I had been near enough to witness the change, and nearer still when ${entityName} revealed itself inside it: not a thing exactly, but a pressure with a face the night almost knew. I followed that sign until it sharpened, learned what little it wanted, and then let the scene keep moving without me.`;
+  let continuation;
+  if (canIntervene) {
+    continuation = `I, ${storytellerName}, stepped close enough for the scene to notice. ${entityName} had already gathered at the edge of what was happening, and this time it did not remain a sign; it tugged one small fact out of hiding and placed it where every eye would have to pass. I let the disturbance settle, then withdrew before it could become an order.`;
+  } else if (canUseFirstPerson || stageId === 'witness') {
+    continuation = `I had been watching from nearer than the margins admitted. ${entityName} showed itself in the pressure around the scene, tying one remembered detail to another until the pattern could no longer pretend to be weather. I did not touch events yet; I only named the shape they were already making.`;
+  } else if (stageId === 'pattern') {
+    continuation = `${archetypeLabel} returned as a pattern in the prose, drawing a line between what had been noticed and what had been avoided. ${entityName} belonged to that line: a concrete sign that another thread was already moving behind the scene. The detail did not interrupt anyone; it made the existing silence more legible.`;
+  } else {
+    continuation = `${archetypeLabel} entered first as style, sharpening the scene toward one grounded thing. ${entityName} surfaced at the margin with a name, a texture, and a reason to matter, as if it had been waiting inside the user's own sentence. The narrative did not change direction; it became more inhabited.`;
+  }
   return {
     continuation,
     entity,
@@ -4933,10 +5026,10 @@ async function findTypewriterStorytellerForIntervention(sessionId, storytellerId
   return null;
 }
 
-async function acquireTypewriterStorytellerInterventionLock(storytellerId, currentFragmentLength) {
+async function acquireTypewriterStorytellerInterventionLock(storytellerId, currentFragmentLength, policyConfig = null) {
   if (!storytellerId) return null;
   const safeFragmentLength = normalizeTypewriterFragmentLength(currentFragmentLength);
-  const maxEligibleBaseline = safeFragmentLength / STORYTELLER_REPRESS_GROWTH_FACTOR;
+  const maxEligibleBaseline = safeFragmentLength / getTypewriterStorytellerRepressGrowthFactor(policyConfig || undefined);
   return Storyteller.findOneAndUpdate(
     {
       _id: storytellerId,

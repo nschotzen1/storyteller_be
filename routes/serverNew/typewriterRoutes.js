@@ -40,14 +40,17 @@ export function registerTypewriterRoutes(app, deps) {
     normalizeTypewriterWorldStateUpdate,
     buildMockTypewriterWorldStateUpdate,
     buildTypewriterTurnRecord,
+    loadTypewriterStorytellerPolicyConfig,
+    saveTypewriterStorytellerPolicyConfig,
+    getTypewriterStorytellerCheckIntervalWords,
     listTypewriterSlotStorytellers,
     filterAssignedTypewriterStorytellers,
     findNextAvailableTypewriterStorytellerSlot,
     getTypewriterStorytellerThreshold,
-    TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS,
     generateTypewriterStorytellerForSlot,
     buildStorytellerListItem,
     buildTypewriterStorytellerSlots,
+    resolveTypewriterStorytellerPressPolicy,
     listTypewriterKeysForSession,
     findTypewriterStorytellerForIntervention,
     acquireTypewriterStorytellerInterventionLock,
@@ -448,6 +451,32 @@ export function registerTypewriterRoutes(app, deps) {
     }
   });
 
+  app.get('/api/typewriter/storyteller-policy', async (_req, res) => {
+    try {
+      const policy = await loadTypewriterStorytellerPolicyConfig();
+      return res.status(200).json({
+        policy,
+        checkIntervalWords: getTypewriterStorytellerCheckIntervalWords(policy)
+      });
+    } catch (error) {
+      console.error('Error in GET /api/typewriter/storyteller-policy:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  app.post('/api/typewriter/storyteller-policy', async (req, res) => {
+    try {
+      const policy = await saveTypewriterStorytellerPolicyConfig(req.body?.policy || req.body || {});
+      return res.status(200).json({
+        policy,
+        checkIntervalWords: getTypewriterStorytellerCheckIntervalWords(policy)
+      });
+    } catch (error) {
+      console.error('Error in POST /api/typewriter/storyteller-policy:', error);
+      return res.status(400).json({ error: error?.message || 'Invalid storyteller policy.' });
+    }
+  });
+
   app.post('/api/shouldCreateStorytellerKey', async (req, res) => {
     try {
       const body = req.body || {};
@@ -464,6 +493,7 @@ export function registerTypewriterRoutes(app, deps) {
       const narrativeWordCount = countWords(fragmentText);
       const storytellerPipeline = await getAiPipelineSettings('storyteller_creation');
       const illustrationPipeline = await getAiPipelineSettings('illustration_creation');
+      const storytellerPolicy = await loadTypewriterStorytellerPolicyConfig();
       const shouldMockStorytellers = resolveMockMode(body, storytellerPipeline.useMock);
       const shouldMockIllustrations = resolveMockMode(body, illustrationPipeline.useMock);
       const allowMockSlots = shouldMockStorytellers || shouldMockIllustrations;
@@ -473,7 +503,7 @@ export function registerTypewriterRoutes(app, deps) {
       });
       const nextAvailableSlot = findNextAvailableTypewriterStorytellerSlot(effectiveAssignedStorytellers);
       const currentAssignedCount = effectiveAssignedStorytellers.length;
-      const currentThreshold = getTypewriterStorytellerThreshold(currentAssignedCount);
+      const currentThreshold = getTypewriterStorytellerThreshold(currentAssignedCount, storytellerPolicy);
       const shouldCreate = Boolean(nextAvailableSlot && currentThreshold !== null && narrativeWordCount >= currentThreshold);
 
       let createdStoryteller = null;
@@ -484,7 +514,8 @@ export function registerTypewriterRoutes(app, deps) {
           fragmentText,
           slotDefinition: nextAvailableSlot,
           req,
-          body
+          body,
+          policyConfig: storytellerPolicy
         });
       }
 
@@ -493,18 +524,20 @@ export function registerTypewriterRoutes(app, deps) {
         : effectiveAssignedStorytellers;
       const visibleStorytellers = filterAssignedTypewriterStorytellers(storytellers, { allowMockSlots });
       const filledCount = visibleStorytellers.length;
-      const nextThreshold = getTypewriterStorytellerThreshold(filledCount);
+      const nextThreshold = getTypewriterStorytellerThreshold(filledCount, storytellerPolicy);
+      const checkIntervalWords = getTypewriterStorytellerCheckIntervalWords(storytellerPolicy);
 
       return res.status(200).json({
         sessionId,
         narrativeWordCount,
-        checkIntervalWords: TYPEWRITER_STORYTELLER_CHECK_INTERVAL_WORDS,
+        checkIntervalWords,
+        storytellerPolicy,
         shouldCreate,
         created: Boolean(createdStoryteller),
         createdStoryteller: createdStoryteller ? buildStorytellerListItem(createdStoryteller) : null,
         assignedStorytellerCount: filledCount,
         nextThreshold,
-        slots: buildTypewriterStorytellerSlots(visibleStorytellers, fragmentText.length),
+        slots: buildTypewriterStorytellerSlots(visibleStorytellers, fragmentText.length, storytellerPolicy),
         typewriterKeys: (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState),
         entityKeys: (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState)
       });
@@ -531,6 +564,7 @@ export function registerTypewriterRoutes(app, deps) {
 
       await startTypewriterSession(sessionId);
       await ensureBuiltinTypewriterKeys(sessionId, resolvedPlayerId);
+      const storytellerPolicyConfig = await loadTypewriterStorytellerPolicyConfig();
       const fragmentText = await getTypewriterSessionFragment(sessionId);
       const storyteller = await findTypewriterStorytellerForIntervention(
         sessionId,
@@ -560,7 +594,8 @@ export function registerTypewriterRoutes(app, deps) {
       let storytellerLockHeld = false;
       const lockedStoryteller = await acquireTypewriterStorytellerInterventionLock(
         storyteller._id,
-        currentFragmentLength
+        currentFragmentLength,
+        storytellerPolicyConfig
       );
 
       if (!lockedStoryteller) {
@@ -570,8 +605,8 @@ export function registerTypewriterRoutes(app, deps) {
           code: 'STORYTELLER_PRESS_NOT_ALLOWED',
           sessionId,
           currentFragmentLength,
-          slots: buildTypewriterStorytellerSlots(visibleStorytellers, currentFragmentLength),
-          storyteller: buildTypewriterSessionStorytellerItem(storyteller)
+          slots: buildTypewriterStorytellerSlots(visibleStorytellers, currentFragmentLength, storytellerPolicyConfig),
+          storyteller: buildTypewriterSessionStorytellerItem(storyteller, storytellerPolicyConfig)
         });
       }
 
@@ -584,11 +619,17 @@ export function registerTypewriterRoutes(app, deps) {
       const requestedFadeTimingScale = toFiniteNumber(body?.fadeTimingScale);
       const storytellerTask = resolveTaskPromptText(task);
       const taskContext = await resolveTaskKnowledgeContext(task, sessionId, resolvedPlayerId);
+      const pressPolicy = resolveTypewriterStorytellerPressPolicy(lockedStoryteller, storytellerPolicyConfig);
 
       try {
         let interventionResponse;
         if (shouldMock) {
-          interventionResponse = buildMockStorytellerIntervention(lockedStoryteller, fragmentText, storytellerTask);
+          interventionResponse = buildMockStorytellerIntervention(
+            lockedStoryteller,
+            fragmentText,
+            storytellerTask,
+            pressPolicy
+          );
         } else {
           const continuationPromptDoc = await getLatestPromptTemplate('story_continuation');
           const promptTemplate = await resolveStorytellerInterventionPromptTemplate();
@@ -599,7 +640,8 @@ export function registerTypewriterRoutes(app, deps) {
               promptTemplate,
               storytellerTask,
               taskContext.knownContextText,
-              continuationPromptDoc?.promptTemplate || ''
+              continuationPromptDoc?.promptTemplate || '',
+              pressPolicy
             ),
             provider: interventionProvider,
             model: interventionPipeline.model || '',
@@ -677,7 +719,7 @@ export function registerTypewriterRoutes(app, deps) {
 
         const sessionTypewriterKeys = (await listTypewriterKeysForSession(sessionId, resolvedPlayerId)).map(buildTypewriterKeyState);
         const sessionStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
-        const sessionSlots = buildTypewriterStorytellerSlots(sessionStorytellers, nextFragment.length);
+        const sessionSlots = buildTypewriterStorytellerSlots(sessionStorytellers, nextFragment.length, storytellerPolicyConfig);
 
         const continuationInsights = normalizeContinuationInsights(
           {
@@ -698,6 +740,15 @@ export function registerTypewriterRoutes(app, deps) {
           continuation,
           metadata
         );
+        continuationInsights.storyteller_press = {
+          stage_id: pressPolicy.stageId,
+          stage_label: pressPolicy.stageLabel,
+          press_number: pressPolicy.pressNumber,
+          proximity: pressPolicy.proximity,
+          narrative_authority: pressPolicy.narrativeAuthority,
+          current_scene_intervention_allowed: pressPolicy.currentSceneInterventionAllowed,
+          archetype: pressPolicy.archetype
+        };
 
         return res.status(200).json({
           ...createTypewriterResponse(continuation, metadata, null, {
@@ -709,6 +760,7 @@ export function registerTypewriterRoutes(app, deps) {
           fragment: nextFragment,
           mocked: shouldMock,
           storyteller: buildStorytellerListItem(updatedStoryteller || lockedStoryteller),
+          storytellerPressPolicy: pressPolicy,
           task: task ? {
             id: String(task._id),
             taskId: firstDefinedString(task.taskId),
