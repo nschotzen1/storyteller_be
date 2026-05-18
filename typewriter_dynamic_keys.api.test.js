@@ -231,7 +231,11 @@ describe('typewriter dynamic keys', () => {
       .send({
         sessionId,
         keyId: dynamicKey.id,
-        currentNarrative: 'word1 word2 word3',
+        currentNarrative: 'word1 word2 word3 Bright ash gathered around the Buraha Light.',
+        candidateNarrative: 'word1 word2 word3 Bright ash gathered around the Buraha Light.',
+        transactionText: 'Bright ash gathered around the Buraha Light.',
+        beforeContext: 'word1 word2 word3 ',
+        afterContext: '',
         mocked_api_calls: true
       })
       .expect(200);
@@ -246,7 +250,8 @@ describe('typewriter dynamic keys', () => {
       })
     );
     expect(typeof verificationResponse.body.appendedText).toBe('string');
-    expect(verificationResponse.body.appendedText.trim()).toBe(dynamicKey.insertText);
+    expect(verificationResponse.body.appendedText).toBe('Bright ash gathered around the Buraha Light.');
+    expect(verificationResponse.body.transactionText).toBe('Bright ash gathered around the Buraha Light.');
   });
 
   test('session inspector returns fragment, storyteller slots, typewriter keys, storytellers, and linked entities together', async () => {

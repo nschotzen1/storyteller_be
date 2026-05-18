@@ -248,6 +248,18 @@ export function registerTypewriterRoutes(app, deps) {
       const resolvedPlayerId = normalizeOptionalPlayerId(body.playerId);
       const requestedKeyId = firstDefinedString(body.keyId);
       const requestedKeyText = firstDefinedString(body.keyText);
+      const transactionText = firstDefinedString(body.transactionText);
+      const transactionContext = {
+        transactionId: firstDefinedString(body.transactionId),
+        transactionText,
+        beforeContext: typeof body.beforeContext === 'string' ? body.beforeContext : '',
+        afterContext: typeof body.afterContext === 'string' ? body.afterContext : ''
+      };
+      const hasTransactionContext = Boolean(
+        transactionContext.transactionText
+        || transactionContext.beforeContext
+        || transactionContext.afterContext
+      );
 
       if (!sessionId || typeof currentNarrative !== 'string') {
         return res.status(400).json({ error: 'Missing sessionId or currentNarrative' });
@@ -273,18 +285,19 @@ export function registerTypewriterRoutes(app, deps) {
       const insertText = firstDefinedString(typewriterKey.insertText, typewriterKey.keyText);
       const candidate = buildTypewriterKeyCandidateNarrative(currentNarrative, insertText);
       const effectiveCandidateNarrative = firstDefinedString(candidateNarrative) || candidate.candidateNarrative;
-      const appendedText = effectiveCandidateNarrative.slice(String(currentNarrative || '').length);
+      const appendedText = transactionText || effectiveCandidateNarrative.slice(String(currentNarrative || '').length);
       const verificationPipeline = await getAiPipelineSettings('typewriter_key_verification');
       const verificationProvider = typeof verificationPipeline?.provider === 'string'
         ? verificationPipeline.provider
         : 'openai';
       const shouldMock = resolveMockMode(body, verificationPipeline.useMock);
 
-      if (!currentNarrative.trim() || narrativeEndsWithTerm(currentNarrative, insertText)) {
+      if (!currentNarrative.trim() || (!hasTransactionContext && narrativeEndsWithTerm(currentNarrative, insertText))) {
         return res.status(200).json({
           allowed: false,
           appendedText,
           candidateNarrative: effectiveCandidateNarrative,
+          transactionText,
           key: buildTypewriterKeyState(typewriterKey),
           mocked: shouldMock,
           runtime: {
@@ -309,6 +322,7 @@ export function registerTypewriterRoutes(app, deps) {
           allowed,
           appendedText,
           candidateNarrative: effectiveCandidateNarrative,
+          transactionText,
           key: buildTypewriterKeyState(typewriterKey),
           mocked: true,
           runtime: {
@@ -328,7 +342,8 @@ export function registerTypewriterRoutes(app, deps) {
             linkedEntity,
             currentNarrative,
             effectiveCandidateNarrative,
-            promptTemplate
+            promptTemplate,
+            transactionContext
           ),
           provider: verificationProvider,
           model: verificationPipeline.model || '',
@@ -346,6 +361,7 @@ export function registerTypewriterRoutes(app, deps) {
           allowed,
           appendedText,
           candidateNarrative: effectiveCandidateNarrative,
+          transactionText,
           reason: firstDefinedString(aiResponse.reason),
           key: buildTypewriterKeyState(typewriterKey),
           mocked: false,

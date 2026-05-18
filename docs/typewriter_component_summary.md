@@ -56,6 +56,11 @@ Core frontend responsibilities:
 4. `POST /api/next_film_image`
 - Returns next page background image.
 
+5. `POST /api/typewriter/keys/shouldAllow`
+- Validates entity typewriter keys before their provisional text becomes permanent.
+- Supports both the older bare-key append check and the newer provisional transaction context.
+- See `docs/typewriter_entity_key_validation.md`.
+
 ## 3) Current Mechanics
 
 ### Trigger mechanics
@@ -84,6 +89,13 @@ Core frontend responsibilities:
 - Prompt payload now includes `preferred_font_size_px` to steer model style choices.
 - Backend normalizes ghostwriter font size to avoid tiny outputs.
 - Frontend applies a final minimum clamp for ghost text rendering safety.
+
+### Entity key validation mechanics
+- Entity keys insert immediately as provisional text.
+- The provisional span can include nearby user-authored text before and after the key.
+- The backend validates the whole span against entity metadata and surrounding context.
+- Rejected spans fade away and are removed from the page.
+- Ghostwriter, persistence, and page navigation wait while a provisional entity-key transaction is unresolved.
 
 ## 4) Desired Behavior Targets
 

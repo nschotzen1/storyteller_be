@@ -1189,7 +1189,13 @@ function shouldAllowTypewriterKeyInMock(typewriterKey, currentNarrative = '') {
   return countWords(currentNarrative) >= 3;
 }
 
-function buildTypewriterKeyVerificationPromptPayload(typewriterKey, entity, currentNarrative = '', candidateNarrative = '') {
+function buildTypewriterKeyVerificationPromptPayload(
+  typewriterKey,
+  entity,
+  currentNarrative = '',
+  candidateNarrative = '',
+  transactionContext = {}
+) {
   const keyText = firstDefinedString(typewriterKey?.keyText);
   const insertText = firstDefinedString(typewriterKey?.insertText, keyText);
   const entityName = firstDefinedString(entity?.name, typewriterKey?.entityName, keyText);
@@ -1207,16 +1213,28 @@ function buildTypewriterKeyVerificationPromptPayload(typewriterKey, entity, curr
     entity_lore: firstDefinedString(entity?.lore),
     entity_type: firstDefinedString(entity?.type),
     entity_subtype: firstDefinedString(entity?.subtype),
-    source_type: firstDefinedString(typewriterKey?.sourceType)
+    source_type: firstDefinedString(typewriterKey?.sourceType),
+    transaction_text: firstDefinedString(transactionContext?.transactionText),
+    before_context: typeof transactionContext?.beforeContext === 'string' ? transactionContext.beforeContext : '',
+    after_context: typeof transactionContext?.afterContext === 'string' ? transactionContext.afterContext : '',
+    transaction_id: firstDefinedString(transactionContext?.transactionId)
   };
 }
 
-function buildTypewriterKeyVerificationPromptMessages(typewriterKey, entity, currentNarrative, candidateNarrative, promptTemplate) {
+function buildTypewriterKeyVerificationPromptMessages(
+  typewriterKey,
+  entity,
+  currentNarrative,
+  candidateNarrative,
+  promptTemplate,
+  transactionContext = {}
+) {
   const payload = buildTypewriterKeyVerificationPromptPayload(
     typewriterKey,
     entity,
     currentNarrative,
-    candidateNarrative
+    candidateNarrative,
+    transactionContext
   );
   const renderedPrompt = renderPromptTemplateString(promptTemplate, payload);
   return [
@@ -4683,11 +4701,16 @@ async function resolveStorytellerInterventionPromptTemplate() {
 
 async function resolveTypewriterKeyVerificationPromptTemplate() {
   const latestPrompt = await getLatestPromptTemplate('typewriter_key_verification');
-  if (latestPrompt?.promptTemplate) {
+  if (
+    latestPrompt?.promptTemplate
+    && latestPrompt.promptTemplate.includes('{{transaction_text}}')
+    && latestPrompt.promptTemplate.includes('{{before_context}}')
+    && latestPrompt.promptTemplate.includes('{{after_context}}')
+  ) {
     return latestPrompt.promptTemplate;
   }
   const currentTemplates = await getCurrentTypewriterPromptTemplates();
-  return currentTemplates?.typewriter_key_verification?.promptTemplate || '';
+  return currentTemplates?.typewriter_key_verification?.promptTemplate || latestPrompt?.promptTemplate || '';
 }
 
 function buildStorytellerInterventionPromptMessages(

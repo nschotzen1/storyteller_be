@@ -571,6 +571,10 @@ export async function getCurrentTypewriterPromptTemplates() {
       variables: [
         'current_narrative',
         'candidate_narrative',
+        'transaction_text',
+        'before_context',
+        'after_context',
+        'transaction_id',
         'key_text',
         'insert_text',
         'entity_name',

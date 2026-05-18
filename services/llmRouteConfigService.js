@@ -836,18 +836,33 @@ Return JSON only in this exact shape:
     routeKey: 'typewriter_key_verification',
     routePath: '/api/typewriter/keys/shouldAllow',
     method: 'POST',
-    description: 'Judge whether a saved textual typewriter key may be appended to the current narrative.',
+    description: 'Judge whether a saved textual typewriter key or provisional key phrase fits the current narrative.',
     promptMode: 'manual',
-    promptTemplate: `You are judging whether a saved textual typewriter key may be appended to a live narrative.
+    promptTemplate: `You are judging whether a saved textual typewriter key fits a live narrative.
 
-Current narrative:
+Current visible narrative at validation time:
 """
 {{current_narrative}}
 """
 
-Candidate narrative after appending the key text:
+Candidate narrative:
 """
 {{candidate_narrative}}
+"""
+
+Provisional typed phrase containing the key:
+"""
+{{transaction_text}}
+"""
+
+Immediate context before that phrase:
+"""
+{{before_context}}
+"""
+
+Immediate context after that phrase:
+"""
+{{after_context}}
 """
 
 Key label shown on the keyboard: "{{key_text}}"
@@ -868,7 +883,9 @@ Return JSON only in this exact shape:
 }
 
 Rules:
-- Approve only when appending the key text at the end feels natural, supported, and tonally coherent.
+- Approve only when the key text or provisional phrase feels natural, supported, and tonally coherent in its exact location.
+- When provisional phrase/context is provided, judge the whole provisional phrase in place rather than only the bare key text.
+- Treat transaction_text as the provisional span that will remain only if approved.
 - Reject when the addition feels abrupt, redundant, contradictory, or unsupported by the current fragment.
 - Prefer restraint. This is an insertion check, not a worldbuilding opportunity.
 - The entity context is background guidance only. Do not force the key in just because the entity is interesting.
