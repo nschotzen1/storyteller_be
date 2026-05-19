@@ -137,7 +137,8 @@ import {
   mergeTypewriterFragment,
   normalizeTypewriterWorldState,
   saveTypewriterSessionFragment,
-  startTypewriterSession
+  startTypewriterSession,
+  updateTypewriterSessionWorldState
 } from './services/typewriterSessionService.js';
 import {
   drawNextWellTextualFragment,
@@ -3594,6 +3595,7 @@ registerTypewriterRoutes(app, {
   buildTypewriterKeyVerificationPromptMessages,
   validatePayloadForRoute,
   saveTypewriterSessionFragment,
+  updateTypewriterSessionWorldState,
   buildTypewriterSessionPayload,
   buildTypewriterSessionInspectPayload,
   getTypewriterSessionFragment,

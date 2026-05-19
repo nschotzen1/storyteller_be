@@ -33,6 +33,7 @@ export function registerTypewriterRoutes(app, deps) {
     buildTypewriterKeyVerificationPromptMessages,
     validatePayloadForRoute,
     saveTypewriterSessionFragment,
+    updateTypewriterSessionWorldState,
     buildTypewriterSessionPayload,
     buildTypewriterSessionInspectPayload,
     getTypewriterSessionFragment,
@@ -426,6 +427,52 @@ export function registerTypewriterRoutes(app, deps) {
       );
     } catch (error) {
       console.error('Error in /api/typewriter/session/start:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  app.post('/api/typewriter/session/vibe', async (req, res) => {
+    try {
+      const {
+        sessionId,
+        playerId,
+        current_vibe,
+        orrery_positions,
+        orrery_radial_distance_budget,
+        number_of_available_slides
+      } = req.body || {};
+      const resolvedPlayerId = normalizeOptionalPlayerId(playerId);
+
+      if (!sessionId) {
+        return res.status(400).json({ error: 'Missing sessionId' });
+      }
+
+      const patch = {};
+      if (typeof current_vibe === 'string') {
+        patch.current_vibe = current_vibe;
+      }
+      if (orrery_positions && typeof orrery_positions === 'object' && !Array.isArray(orrery_positions)) {
+        patch.orrery_positions = orrery_positions;
+      }
+      if (orrery_radial_distance_budget !== undefined) {
+        patch.orrery_radial_distance_budget = orrery_radial_distance_budget;
+      }
+      if (number_of_available_slides !== undefined) {
+        patch.number_of_available_slides = number_of_available_slides;
+      }
+
+      const session = await updateTypewriterSessionWorldState(sessionId, patch);
+      return res.status(200).json(
+        await buildTypewriterSessionPayload(
+          session.sessionId,
+          session.fragment,
+          session.initialFragment,
+          resolvedPlayerId,
+          session
+        )
+      );
+    } catch (error) {
+      console.error('Error in /api/typewriter/session/vibe:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
     }
   });

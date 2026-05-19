@@ -318,4 +318,55 @@ describe('typewriter dynamic keys', () => {
       })
     );
   });
+
+  test('session vibe route persists current vibe and remaining orrery slides', async () => {
+    const sessionId = 'typewriter-vibe-session';
+
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({ sessionId })
+      .expect(200);
+
+    const response = await request(app)
+      .post('/api/typewriter/session/vibe')
+      .send({
+        sessionId,
+        current_vibe: 'veilwood_cold',
+        orrery_positions: {
+          veil: 0.1,
+          warden: 0.9
+        },
+        orrery_radial_distance_budget: 1
+      })
+      .expect(200);
+
+    expect(response.body.worldState).toEqual(
+      expect.objectContaining({
+        current_vibe: 'veilwood_cold',
+        orrery_positions: {
+          veil: 0.1,
+          warden: 0.9
+        },
+        orrery_radial_distance_budget: 1,
+        number_of_available_slides: 1
+      })
+    );
+
+    const inspectResponse = await request(app)
+      .get('/api/typewriter/session/inspect')
+      .query({ sessionId })
+      .expect(200);
+
+    expect(inspectResponse.body.worldState).toEqual(
+      expect.objectContaining({
+        current_vibe: 'veilwood_cold',
+        orrery_positions: {
+          veil: 0.1,
+          warden: 0.9
+        },
+        orrery_radial_distance_budget: 1,
+        number_of_available_slides: 1
+      })
+    );
+  });
 });

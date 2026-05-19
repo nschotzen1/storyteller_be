@@ -4,7 +4,8 @@ import { NarrativeFragment } from './models/models.js';
 import {
   normalizeTypewriterWorldState,
   saveTypewriterSessionFragment,
-  startTypewriterSession
+  startTypewriterSession,
+  updateTypewriterSessionWorldState
 } from './services/typewriterSessionService.js';
 
 describe('typewriterSessionService', () => {
@@ -90,5 +91,47 @@ describe('typewriterSessionService', () => {
     expect(stored.typewriterTurns).toEqual([
       expect.objectContaining(typewriterTurn)
     ]);
+  });
+
+  test('persists orrery vibe state without rewriting the fragment', async () => {
+    await startTypewriterSession('orrery-session');
+    const saved = await updateTypewriterSessionWorldState('orrery-session', {
+      current_vibe: 'forge_ember',
+      orrery_positions: {
+        forge: 0.12,
+        veil: 2,
+        invalid: 'nope'
+      },
+      orrery_radial_distance_budget: 2
+    });
+
+    expect(saved.fragment).toBe('');
+    expect(saved.worldState).toEqual(
+      expect.objectContaining({
+        current_vibe: 'forge_ember',
+        orrery_positions: {
+          forge: 0.12,
+          veil: 1
+        },
+        orrery_radial_distance_budget: 2,
+        number_of_available_slides: 2
+      })
+    );
+
+    const continued = await saveTypewriterSessionFragment('orrery-session', 'The paper remembers.');
+    expect(continued.fragment).toBe('The paper remembers.');
+    expect(continued.worldState.current_vibe).toBe('forge_ember');
+    expect(continued.worldState.orrery_radial_distance_budget).toBe(2);
+    expect(continued.worldState.number_of_available_slides).toBe(2);
+
+    const stored = await NarrativeFragment.findOne({
+      session_id: 'orrery-session',
+      turn: 0
+    }).lean();
+    expect(stored.worldState.current_vibe).toBe('forge_ember');
+    expect(stored.worldState.orrery_positions).toEqual({
+      forge: 0.12,
+      veil: 1
+    });
   });
 });
