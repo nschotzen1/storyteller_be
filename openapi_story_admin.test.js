@@ -130,6 +130,7 @@ describe('story admin API metadata', () => {
       '/api/typewriter/keys/shouldAllow',
       '/api/typewriter/session/start',
       '/api/typewriter/session/inspect',
+      '/api/typewriter/session/vibe',
       '/api/shouldCreateStorytellerKey',
       '/api/send_storyteller_typewriter_text',
       '/api/send_typewriter_text',
@@ -155,6 +156,7 @@ describe('story admin API metadata', () => {
     expect(spec.paths['/api/textToEntity']).toBeDefined();
     expect(spec.components.schemas.NarrativeEntity).toBeDefined();
     expect(spec.components.schemas.TypewriterKey).toBeDefined();
+    expect(spec.components.schemas.TypewriterWorldState).toBeDefined();
     expect(spec.components.schemas.TypewriterSessionInspectResponse).toBeDefined();
     expect(spec.components.schemas.NarrativeEntityListResponse).toBeDefined();
     expect(spec.components.schemas.SeerReadingResponse).toBeDefined();

@@ -53,6 +53,10 @@ async function seedStorytellerInterventionPromptTemplate() {
 Storyteller: {{storyteller_name}}
 Task: {{storyteller_task}}
 Known context: {{storyteller_known_context}}
+Stage: {{storyteller_stage_id}}
+First person allowed: {{storyteller_first_person_allowed}}
+Current intervention allowed: {{storyteller_current_scene_intervention_allowed}}
+Archetype: {{storyteller_archetype_label}}
 Inline fragment should be blank: "{{fragment_text}}"
 INTERVENTION_PROMPT_END`,
     isLatest: true,

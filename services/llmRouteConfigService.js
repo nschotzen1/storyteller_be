@@ -704,9 +704,9 @@ Output JSON only.`,
     routeKey: 'storyteller_typewriter_intervention',
     routePath: '/api/send_storyteller_typewriter_text',
     method: 'POST',
-    description: 'Generate a short storyteller entrance/intervention plus one new pressable textual typewriter key.',
+    description: 'Generate a staged storyteller key continuation plus one new pressable textual typewriter key.',
     promptMode: 'manual',
-    promptTemplate: `You are a hidden storyteller stepping briefly into an already-unfolding scene.
+    promptTemplate: `You are a hidden storyteller entering an already-unfolding narrative through a pressable storyteller key.
 
 Storyteller:
 - Name: {{storyteller_name}}
@@ -717,24 +717,46 @@ Storyteller:
 - Already introduced: {{storyteller_already_introduced}}
 - Task: {{storyteller_task}}
 - Known private context: {{storyteller_known_context}}
+- Archetype: {{storyteller_archetype_label}}
+- Archetype style: {{storyteller_archetype_style}}
+- Archetype role: {{storyteller_archetype_role}}
+- Archetype substance bias: {{storyteller_archetype_substance_bias}}
+- Archetype intervention style: {{storyteller_archetype_intervention_style}}
 
-Write one brief in-world intervention.
+Press policy:
+- Press count before this press: {{storyteller_press_count}}
+- Current press number: {{storyteller_press_number}}
+- Stage: {{storyteller_stage_label}} ({{storyteller_stage_id}})
+- Stage instruction: {{storyteller_stage_instruction}}
+- Proximity: {{storyteller_proximity}}
+- Narrative authority: {{storyteller_narrative_authority}}
+- First person allowed: {{storyteller_first_person_allowed}}
+- Current-scene intervention allowed: {{storyteller_current_scene_intervention_allowed}}
+- Word target: {{storyteller_output_word_min}}-{{storyteller_output_word_max}} words
+- New entity budget: {{storyteller_max_new_entities}}
+- Existing entity/detail reuse target: {{storyteller_min_reused_entities}}
+- Major plot change allowed: {{storyteller_allow_major_plot_change}}
+
+Write one brief in-world continuation shaped by this press policy.
 
 Your job:
-A real person is already nearby. Something in the scene catches their attention for reasons of their own. They briefly step in, hint at another thread of the plot, and withdraw.
+The user has chosen this storyteller key. The storyteller should join the collaborative writing in their own style and add substance: grounded concrete people, places, names, events, items, customs, tensions, or clues.
 
-The storyteller also has a private task. The continuation must begin to fulfill it now, in-scene, through what the storyteller notices, says, or does.
+The storyteller also has a private task. The continuation must begin to fulfill it now through concrete narrative material.
 The storyteller may also have private background knowledge tied to the task. Use it as internal guidance, but do not explain it outright unless the task clearly calls for a small mention.
 
 Requirements:
 - If the fragment ends mid-sentence or on an unfinished image, complete it first in 1 short sentence.
-- Then write the storyteller's intervention in quotation marks.
-- Enter with 1 short, clear witness sentence.
-- Notice 1 concrete detail already present in the fragment.
-- Make it clear why that detail matters, even if the full context remains hidden.
-- Introduce exactly 1 new entity not explicitly named in the fragment.
-- That entity should feel like part of another thread of the plot already moving behind events.
-- End with 1 short human action, pause, or withdrawal.
+- Reuse at least {{storyteller_min_reused_entities}} concrete detail, name, place, object, or event already present in the fragment when possible.
+- Introduce no more than {{storyteller_max_new_entities}} new focal entity for this route.
+- The returned "entity" must be the most important newly surfaced person, place, item, event, institution, omen, route, or named social fact.
+- Keep the new entity grounded and nameable; avoid abstract mythology unless the current text already supports it.
+- Make the archetype visible through substance, not exposition.
+- If first person allowed is false, do not use I, me, my, mine, we, us, or our for the storyteller.
+- If first person allowed is true, use first person with restraint; one clear trace is enough.
+- If current-scene intervention allowed is false, the storyteller must not physically change, interrupt, or redirect the current scene. They may add narration, implication, memory, observation, or pattern.
+- If current-scene intervention allowed is true, the storyteller may act in the present scene once, but the action must be focused and reversible enough that the user's authorship remains intact.
+- If major plot change allowed is false, do not kill, rescue, destroy, reveal the whole mystery, force a new destination, or override the user's apparent intent.
 
 Task fulfillment rules:
 - The storyteller must begin fulfilling {{storyteller_task}} inside this continuation, not merely hint at it abstractly.
@@ -752,25 +774,26 @@ Use the metadata meaningfully:
 - Style: rhythm and texture, but keep it readable
 - Immediate appearance: at most 1 small physical touch
 - Already introduced: if false, name the storyteller naturally; if true, do not reintroduce heavily
+- Archetype: what kinds of substance the storyteller tends to add
+- Stage: how close the storyteller is allowed to be to the current scene
 - Task: shapes what the storyteller is trying to notice, reveal, test, or set in motion
 - Known private context: shapes what the storyteller already recognizes, fears, or suspects without forcing exposition
 
-Preferred entry patterns:
-- "It was then that I, [name], took notice."
-- "At that moment, I, [name], saw..."
-- "It was from [place] that I, [name], first saw..."
-- "That was when I, [name], understood..."
-- "I, [name], was watching when..."
+Stage guidance:
+- Signature Entry: add the storyteller's voice and 1 grounded named substance. Stay outside first person. Do not intervene.
+- Pattern Building: connect previous details to the newly surfaced entity. Prefer reused details over new sprawl. Stay outside first person. Do not intervene.
+- Witness Nearing: the storyteller may become a restrained first-person witness or memory. They are close, but not acting on the scene.
+- Current Intervention: the storyteller may enter the present moment and affect it once through a concise action, utterance, interruption, or revelation.
 
 Rules:
 - Keep it brief, clear, meaningful, and easy to read.
-- Keep the continuation about 45-90 words.
-- Prefer 4-5 sentences.
+- Keep the continuation within the configured word target.
+- Prefer 3-5 sentences.
 - Do not retell or summarize the whole fragment.
 - Do not sound like a lecturer, detective, or lore entry.
 - Do not be vague or overly poetic.
-- Introduce exactly 1 new entity.
-- Do not imply a second newly named thing.
+- Do not exceed the new entity budget.
+- Do not imply extra newly named things beyond the returned entity.
 - Do not explain everything.
 - Let the mystery come from the storyteller knowing more than they say.
 - Prefer plot implication over abstract mythology.
@@ -778,9 +801,9 @@ Rules:
 
 Good test:
 After reading it, the reader should understand:
-1. what drew the storyteller's attention
-2. why it mattered
-3. that another line of the story is already in motion
+1. what the storyteller's archetype added
+2. what concrete entity, place, event, item, or clue has become more real
+3. how close the storyteller currently is to the scene
 4. how the storyteller has started to fulfill their private task
 
 Return JSON only in this exact shape:
@@ -803,7 +826,7 @@ Return JSON only in this exact shape:
 }`,
     promptCore: '',
     fieldDocs: {
-      continuation: '45-90 words, in-world, clear witness entrance, task-shaped clue, and brief withdrawal.',
+      continuation: 'Configured word target, in-world, stage-aware storyteller key continuation with grounded substance.',
       'entity.key_text': '1-3 words, compact enough for a pressable typewriter text key.',
       'style.font_color': 'Use only dark, legible CSS hex colors suitable for parchment.'
     },
@@ -836,18 +859,33 @@ Return JSON only in this exact shape:
     routeKey: 'typewriter_key_verification',
     routePath: '/api/typewriter/keys/shouldAllow',
     method: 'POST',
-    description: 'Judge whether a saved textual typewriter key may be appended to the current narrative.',
+    description: 'Judge whether a saved textual typewriter key or provisional key phrase fits the current narrative.',
     promptMode: 'manual',
-    promptTemplate: `You are judging whether a saved textual typewriter key may be appended to a live narrative.
+    promptTemplate: `You are judging whether a saved textual typewriter key fits a live narrative.
 
-Current narrative:
+Current visible narrative at validation time:
 """
 {{current_narrative}}
 """
 
-Candidate narrative after appending the key text:
+Candidate narrative:
 """
 {{candidate_narrative}}
+"""
+
+Provisional typed phrase containing the key:
+"""
+{{transaction_text}}
+"""
+
+Immediate context before that phrase:
+"""
+{{before_context}}
+"""
+
+Immediate context after that phrase:
+"""
+{{after_context}}
 """
 
 Key label shown on the keyboard: "{{key_text}}"
@@ -868,7 +906,9 @@ Return JSON only in this exact shape:
 }
 
 Rules:
-- Approve only when appending the key text at the end feels natural, supported, and tonally coherent.
+- Approve only when the key text or provisional phrase feels natural, supported, and tonally coherent in its exact location.
+- When provisional phrase/context is provided, judge the whole provisional phrase in place rather than only the bare key text.
+- Treat transaction_text as the provisional span that will remain only if approved.
 - Reject when the addition feels abrupt, redundant, contradictory, or unsupported by the current fragment.
 - Prefer restraint. This is an insertion check, not a worldbuilding opportunity.
 - The entity context is background guidance only. Do not force the key in just because the entity is interesting.

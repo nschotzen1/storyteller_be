@@ -231,7 +231,11 @@ describe('typewriter dynamic keys', () => {
       .send({
         sessionId,
         keyId: dynamicKey.id,
-        currentNarrative: 'word1 word2 word3',
+        currentNarrative: 'word1 word2 word3 Bright ash gathered around the Buraha Light.',
+        candidateNarrative: 'word1 word2 word3 Bright ash gathered around the Buraha Light.',
+        transactionText: 'Bright ash gathered around the Buraha Light.',
+        beforeContext: 'word1 word2 word3 ',
+        afterContext: '',
         mocked_api_calls: true
       })
       .expect(200);
@@ -246,7 +250,8 @@ describe('typewriter dynamic keys', () => {
       })
     );
     expect(typeof verificationResponse.body.appendedText).toBe('string');
-    expect(verificationResponse.body.appendedText.trim()).toBe(dynamicKey.insertText);
+    expect(verificationResponse.body.appendedText).toBe('Bright ash gathered around the Buraha Light.');
+    expect(verificationResponse.body.transactionText).toBe('Bright ash gathered around the Buraha Light.');
   });
 
   test('session inspector returns fragment, storyteller slots, typewriter keys, storytellers, and linked entities together', async () => {
@@ -310,6 +315,57 @@ describe('typewriter dynamic keys', () => {
           typewriterKeyCount: expect.any(Number),
           entityCount: expect.any(Number)
         })
+      })
+    );
+  });
+
+  test('session vibe route persists current vibe and remaining orrery slides', async () => {
+    const sessionId = 'typewriter-vibe-session';
+
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({ sessionId })
+      .expect(200);
+
+    const response = await request(app)
+      .post('/api/typewriter/session/vibe')
+      .send({
+        sessionId,
+        current_vibe: 'veilwood_cold',
+        orrery_positions: {
+          veil: 0.1,
+          warden: 0.9
+        },
+        orrery_radial_distance_budget: 1
+      })
+      .expect(200);
+
+    expect(response.body.worldState).toEqual(
+      expect.objectContaining({
+        current_vibe: 'veilwood_cold',
+        orrery_positions: {
+          veil: 0.1,
+          warden: 0.9
+        },
+        orrery_radial_distance_budget: 1,
+        number_of_available_slides: 1
+      })
+    );
+
+    const inspectResponse = await request(app)
+      .get('/api/typewriter/session/inspect')
+      .query({ sessionId })
+      .expect(200);
+
+    expect(inspectResponse.body.worldState).toEqual(
+      expect.objectContaining({
+        current_vibe: 'veilwood_cold',
+        orrery_positions: {
+          veil: 0.1,
+          warden: 0.9
+        },
+        orrery_radial_distance_budget: 1,
+        number_of_available_slides: 1
       })
     );
   });

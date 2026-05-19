@@ -1066,6 +1066,7 @@ export function buildOpenApiSpec() {
             sessionId: { type: 'string' },
             fragment: { type: 'string' },
             initialFragment: { type: 'string' },
+            worldState: { $ref: '#/components/schemas/TypewriterWorldState' },
             typewriterKeys: {
               type: 'array',
               items: { $ref: '#/components/schemas/TypewriterKey' }
@@ -1083,6 +1084,7 @@ export function buildOpenApiSpec() {
             playerId: { type: 'string' },
             fragment: { type: 'string' },
             initialFragment: { type: 'string' },
+            worldState: { $ref: '#/components/schemas/TypewriterWorldState' },
             narrativeWordCount: { type: 'integer' },
             slots: {
               type: 'array',
@@ -1115,6 +1117,22 @@ export function buildOpenApiSpec() {
               additionalProperties: true
             }
           }
+        },
+        TypewriterWorldState: {
+          type: 'object',
+          properties: {
+            entities: { type: 'array', items: { type: 'object', additionalProperties: true } },
+            active_tension: { type: 'string' },
+            established_facts: { type: 'array', items: { type: 'string' } },
+            current_vibe: { type: 'string' },
+            orrery_positions: {
+              type: 'object',
+              additionalProperties: { type: 'number', minimum: 0, maximum: 1 }
+            },
+            orrery_radial_distance_budget: { type: 'integer', minimum: 0 },
+            number_of_available_slides: { type: 'integer', minimum: 0 }
+          },
+          additionalProperties: true
         },
         TypewriterKey: TYPEWRITER_KEY_JSON_SCHEMA,
         TypewriterStoryEntityKey: {
@@ -1863,6 +1881,43 @@ export function buildOpenApiSpec() {
             },
             '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
             '404': { description: 'Typewriter session not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/typewriter/session/vibe': {
+        post: op({
+          tags: ['Sessions'],
+          summary: 'Persist the active typewriter Orrery vibe',
+          importance: 'Medium',
+          flow: 'Used by the typewriter Orrery to save the current tuning, remaining slide budget, and active paper vibe for a session.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    playerId: { type: 'string' },
+                    current_vibe: { type: 'string' },
+                    orrery_positions: {
+                      type: 'object',
+                      additionalProperties: { type: 'number', minimum: 0, maximum: 1 }
+                    },
+                    orrery_radial_distance_budget: { type: 'integer', minimum: 0 },
+                    number_of_available_slides: { type: 'integer', minimum: 0 }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Updated session payload with persisted world state.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterSessionResponse' })
+            },
+            '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
