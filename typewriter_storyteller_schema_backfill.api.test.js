@@ -25,7 +25,11 @@ await jest.unstable_mockModule('./ai/openai/apiService.js', () => ({
   callJsonLlm: mockCallJsonLlm,
   directExternalApiCall: mockDirectExternalApiCall,
   listAvailableOpenAiModels: mockListAvailableOpenAiModels,
-  listAvailableAnthropicModels: mockListAvailableAnthropicModels
+  listAvailableAnthropicModels: mockListAvailableAnthropicModels,
+  resolveDirectExternalApiRouteError: jest.fn((error, fallbackMessage = 'Internal Server Error') => ({
+    statusCode: Number.isInteger(error?.statusCode) ? error.statusCode : 500,
+    message: error?.message || fallbackMessage
+  }))
 }));
 
 await jest.unstable_mockModule('./ai/textToImage/api.js', () => ({

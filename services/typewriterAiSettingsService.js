@@ -35,40 +35,6 @@ const PIPELINE_DEFINITIONS = {
       || process.env.TYPEWRITER_CONTINUATION_PROVIDER
       || DEFAULT_PROVIDER
   },
-  memory_creation: {
-    key: 'memory_creation',
-    label: 'Memory Creation',
-    description: '/api/fragmentToMemories',
-    modelKind: 'text',
-    defaultUseMock: false,
-    defaultModel: process.env.OPENAI_MEMORY_MODEL || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: DEFAULT_PROVIDER,
-    countProperty: 'memoryCount',
-    countLabel: 'Default memory count',
-    minCount: 1,
-    maxCount: 10,
-    defaultCount: Number.isFinite(Number(process.env.OPENAI_MEMORY_COUNT))
-      ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_MEMORY_COUNT))), 10)
-      : 3
-  },
-  entity_creation: {
-    key: 'entity_creation',
-    label: 'Entity Creation',
-    description: '/api/textToEntity',
-    modelKind: 'text',
-    defaultUseMock: false,
-    defaultModel: process.env.OPENAI_ENTITY_MODEL || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: DEFAULT_PROVIDER,
-    countProperty: 'entityCount',
-    countLabel: 'Default entity count',
-    minCount: 1,
-    maxCount: 12,
-    defaultCount: Number.isFinite(Number(process.env.OPENAI_ENTITY_COUNT))
-      ? Math.min(Math.max(1, Math.floor(Number(process.env.OPENAI_ENTITY_COUNT))), 12)
-      : 8
-  },
   storyteller_creation: {
     key: 'storyteller_creation',
     label: 'Storyteller Creation',
@@ -111,108 +77,6 @@ const PIPELINE_DEFINITIONS = {
     supportedProviders: TEXT_PIPELINE_PROVIDERS,
     defaultProvider: process.env.OPENAI_TYPEWRITER_KEY_VERIFICATION_PROVIDER || DEFAULT_PROVIDER
   },
-  messenger_chat: {
-    key: 'messenger_chat',
-    label: 'Messenger Chat',
-    description: '/api/messenger/chat',
-    modelKind: 'text',
-    defaultUseMock: process.env.CHAT_MOCK_MODE === 'true',
-    defaultModel: process.env.OPENAI_MESSENGER_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: process.env.OPENAI_MESSENGER_PROVIDER || DEFAULT_PROVIDER
-  },
-  immersive_rpg_gm: {
-    key: 'immersive_rpg_gm',
-    label: 'Immersive RPG GM',
-    description: '/api/immersive-rpg/chat',
-    modelKind: 'text',
-    defaultUseMock: false,
-    defaultModel: process.env.OPENAI_IMMERSIVE_RPG_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: process.env.OPENAI_IMMERSIVE_RPG_PROVIDER || DEFAULT_PROVIDER
-  },
-  seer_reading_orchestrator: {
-    key: 'seer_reading_orchestrator',
-    label: 'Seer Reading Orchestrator',
-    description: '/api/seer/readings/:readingId/turn',
-    modelKind: 'text',
-    defaultUseMock: true,
-    defaultModel: process.env.OPENAI_SEER_READING_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: process.env.OPENAI_SEER_READING_PROVIDER || DEFAULT_PROVIDER
-  },
-  seer_reading_card_generation: {
-    key: 'seer_reading_card_generation',
-    label: 'Seer Reading Card Generation',
-    description: 'internal://seer-reading/cards/generate',
-    modelKind: 'text',
-    defaultUseMock: true,
-    countProperty: 'cardCount',
-    countLabel: 'Default card count',
-    minCount: 1,
-    maxCount: 10,
-    defaultCount: 3,
-    defaultModel: process.env.OPENAI_SEER_CARD_MODEL
-      || process.env.OPENAI_SEER_READING_MODEL
-      || process.env.OPENAI_CHAT_MODEL
-      || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: process.env.OPENAI_SEER_CARD_PROVIDER
-      || process.env.OPENAI_SEER_READING_PROVIDER
-      || DEFAULT_PROVIDER
-  },
-  quest_generation: {
-    key: 'quest_generation',
-    label: 'Quest Generation',
-    description: '/api/quest/advance',
-    modelKind: 'text',
-    defaultUseMock: false,
-    defaultModel: process.env.OPENAI_QUEST_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: process.env.OPENAI_QUEST_PROVIDER || DEFAULT_PROVIDER
-  },
-  quest_scene_authoring: {
-    key: 'quest_scene_authoring',
-    label: 'Quest Scene Authoring',
-    description: '/api/admin/quest/authoring-draft',
-    modelKind: 'text',
-    defaultUseMock: false,
-    defaultModel: process.env.OPENAI_QUEST_AUTHORING_MODEL || process.env.OPENAI_QUEST_MODEL || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: process.env.OPENAI_QUEST_AUTHORING_PROVIDER || process.env.OPENAI_QUEST_PROVIDER || DEFAULT_PROVIDER
-  },
-  storyteller_mission: {
-    key: 'storyteller_mission',
-    label: 'Storyteller Mission',
-    description: '/api/sendStorytellerToEntity',
-    modelKind: 'text',
-    defaultUseMock: false,
-    defaultModel: process.env.OPENAI_STORYTELLER_MISSION_MODEL
-      || process.env.OPENAI_STORYTELLER_MODEL
-      || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: process.env.OPENAI_STORYTELLER_MISSION_PROVIDER || DEFAULT_PROVIDER
-  },
-  relationship_evaluation: {
-    key: 'relationship_evaluation',
-    label: 'Relationship Evaluation',
-    description: '/api/arena/relationships/propose',
-    modelKind: 'text',
-    defaultUseMock: false,
-    defaultModel: process.env.OPENAI_RELATIONSHIP_MODEL || 'gpt-5-mini',
-    supportedProviders: TEXT_PIPELINE_PROVIDERS,
-    defaultProvider: DEFAULT_PROVIDER
-  },
-  texture_creation: {
-    key: 'texture_creation',
-    label: 'Texture Creation',
-    description: 'Card/front/back image generation',
-    modelKind: 'image',
-    defaultUseMock: false,
-    defaultModel: process.env.OPENAI_TEXTURE_MODEL || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1',
-    supportedProviders: OPENAI_ONLY_PROVIDERS,
-    defaultProvider: DEFAULT_PROVIDER
-  },
   illustration_creation: {
     key: 'illustration_creation',
     label: 'Illustration Creation',
@@ -224,6 +88,14 @@ const PIPELINE_DEFINITIONS = {
     defaultProvider: DEFAULT_PROVIDER
   }
 };
+const TYPEWRITER_PIPELINE_KEYS = [
+  'story_continuation',
+  'xerofag_inspection',
+  'storyteller_creation',
+  'storyteller_intervention',
+  'typewriter_key_verification',
+  'illustration_creation'
+];
 
 let cachedSettings = null;
 let cachedSettingsMtimeMs = -1;
@@ -268,9 +140,15 @@ function normalizeCount(value, fallback = 8, max = 12) {
   return Math.min(Math.max(1, Math.floor(next)), max);
 }
 
+function getActivePipelineEntries() {
+  return TYPEWRITER_PIPELINE_KEYS
+    .map((key) => [key, PIPELINE_DEFINITIONS[key]])
+    .filter(([, definition]) => Boolean(definition));
+}
+
 function buildDefaultSettings() {
   const pipelines = {};
-  for (const [key, definition] of Object.entries(PIPELINE_DEFINITIONS)) {
+  for (const [key, definition] of getActivePipelineEntries()) {
     pipelines[key] = {
       key,
       label: definition.label,
@@ -304,7 +182,7 @@ function normalizeSettings(rawSettings) {
   const sourcePipelines = asObject(source.pipelines);
   const pipelines = {};
 
-  for (const [key, definition] of Object.entries(PIPELINE_DEFINITIONS)) {
+  for (const [key, definition] of getActivePipelineEntries()) {
     const fallbackPipeline = defaults.pipelines[key];
     const incoming = asObject(sourcePipelines[key]);
     pipelines[key] = {
@@ -369,7 +247,7 @@ function normalizeUpdatePayload(payload = {}) {
   const sourcePipelines = asObject(source.pipelines);
   const nextPipelines = {};
 
-  for (const key of Object.keys(PIPELINE_DEFINITIONS)) {
+  for (const [key] of getActivePipelineEntries()) {
     const incoming = asObject(sourcePipelines[key]);
     const hasUseMock = Object.prototype.hasOwnProperty.call(incoming, 'useMock');
     const hasModel = Object.prototype.hasOwnProperty.call(incoming, 'model');
@@ -390,7 +268,7 @@ function normalizeUpdatePayload(payload = {}) {
 }
 
 export function getTypewriterPipelineDefinitions() {
-  return Object.values(PIPELINE_DEFINITIONS).map((definition) => ({
+  return getActivePipelineEntries().map(([, definition]) => ({
     key: definition.key,
     label: definition.label,
     description: definition.description || '',

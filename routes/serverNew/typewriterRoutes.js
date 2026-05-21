@@ -1,3 +1,56 @@
+function toPlainObject(doc) {
+  if (!doc) return null;
+  if (typeof doc.toObject === 'function') {
+    return doc.toObject();
+  }
+  return JSON.parse(JSON.stringify(doc));
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+function normalizeTaskPrivacy(value, fallback = 'session') {
+  const normalized = firstNonEmptyString(value).toLowerCase();
+  return ['public', 'session', 'private'].includes(normalized) ? normalized : fallback;
+}
+
+function normalizeTaskTarget(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  return {
+    type: firstNonEmptyString(source.type),
+    id: firstNonEmptyString(source.id),
+    label: firstNonEmptyString(source.label)
+  };
+}
+
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry) => typeof entry === 'string' && entry.trim())
+    .map((entry) => entry.trim());
+}
+
+function normalizeMetaObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+}
+
+function parseOptionalBooleanQuery(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  return undefined;
+}
+
+function escapeRegexPattern(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function registerTypewriterRoutes(app, deps) {
   const {
     collectTypewriterPageImages,
@@ -59,7 +112,9 @@ export function registerTypewriterRoutes(app, deps) {
     toFiniteNumber,
     buildMockStorytellerIntervention,
     resolveStorytellerInterventionPromptTemplate,
+    composeTypewriterStorytellerPrompt,
     buildStorytellerInterventionPromptMessages,
+    shouldApplyStorytellerTaskForPressPolicy,
     findStorytellerTaskAssignmentForRoute,
     resolveTaskPromptText,
     resolveTaskKnowledgeContext,
@@ -71,7 +126,13 @@ export function registerTypewriterRoutes(app, deps) {
     normalizeContinuationInsights,
     createTypewriterResponse,
     buildMockContinuation,
-    buildTypewriterPromptMessages
+    buildTypewriterPromptMessages,
+    resolveOrreryPageTextureIdentity,
+    buildPageTextureSessionSnapshot,
+    Task,
+    buildEntityAccessQuery,
+    buildTaskAccessQuery,
+    dedupeNarrativeEntitiesForResponse
   } = deps;
 
   app.post('/api/next_film_image', async (req, res) => {
@@ -100,6 +161,195 @@ export function registerTypewriterRoutes(app, deps) {
     } catch (error) {
       console.error('Error in /api/next_film_image:', error);
       return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  app.post('/api/typewriter/orrery/page-texture', async (req, res) => {
+    try {
+      const body = req.body || {};
+      const vector = body.vector || body.orreryVector || body.orrery_vector;
+      const sessionId = firstDefinedString(body.sessionId);
+
+      if (!vector || typeof vector !== 'object' || Array.isArray(vector)) {
+        return res.status(400).json({ error: 'Missing Orrery vector.' });
+      }
+
+      if (typeof resolveOrreryPageTextureIdentity !== 'function') {
+        return res.status(503).json({ error: 'Orrery page texture resolver is unavailable.' });
+      }
+
+      const identity = await resolveOrreryPageTextureIdentity(vector, {
+        persistComposed: body.persistAlignment !== false
+      });
+
+      let session = null;
+      if (sessionId && body.persistToSession !== false) {
+        await startTypewriterSession(sessionId);
+        session = await updateTypewriterSessionWorldState(sessionId, {
+          current_vibe: identity.alignmentKey,
+          orrery_vector: identity.vector,
+          page_texture_identity: typeof buildPageTextureSessionSnapshot === 'function'
+            ? buildPageTextureSessionSnapshot(identity)
+            : identity
+        });
+      }
+
+      return res.status(200).json({
+        ...identity,
+        sessionId: session?.sessionId || sessionId || undefined,
+        worldState: session?.worldState
+      });
+    } catch (error) {
+      console.error('Error in /api/typewriter/orrery/page-texture:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  app.get('/api/entities', async (req, res) => {
+    try {
+      const {
+        sessionId,
+        playerId,
+        mainEntityId,
+        isSubEntity,
+        source,
+        type,
+        subtype,
+        externalId,
+        name,
+        tag,
+        privacy,
+        activeInTypewriter,
+        typewriterKeyText,
+        sort,
+        limit
+      } = req.query;
+
+      if (!sessionId) {
+        return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+      }
+
+      const query = buildEntityAccessQuery(sessionId, playerId);
+      if (mainEntityId) query.mainEntityId = String(mainEntityId);
+      const parsedIsSubEntity = parseOptionalBooleanQuery(isSubEntity);
+      if (parsedIsSubEntity !== undefined) query.isSubEntity = parsedIsSubEntity;
+      if (source) query.source = String(source);
+      if (type) query.type = String(type);
+      if (subtype) query.subtype = String(subtype);
+      if (externalId) query.externalId = String(externalId);
+      if (privacy) query.privacy = String(privacy);
+      const parsedActiveInTypewriter = parseOptionalBooleanQuery(activeInTypewriter);
+      if (parsedActiveInTypewriter !== undefined) query.activeInTypewriter = parsedActiveInTypewriter;
+      if (typewriterKeyText) query.typewriterKeyText = String(typewriterKeyText);
+      if (name) query.name = { $regex: escapeRegexPattern(String(name)), $options: 'i' };
+      if (tag) query.tags = { $regex: escapeRegexPattern(String(tag)), $options: 'i' };
+
+      const safeLimit = Number.isFinite(Number(limit))
+        ? Math.max(1, Math.min(200, Math.floor(Number(limit))))
+        : 0;
+      const normalizedSort = firstDefinedString(sort).toLowerCase();
+      const sortSpec = normalizedSort === 'reuse'
+        ? { reuseCount: -1, lastUsedAt: -1, createdAt: -1 }
+        : { createdAt: -1 };
+
+      let entitiesQuery = NarrativeEntity.find(query).sort(sortSpec);
+      if (safeLimit) {
+        entitiesQuery = entitiesQuery.limit(safeLimit * 2);
+      }
+
+      const entities = dedupeNarrativeEntitiesForResponse(await entitiesQuery.exec())
+        .slice(0, safeLimit || undefined);
+      return res.status(200).json({
+        sessionId,
+        playerId: normalizeOptionalPlayerId(playerId),
+        count: entities.length,
+        entities
+      });
+    } catch (error) {
+      console.error('Error in /api/entities:', error);
+      return res.status(500).json({ message: 'Server error during entity listing.' });
+    }
+  });
+
+  app.post('/api/tasks', async (req, res) => {
+    try {
+      const body = req.body || {};
+      const title = firstNonEmptyString(body.title);
+      const brief = typeof body.brief === 'string' ? body.brief.trim() : '';
+      const privacy = normalizeTaskPrivacy(body.privacy);
+      const sessionId = firstNonEmptyString(body.sessionId);
+      const playerId = normalizeOptionalPlayerId(body.playerId);
+      const target = normalizeTaskTarget(body.target);
+
+      if (!title) {
+        return res.status(400).json({ message: 'Task title is required.' });
+      }
+      if (!target.type) {
+        return res.status(400).json({ message: 'Task target.type is required.' });
+      }
+
+      const task = await Task.create({
+        taskId: firstNonEmptyString(body.taskId) || undefined,
+        title,
+        brief,
+        privacy,
+        sessionId,
+        playerId,
+        target,
+        knownEntityIds: normalizeStringArray(body.knownEntityIds),
+        tags: normalizeStringArray(body.tags),
+        meta: normalizeMetaObject(body.meta)
+      });
+
+      return res.status(201).json({ task: toPlainObject(task) });
+    } catch (error) {
+      console.error('Error in POST /api/tasks:', error);
+      return sendLlmAwareError(res, error, 'Server error during task creation.', 'message');
+    }
+  });
+
+  app.get('/api/tasks', async (req, res) => {
+    try {
+      const {
+        sessionId,
+        playerId,
+        privacy,
+        targetType,
+        targetId,
+        tag,
+        limit,
+        sort
+      } = req.query;
+
+      const query = buildTaskAccessQuery(sessionId, playerId);
+      if (privacy) query.privacy = normalizeTaskPrivacy(privacy, '');
+      if (targetType) query['target.type'] = String(targetType).trim();
+      if (targetId) query['target.id'] = String(targetId).trim();
+      if (tag) query.tags = { $regex: escapeRegexPattern(String(tag)), $options: 'i' };
+
+      const safeLimit = Number.isFinite(Number(limit))
+        ? Math.max(1, Math.min(200, Math.floor(Number(limit))))
+        : 0;
+      const normalizedSort = firstNonEmptyString(sort).toLowerCase();
+      const sortSpec = normalizedSort === 'title'
+        ? { title: 1, createdAt: -1 }
+        : { createdAt: -1 };
+
+      let tasksQuery = Task.find(query).sort(sortSpec);
+      if (safeLimit) {
+        tasksQuery = tasksQuery.limit(safeLimit);
+      }
+
+      const tasks = await tasksQuery.exec();
+      return res.status(200).json({
+        sessionId: firstNonEmptyString(sessionId),
+        playerId: normalizeOptionalPlayerId(playerId),
+        count: tasks.length,
+        tasks: tasks.map(toPlainObject)
+      });
+    } catch (error) {
+      console.error('Error in GET /api/tasks:', error);
+      return sendLlmAwareError(res, error, 'Server error during task listing.', 'message');
     }
   });
 
@@ -438,6 +688,8 @@ export function registerTypewriterRoutes(app, deps) {
         playerId,
         current_vibe,
         orrery_positions,
+        orrery_vector,
+        page_texture_identity,
         orrery_radial_distance_budget,
         number_of_available_slides
       } = req.body || {};
@@ -453,6 +705,12 @@ export function registerTypewriterRoutes(app, deps) {
       }
       if (orrery_positions && typeof orrery_positions === 'object' && !Array.isArray(orrery_positions)) {
         patch.orrery_positions = orrery_positions;
+      }
+      if (orrery_vector && typeof orrery_vector === 'object' && !Array.isArray(orrery_vector)) {
+        patch.orrery_vector = orrery_vector;
+      }
+      if (page_texture_identity && typeof page_texture_identity === 'object' && !Array.isArray(page_texture_identity)) {
+        patch.page_texture_identity = page_texture_identity;
       }
       if (orrery_radial_distance_budget !== undefined) {
         patch.orrery_radial_distance_budget = orrery_radial_distance_budget;
@@ -503,7 +761,8 @@ export function registerTypewriterRoutes(app, deps) {
       const policy = await loadTypewriterStorytellerPolicyConfig();
       return res.status(200).json({
         policy,
-        checkIntervalWords: getTypewriterStorytellerCheckIntervalWords(policy)
+        checkIntervalWords: getTypewriterStorytellerCheckIntervalWords(policy),
+        storage: 'mongodb'
       });
     } catch (error) {
       console.error('Error in GET /api/typewriter/storyteller-policy:', error);
@@ -513,14 +772,151 @@ export function registerTypewriterRoutes(app, deps) {
 
   app.post('/api/typewriter/storyteller-policy', async (req, res) => {
     try {
-      const policy = await saveTypewriterStorytellerPolicyConfig(req.body?.policy || req.body || {});
+      const policy = await saveTypewriterStorytellerPolicyConfig(req.body?.policy || req.body || {}, {
+        updatedBy: firstDefinedString(req.body?.updatedBy, 'story-admin-ui'),
+        meta: {
+          source: '/api/typewriter/storyteller-policy'
+        }
+      });
       return res.status(200).json({
         policy,
-        checkIntervalWords: getTypewriterStorytellerCheckIntervalWords(policy)
+        checkIntervalWords: getTypewriterStorytellerCheckIntervalWords(policy),
+        storage: 'mongodb'
       });
     } catch (error) {
       console.error('Error in POST /api/typewriter/storyteller-policy:', error);
       return res.status(400).json({ error: error?.message || 'Invalid storyteller policy.' });
+    }
+  });
+
+  app.post('/api/typewriter/storyteller-prompt/preview', async (req, res) => {
+    try {
+      const body = req.body || {};
+      const sessionId = firstDefinedString(body.sessionId);
+      const storytellerId = firstDefinedString(body.storytellerId);
+      const slotIndexRaw = Number(body.slotIndex);
+      const slotIndex = Number.isInteger(slotIndexRaw) ? slotIndexRaw : null;
+      const resolvedPlayerId = normalizeOptionalPlayerId(body.playerId);
+
+      if (!sessionId || (!storytellerId && slotIndex === null)) {
+        return res.status(400).json({ error: 'Missing sessionId and storytellerId or slotIndex.' });
+      }
+
+      await startTypewriterSession(sessionId);
+      await ensureBuiltinTypewriterKeys(sessionId, resolvedPlayerId);
+      const storytellerPolicyConfig = await loadTypewriterStorytellerPolicyConfig();
+      const sessionFragmentText = await getTypewriterSessionFragment(sessionId);
+      const hasNarrativeOverride = typeof body.currentNarrative === 'string'
+        || typeof body.current_narrative === 'string';
+      const fragmentText = hasNarrativeOverride
+        ? String(body.currentNarrative ?? body.current_narrative ?? '')
+        : sessionFragmentText;
+      const fragmentSource = hasNarrativeOverride ? 'override' : 'session';
+      const storyteller = await findTypewriterStorytellerForIntervention(
+        sessionId,
+        storytellerId,
+        slotIndex,
+        resolvedPlayerId
+      );
+
+      if (!storyteller) {
+        return res.status(404).json({ error: 'Storyteller not found for this session.' });
+      }
+
+      const taskId = firstDefinedString(body.taskId);
+      const { task, assignment: taskAssignment } = await findStorytellerTaskAssignmentForRoute({
+        sessionId,
+        storytellerId: String(storyteller._id || storytellerId || ''),
+        routePath: '/api/send_storyteller_typewriter_text',
+        explicitTaskId: taskId,
+        playerId: resolvedPlayerId
+      });
+
+      if (taskId && !task) {
+        return res.status(404).json({ error: 'Task not found for this session.' });
+      }
+
+      const interventionPipeline = await getAiPipelineSettings('storyteller_intervention');
+      const interventionProvider = typeof interventionPipeline?.provider === 'string'
+        ? interventionPipeline.provider
+        : 'openai';
+      const shouldMock = resolveMockMode(body, interventionPipeline.useMock);
+      const storytellerTask = resolveTaskPromptText(task);
+      const taskContext = await resolveTaskKnowledgeContext(task, sessionId, resolvedPlayerId);
+      const pressPolicy = resolveTypewriterStorytellerPressPolicy(storyteller, storytellerPolicyConfig);
+      const continuationPromptDoc = await getLatestPromptTemplate('story_continuation');
+      const continuationPromptOverride = firstDefinedString(
+        body.continuationPromptTemplate,
+        body.continuation_prompt_template
+      );
+      const storytellerPromptOverride = firstDefinedString(
+        body.storytellerPromptTemplate,
+        body.storyteller_prompt_template
+      );
+      const storytellerPromptTemplate = storytellerPromptOverride
+        || await resolveStorytellerInterventionPromptTemplate();
+      const continuationPromptTemplate = continuationPromptOverride
+        || continuationPromptDoc?.promptTemplate
+        || '';
+      const composedPrompt = composeTypewriterStorytellerPrompt({
+        storyteller,
+        fragmentText,
+        promptTemplate: storytellerPromptTemplate,
+        storytellerTask,
+        storytellerKnownContext: taskContext.knownContextText,
+        continuationPromptTemplate,
+        pressPolicy
+      });
+      const visibleStorytellers = await listTypewriterSlotStorytellers(sessionId, resolvedPlayerId);
+
+      return res.status(200).json({
+        sessionId,
+        playerId: resolvedPlayerId,
+        fragmentText,
+        fragmentSource,
+        storyteller: buildTypewriterSessionStorytellerItem(storyteller, storytellerPolicyConfig),
+        pressPolicy,
+        task: task ? {
+          id: String(task._id),
+          taskId: firstDefinedString(task.taskId),
+          title: firstDefinedString(task.title),
+          brief: firstDefinedString(task.brief)
+        } : null,
+        taskAssignment: taskAssignment ? {
+          id: String(taskAssignment._id),
+          status: firstDefinedString(taskAssignment.status),
+          assigneeType: firstDefinedString(taskAssignment.assigneeType),
+          assigneeId: firstDefinedString(taskAssignment.assigneeId)
+        } : null,
+        taskContext: {
+          knownEntities: Array.isArray(taskContext?.knownEntities) ? taskContext.knownEntities : []
+        },
+        slots: buildTypewriterStorytellerSlots(visibleStorytellers, fragmentText.length, storytellerPolicyConfig),
+        runtime: {
+          pipeline: 'storyteller_intervention',
+          provider: interventionProvider,
+          model: interventionPipeline.model || '',
+          mocked: shouldMock
+        },
+        prompt: {
+          messages: composedPrompt.messages,
+          systemPrompt: composedPrompt.systemPrompt,
+          userPayload: composedPrompt.userPayload,
+          stageGuideline: composedPrompt.stageGuideline,
+          taskApplied: composedPrompt.taskApplied,
+          composerBreakpoint: composedPrompt.composerBreakpoint,
+          continuationPromptTemplate,
+          storytellerPromptTemplate,
+          overrides: {
+            continuationPromptTemplate: Boolean(continuationPromptOverride),
+            storytellerPromptTemplate: Boolean(storytellerPromptOverride),
+            currentNarrative: hasNarrativeOverride
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error in POST /api/typewriter/storyteller-prompt/preview:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
     }
   });
 

@@ -8,6 +8,8 @@ const DEFAULT_TYPEWRITER_WORLD_STATE = Object.freeze({
   established_facts: [],
   current_vibe: '',
   orrery_positions: {},
+  orrery_vector: {},
+  page_texture_identity: null,
   orrery_radial_distance_budget: 2,
   number_of_available_slides: 2
 });

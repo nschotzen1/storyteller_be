@@ -1,12 +1,15 @@
 import fs from 'fs/promises';
+import mongoose from 'mongoose';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { TypewriterStorytellerPolicy } from '../models/models.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CONFIG_DIR = path.resolve(__dirname, '..', 'config');
 const POLICY_CONFIG_PATH = process.env.TYPEWRITER_STORYTELLER_POLICY_PATH
   || path.join(CONFIG_DIR, 'typewriter_storyteller_policy.json');
+const STORYTELLER_POLICY_KEY = 'default';
 
 const DEFAULT_SUBSTANCE_BUDGET = Object.freeze({
   maxNewEntities: 1,
@@ -246,9 +249,28 @@ export function normalizeTypewriterStorytellerPolicyConfig(config = {}) {
 }
 
 export async function loadTypewriterStorytellerPolicyConfig() {
+  if (mongoose.connection.readyState === 1) {
+    const policyDoc = await TypewriterStorytellerPolicy.findOne({
+      key: STORYTELLER_POLICY_KEY,
+      isLatest: true
+    })
+      .sort({ version: -1, createdAt: -1 })
+      .lean();
+    if (policyDoc?.policy) {
+      return normalizeTypewriterStorytellerPolicyConfig(policyDoc.policy);
+    }
+  }
+
   try {
     const raw = await fs.readFile(POLICY_CONFIG_PATH, 'utf8');
-    return normalizeTypewriterStorytellerPolicyConfig(JSON.parse(raw));
+    const normalized = normalizeTypewriterStorytellerPolicyConfig(JSON.parse(raw));
+    if (mongoose.connection.readyState === 1) {
+      await saveTypewriterStorytellerPolicyConfig(normalized, {
+        updatedBy: 'file-migration',
+        meta: { source: POLICY_CONFIG_PATH }
+      });
+    }
+    return normalized;
   } catch (error) {
     if (error.code === 'ENOENT') {
       return normalizeTypewriterStorytellerPolicyConfig(DEFAULT_TYPEWRITER_STORYTELLER_POLICY);
@@ -257,8 +279,28 @@ export async function loadTypewriterStorytellerPolicyConfig() {
   }
 }
 
-export async function saveTypewriterStorytellerPolicyConfig(config = {}) {
+export async function saveTypewriterStorytellerPolicyConfig(config = {}, options = {}) {
   const normalized = normalizeTypewriterStorytellerPolicyConfig(config);
+  if (mongoose.connection.readyState === 1) {
+    const latest = await TypewriterStorytellerPolicy.findOne({ key: STORYTELLER_POLICY_KEY })
+      .sort({ version: -1 })
+      .lean();
+    const nextVersion = Math.max(Number(latest?.version) || 0, 0) + 1;
+    await TypewriterStorytellerPolicy.updateMany(
+      { key: STORYTELLER_POLICY_KEY, isLatest: true },
+      { $set: { isLatest: false } }
+    );
+    await TypewriterStorytellerPolicy.create({
+      key: STORYTELLER_POLICY_KEY,
+      version: nextVersion,
+      policy: normalized,
+      isLatest: true,
+      createdBy: firstString(options.updatedBy, options.createdBy, 'admin'),
+      meta: options.meta || {}
+    });
+    return normalized;
+  }
+
   await fs.mkdir(path.dirname(POLICY_CONFIG_PATH), { recursive: true });
   await fs.writeFile(POLICY_CONFIG_PATH, JSON.stringify(normalized, null, 2), 'utf8');
   return normalized;

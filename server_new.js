@@ -74,19 +74,8 @@ import {
   renderPrompt,
   validatePayloadForRoute
 } from './services/llmRouteConfigService.js';
-import memoriesRouter from './routes/memoriesRoutes.js';
-import { registerWellAdminRoutes } from './routes/serverNew/wellAdminRoutes.js';
-import { registerQuestRoutes } from './routes/serverNew/questRoutes.js';
-import { registerSeerRoutes } from './routes/serverNew/seerRoutes.js';
-import { registerSessionWorldRoutes } from './routes/serverNew/sessionWorldRoutes.js';
-import { registerNarrativeRoutes } from './routes/serverNew/narrativeRoutes.js';
-import { registerTaskRoutes } from './routes/serverNew/taskRoutes.js';
-import { registerArenaRoutes } from './routes/serverNew/arenaRoutes.js';
-import { registerBrewingRoutes } from './routes/serverNew/brewingRoutes.js';
-import { registerMessengerRoutes } from './routes/serverNew/messengerRoutes.js';
-import { registerImmersiveRpgRoutes } from './routes/serverNew/immersiveRpgRoutes.js';
 import { registerTypewriterRoutes } from './routes/serverNew/typewriterRoutes.js';
-import { registerDocsRoutes } from './routes/serverNew/docsRoutes.js';
+import { registerTypewriterAdminRoutes } from './routes/serverNew/typewriterAdminRoutes.js';
 import {
   getPipelineSettings,
   getTypewriterAiSettings,
@@ -140,6 +129,10 @@ import {
   startTypewriterSession,
   updateTypewriterSessionWorldState
 } from './services/typewriterSessionService.js';
+import {
+  buildPageTextureSessionSnapshot,
+  resolveOrreryPageTextureIdentity
+} from './services/orreryAlignmentService.js';
 import {
   drawNextWellTextualFragment,
   getWellMemorySession,
@@ -2488,15 +2481,6 @@ async function handleMessengerChatPost(req, res) {
   }
 }
 
-registerMessengerRoutes(app, {
-  handleMessengerChatPost,
-  normalizeMessengerSceneId,
-  resolveMessengerPersistenceMode,
-  buildMessengerConversationPayload,
-  deleteMessengerConversation,
-  deleteMessengerSceneBrief
-});
-
 function normalizeImmersiveRpgSessionId(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
@@ -3531,36 +3515,6 @@ function buildImmersiveRpgEnvelope(sceneDoc, characterSheetDoc, extras = {}) {
   };
 }
 
-registerImmersiveRpgRoutes(app, {
-  normalizeImmersiveRpgSessionId,
-  normalizeImmersiveRpgPlayerId,
-  normalizeImmersiveRpgPlayerName,
-  normalizeImmersiveRpgMessengerSceneId,
-  resolveImmersiveRpgRuntimeConfig,
-  getAiPipelineSettings,
-  createOrLoadImmersiveRpgScene,
-  buildImmersiveRpgEnvelope,
-  getDefaultImmersiveRpgSceneDefinition,
-  resolveMockMode,
-  createTranscriptEntry,
-  buildMockImmersiveRpgChatResponse,
-  buildImmersiveRpgPromptMessages,
-  callJsonLlm,
-  validatePayloadForRoute,
-  IMMERSIVE_RPG_TURN_CONTRACT_KEY,
-  normalizeImmersiveRpgChatResponse,
-  buildCompiledScenePrompt,
-  ImmersiveRpgSceneSession,
-  resolveSchemaErrorMessage,
-  sendLlmAwareError,
-  simulateDicePoolRoll,
-  resolveRollOutcome,
-  getImmersiveRpgSceneDefinition,
-  resolveImmersiveRpgSceneContext,
-  ensureImmersiveRpgCharacterSheet,
-  toImmersiveRpgCharacterSheetPayload
-});
-
 registerTypewriterRoutes(app, {
   collectTypewriterPageImages,
   ASSETS_ROOTS,
@@ -3621,7 +3575,9 @@ registerTypewriterRoutes(app, {
   toFiniteNumber,
   buildMockStorytellerIntervention,
   resolveStorytellerInterventionPromptTemplate,
+  composeTypewriterStorytellerPrompt,
   buildStorytellerInterventionPromptMessages,
+  shouldApplyStorytellerTaskForPressPolicy,
   findStorytellerTaskAssignmentForRoute,
   resolveTaskPromptText,
   resolveTaskKnowledgeContext,
@@ -3633,20 +3589,13 @@ registerTypewriterRoutes(app, {
   normalizeContinuationInsights,
   createTypewriterResponse,
   buildMockContinuation,
-  buildTypewriterPromptMessages
-});
-
-registerTaskRoutes(app, {
+  buildTypewriterPromptMessages,
+  resolveOrreryPageTextureIdentity,
+  buildPageTextureSessionSnapshot,
   Task,
-  TaskAssignment,
+  buildEntityAccessQuery,
   buildTaskAccessQuery,
-  findTaskById,
-  normalizeOptionalPlayerId,
-  sendLlmAwareError
-});
-
-registerDocsRoutes(app, {
-  OPEN_API_SPEC
+  dedupeNarrativeEntitiesForResponse
 });
 
 const MOCK_STORYTELLER = {
@@ -4642,6 +4591,7 @@ function buildStorytellerInterventionPromptPayload(storyteller, fragmentText) {
 }
 
 const DEFAULT_STORYTELLER_INTERVENTION_TASK = 'Notice what most disturbs you in the scene, reveal it through one concrete clue, and leave room for later investigation.';
+const XEROFAG_TASK_PATTERN = /\bxerofag\b/i;
 
 function resolveTaskPromptText(task = null) {
   return firstDefinedString(task?.brief, task?.title, DEFAULT_STORYTELLER_INTERVENTION_TASK);
@@ -4688,6 +4638,7 @@ function buildStorytellerInterventionPromptPayloadWithTask(
     storyteller_stage_id: firstDefinedString(resolvedPolicy.stageId),
     storyteller_stage_label: firstDefinedString(resolvedPolicy.stageLabel),
     storyteller_stage_instruction: firstDefinedString(resolvedPolicy.stageInstruction),
+    storyteller_stage_guideline: firstDefinedString(resolvedPolicy.stageGuideline, resolvedPolicy.stageInstruction),
     storyteller_proximity: firstDefinedString(resolvedPolicy.proximity),
     storyteller_narrative_authority: firstDefinedString(resolvedPolicy.narrativeAuthority),
     storyteller_first_person_allowed: resolvedPolicy.firstPersonAllowed ? 'true' : 'false',
@@ -4698,6 +4649,91 @@ function buildStorytellerInterventionPromptPayloadWithTask(
     storyteller_min_reused_entities: String(budget.minReusedEntities ?? 1),
     storyteller_allow_major_plot_change: budget.allowMajorPlotChange ? 'true' : 'false',
     fragment_text: typeof fragmentText === 'string' ? fragmentText : ''
+  };
+}
+
+function shouldApplyStorytellerTaskForPressPolicy(storytellerTask = '', pressPolicy = null) {
+  const taskText = firstDefinedString(storytellerTask);
+  if (!taskText) return false;
+  if (XEROFAG_TASK_PATTERN.test(taskText)) {
+    return Boolean(pressPolicy?.currentSceneInterventionAllowed);
+  }
+  return true;
+}
+
+function buildStorytellerStatePromptBlock(payload = {}, pressPolicy = null) {
+  return `Storyteller current state:
+- Name: ${firstDefinedString(payload.storyteller_name, 'Unnamed storyteller')}
+- Stage: ${firstDefinedString(payload.storyteller_stage_label, 'Unknown stage')} (${firstDefinedString(payload.storyteller_stage_id, 'unknown')})
+- Press number: ${firstDefinedString(payload.storyteller_press_number, '1')}
+- Archetype: ${firstDefinedString(payload.storyteller_archetype_label, 'No archetype')}
+- Archetype role: ${firstDefinedString(payload.storyteller_archetype_role, 'No archetype role')}
+- Proximity: ${firstDefinedString(payload.storyteller_proximity, 'distant')}
+- Narrative authority: ${firstDefinedString(payload.storyteller_narrative_authority, 'additive')}
+- First person allowed: ${pressPolicy?.firstPersonAllowed ? 'yes' : 'no'}
+- Current-scene intervention allowed: ${pressPolicy?.currentSceneInterventionAllowed ? 'yes' : 'no'}
+- Output length: ${firstDefinedString(payload.storyteller_output_word_min, '45')}-${firstDefinedString(payload.storyteller_output_word_max, '90')} words`;
+}
+
+function composeTypewriterStorytellerPrompt({
+  storyteller = null,
+  fragmentText = '',
+  promptTemplate = '',
+  storytellerTask = '',
+  storytellerKnownContext = '',
+  continuationPromptTemplate = '',
+  pressPolicy = null
+} = {}) {
+  // Breakpoint here: this is the only place where the final storyteller key prompt is assembled.
+  const resolvedPolicy = pressPolicy || resolveTypewriterStorytellerPressPolicy(storyteller);
+  const taskApplies = shouldApplyStorytellerTaskForPressPolicy(storytellerTask, resolvedPolicy);
+  const effectiveTask = taskApplies
+    ? firstDefinedString(storytellerTask, DEFAULT_STORYTELLER_INTERVENTION_TASK)
+    : DEFAULT_STORYTELLER_INTERVENTION_TASK;
+  const effectiveKnownContext = taskApplies
+    ? storytellerKnownContext
+    : DEFAULT_STORYTELLER_KNOWN_CONTEXT;
+  const stageGuideline = firstDefinedString(resolvedPolicy?.stageGuideline, resolvedPolicy?.stageInstruction);
+  const payload = buildStorytellerInterventionPromptPayloadWithTask(
+    storyteller,
+    fragmentText,
+    effectiveTask,
+    effectiveKnownContext,
+    {
+      ...resolvedPolicy,
+      stageGuideline
+    }
+  );
+  const continuationPrompt = renderContinuationPromptForStorytellerIntervention(
+    fragmentText,
+    continuationPromptTemplate
+  );
+  const storytellerStateBlock = buildStorytellerStatePromptBlock(payload, resolvedPolicy);
+  const interventionPrompt = renderStorytellerInterventionPromptWithoutInlineFragment(
+    promptTemplate,
+    payload
+  );
+  const normalizedFragmentText = typeof fragmentText === 'string' ? fragmentText : '';
+  const systemPrompt = [
+    continuationPrompt,
+    `Fragment text:\n"""\n${normalizedFragmentText}\n"""`,
+    storytellerStateBlock,
+    `Stage guideline from MongoDB:\n${stageGuideline}`,
+    interventionPrompt
+  ]
+    .filter((section) => typeof section === 'string' && section.trim())
+    .join('\n\n');
+
+  return {
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: JSON.stringify(payload) }
+    ],
+    systemPrompt,
+    userPayload: payload,
+    stageGuideline,
+    taskApplied: taskApplies,
+    composerBreakpoint: 'server_new.js:composeTypewriterStorytellerPrompt'
   };
 }
 
@@ -4801,23 +4837,15 @@ function buildStorytellerInterventionPromptMessages(
   continuationPromptTemplate = '',
   pressPolicy = null
 ) {
-  const payload = buildStorytellerInterventionPromptPayloadWithTask(
+  return composeTypewriterStorytellerPrompt({
     storyteller,
     fragmentText,
+    promptTemplate,
     storytellerTask,
     storytellerKnownContext,
+    continuationPromptTemplate,
     pressPolicy
-  );
-  const renderedPrompt = buildStorytellerInterventionCompositePrompt({
-    fragmentText,
-    storytellerPayload: payload,
-    interventionPromptTemplate: promptTemplate,
-    continuationPromptTemplate
-  });
-  return [
-    { role: 'system', content: renderedPrompt },
-    { role: 'user', content: JSON.stringify(payload) }
-  ];
+  }).messages;
 }
 
 function pickMockStoryEntitySeed(fragmentText = '') {
@@ -4862,7 +4890,7 @@ function buildMockStorytellerIntervention(storyteller, fragmentText, storyteller
   const stageId = firstDefinedString(policy?.stageId, 'signature');
   const canUseFirstPerson = Boolean(policy?.firstPersonAllowed);
   const canIntervene = Boolean(policy?.currentSceneInterventionAllowed);
-  if (taskText.includes('xerofag')) {
+  if (XEROFAG_TASK_PATTERN.test(taskText) && canIntervene) {
     const storytellerName = firstDefinedString(storyteller?.name) || 'The hidden storyteller';
     const xerofagContinuation = canUseFirstPerson
       ? `It was then that I, ${storytellerName}, drew near enough to read the thumb-wide crescent of dark wax pressed into the latch. "That mark makes me suspect the Xerofag, though certainty would be a dangerous vanity." The Wax Clerk looked up only once, and the room seemed to remember another door.`
@@ -8103,18 +8131,8 @@ async function upsertNarrativeEntityFromSeerClaim({
   return updatedEntity;
 }
 
-// Register the route surface by domain so the server entrypoint stays a composition root.
-registerWellAdminRoutes(app, {
+registerTypewriterAdminRoutes(app, {
   requireAdmin,
-  loadWellSceneConfig,
-  startWellMemorySession,
-  getWellMemorySession,
-  drawNextWellTextualFragment,
-  submitWellTextualJot,
-  handoffWellMemorySession,
-  getWellSceneConfigMeta,
-  saveWellSceneConfig,
-  resetWellSceneConfig,
   getTypewriterAiSettings,
   getTypewriterPipelineDefinitions,
   updateTypewriterAiSettings,
@@ -8137,176 +8155,6 @@ registerWellAdminRoutes(app, {
   updateRouteSchema,
   setLatestRouteConfig,
   resetRouteConfig
-});
-
-registerQuestRoutes(app, {
-  requireAdmin,
-  normalizeQuestScope,
-  ensureQuestConfig,
-  validateQuestConfigPayload,
-  saveQuestConfig,
-  resetQuestConfig,
-  parseQuestSceneImageDataUrl,
-  MAX_QUEST_SCENE_UPLOAD_BYTES,
-  buildQuestSceneUploadAssetPath,
-  fsPromises,
-  composeQuestSceneImagePrompt,
-  resolveProjectAssetUrl,
-  generateQuestSceneImageAsset,
-  resolveMockMode,
-  sanitizeQuestConfig,
-  getAiPipelineSettings,
-  QUEST_SCENE_AUTHORING_PIPELINE_KEY,
-  buildQuestSceneAuthoringRuntime,
-  buildQuestSceneAuthoringPromptPayload,
-  buildQuestPromptSourceDetails,
-  getDefaultQuestSceneAuthoringPromptTemplate,
-  buildMockQuestSceneAuthoringDraft,
-  resolveQuestSceneAuthoringRuntimeConfig,
-  buildQuestSceneAuthoringPromptMessages,
-  callJsonLlm,
-  normalizeQuestSceneAuthoringDraft,
-  flattenQuestSceneAuthoringChanges,
-  buildQuestDebugContext,
-  appendQuestTraversalEvent,
-  getQuestTraversal,
-  materializeRoseCourtLocationMuralsForQuest,
-  advanceQuest,
-  resolveSchemaErrorMessage
-});
-
-app.use('/api', memoriesRouter);
-
-registerSeerRoutes(app, {
-  firstDefinedString,
-  normalizeOptionalPlayerId,
-  randomUUID,
-  resolveFragmentText,
-  resolveWorldContextForSession,
-  resolveSeerReadingMemories,
-  chooseSeerVisionSourceMemory,
-  selectSeerRuntimeMemories,
-  buildSeerReadingMemory,
-  chooseInitialSeerFocusMemoryId,
-  NarrativeEntity,
-  applyOptionalPlayerId,
-  buildSeerReadingEntity,
-  getPipelineSettings,
-  resolveMockMode,
-  normalizeSeerCardCount,
-  normalizeSeerStringArray,
-  resolveSeerCardKinds,
-  generateSeerReadingCardDrafts,
-  buildSeerReadingCardFromDraft,
-  listTypewriterSlotStorytellers,
-  buildSeerReadingApparition,
-  buildSeerVision,
-  buildSeerReadingSpread,
-  SeerReading,
-  normalizeSeerReadingPayload,
-  runSeerReadingTurn,
-  findSeerReadingEntityByCard,
-  resolveCanonicalEntityForClaim,
-  upsertNarrativeEntityFromSeerClaim,
-  buildClaimedEntityLink,
-  findNextSeerClaimFocusCard,
-  createSeerTranscriptEntry,
-  buildClaimedSeerCardRecord,
-  buildSeerCardLayout,
-  buildSeerOrchestratorEnvelope,
-  synthesizeCharacterSheetFromSeerClaim,
-  toImmersiveRpgCharacterSheetPayload,
-  executeSeerCardClaimAction,
-  executeStorytellerMissionAction
-});
-
-registerSessionWorldRoutes(app, {
-  randomUUID,
-  SessionPlayer,
-  Arena,
-  normalizeArenaPayload,
-  World,
-  findWorldForPlayer,
-  WorldElement,
-  getRouteConfig,
-  renderPrompt,
-  directExternalApiCall,
-  validatePayloadForRoute,
-  buildMockWorld,
-  buildMockElements,
-  resolveSchemaErrorMessage,
-  sendLlmAwareError
-});
-
-registerNarrativeRoutes(app, {
-  Storyteller,
-  NarrativeEntity,
-  applyOptionalPlayerId,
-  buildEntityAccessQuery,
-  dedupeNarrativeEntitiesForResponse,
-  matchesOptionalPlayerId,
-  buildStorytellerListItem,
-  parseOptionalBooleanQuery,
-  escapeRegexPattern,
-  firstDefinedString,
-  normalizeOptionalPlayerId,
-  findEntityById,
-  getAiPipelineSettings,
-  getLatestPromptTemplate,
-  resolveMockMode,
-  resolveImageMockMode,
-  textToEntityFromText,
-  normalizeEntityCount,
-  normalizeDesiredEntityCategories,
-  validatePayloadForRoute,
-  normalizeStorytellerCount,
-  buildMockStorytellers,
-  renderPromptTemplateString,
-  getRouteConfig,
-  renderPrompt,
-  callJsonLlm,
-  normalizeGeneratedStorytellerPayload,
-  pickMockStorytellerIllustrationUrl,
-  pickMockStorytellerKeyUrl,
-  createStoryTellerKey,
-  createStorytellerIllustration,
-  path,
-  resolveSchemaErrorMessage,
-  sendLlmAwareError,
-  resolveFragmentText,
-  updateNarrativeEntityAfterStorytellerMission,
-  ensureImmersiveRpgCharacterSheet,
-  buildStorytellerMissionCharacterSheetPatch,
-  toImmersiveRpgCharacterSheetPayload,
-  executeStorytellerMissionAction
-});
-
-registerArenaRoutes(app, {
-  randomUUID,
-  getAiPipelineSettings,
-  getLatestPromptTemplate,
-  resolveMockMode,
-  Arena,
-  normalizePredicate,
-  getExistingEdgesForEntities,
-  getClusterForEntities,
-  buildClusterContext,
-  checkDuplicateEdge,
-  evaluateRelationship,
-  deriveRelationshipStrength,
-  calculatePoints,
-  syncEntityNode,
-  createRelationship,
-  deleteRelationshipsByEdgeIds
-});
-
-registerBrewingRoutes(app, {
-  BrewRoom,
-  randomUUID,
-  generateRoomId,
-  sanitizeRoomForPublic,
-  broadcastToRoom,
-  roomClients
 });
 
 

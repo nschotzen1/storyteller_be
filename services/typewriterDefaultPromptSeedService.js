@@ -3,16 +3,16 @@ import {
   getLatestPromptTemplate,
   savePromptTemplateVersion
 } from './typewriterPromptConfigService.js';
-import {
-  generate_entities_by_fragment,
-  getNArchetypes
-} from '../ai/openai/promptsUtils.js';
-import { buildInitialChatPromptText } from '../ai/openai/personaChatPrompts.js';
-import { getDefaultImmersiveRpgGmPromptTemplate } from './immersiveRpgService.js';
-import { getDefaultQuestSceneAuthoringPromptTemplate } from './questSceneAuthoringService.js';
 
-const DEFAULT_ENTITY_COUNT = 4;
-const DEFAULT_MAX_ENTITIES = 8;
+const TYPEWRITER_PROMPT_TEMPLATE_KEYS = [
+  'story_continuation',
+  'xerofag_inspection',
+  'storyteller_creation',
+  'storyteller_intervention',
+  'typewriter_key_verification',
+  'storyteller_key_creation',
+  'illustration_creation'
+];
 
 function buildStoryContinuationPromptTemplate() {
   return `{{current_fragment}}
@@ -47,170 +47,6 @@ If the current narrative already ends with the same term, return false.
 Do not explain your answer.`;
 }
 
-async function buildMemoryCreationPromptTemplate() {
-  const routeConfig = await getRouteConfig('fragment_to_memories');
-  return routeConfig?.promptTemplate || '';
-}
-
-async function buildEntityCreationPromptTemplate() {
-  const routeConfig = await getRouteConfig('text_to_entity');
-  if (routeConfig?.promptTemplate) {
-    return routeConfig.promptTemplate;
-  }
-  return generate_entities_by_fragment(
-    '{{fragmentText}}',
-    DEFAULT_MAX_ENTITIES,
-    '{{existingEntities}}',
-    '{{desiredEntityCategories}}'
-  )?.[0]?.content || '';
-}
-
-function buildTextureCreationPromptTemplate() {
-  return `So you're telling me that if for example, I will give this archetype json list:
-"{{archetypes_json}}"
-these could be meaningful in crafting a tarot deck? for the following
- very very specific and yet unknown, mysterious first trodden storytelling universe from which we only got this narrative fragment:
-
-
-** fragment start*** "{{fragmentText}}" *** fragment end ***:
-
-this is all we've got left of this storytelling universe. and now we want to reveal the decks that resonate this storytelling universe
-{{entityCount}} different decks each made of different material. from each deck we get a texture for a different archetype
-but all textures echo and resonate deeply the fragment given. they are its extract each in a different way.
-
-
-
-Requirements:
-1. Output Format: JSON Array of {{entityCount}}
-{
-  "textures": [
-    {
-      "text_for_entity": "String (the name of the entity for which the texture matches)",
-      "archetype": "String (Core symbolic archetype, e.g., 'Celestial Seer', ' mix of drama+psychology+mythic)",
-      "prompt": "Card texture: A worn, arcane card back designed for an RPG universe, crafted from [card_material]. The full-frame design features each archetype through its organic mediums, while demonstrating intricate embellishments and filigrees, seamlessly integrated into the surface. The texture is deeply aged, with visible signs of wear-faded edges, small cracks, and a raw, tactile feel. it's been through a lot.
-
-      **Bottom Left & Right Corners:** Rugged yet elegantly adorned with curling filigree, hinting at lost grandeur. Subtle arcane etchings fade into the worn edges, as if the card has been handled for centuries.
-
-      **Right & Left Borders:** A delicate interplay of embossed patterns and arcane inscriptions, barely visible beneath layers of aging. The texture transitions smoothly, retaining an unbroken, magical feel.
-
-      **Top Left & Right Corners:** Slightly more intact, though still weathered, featuring celestial or abstract motifs. These elements feel partially eroded, adding to the mystique of the deck's forgotten history.
-
-      **Central Body:** An uninterrupted expanse of textured material, crafting carefully, though now partly worn [one of the archetypes from the list]- The texture is rich with depth, shifting subtly under natural light, giving the illusion of hidden details emerging when viewed from different angles. No gaps, no empty spaces-only the immersive, full-frame texture of a card belonging to an ancient, otherworldly deck..
-
-      Seamless RPG card texture. Thick, tactile, immersive, and enigmatic. It must feel like a real, well-worn artifact, blending elements of fantasy and mystery. This is the card back for a unique tarot-style deck within the RPG world-each card a fragment of a grander, cosmic puzzle.",
-      "font": "String (Google font name)",
-      "font_size": "Number (in px)",
-      "font_color": "String (descriptive, e.g., 'faded gold', 'deep obsidian')",
-      "card_material": "String (e.g., 'weathered bone', 'aged bronze', 'woven lunar cloth')",
-      "major_cultural_influences_references": [
-        "String (RPG system, e.g., 'Numenera', 'Mage: The Ascension')",
-        "String (Fantasy/Sci-Fi novel, e.g., 'The Broken Earth Trilogy')",
-        "String (Movie/TV Show, e.g., 'Blade Runner 2049')",
-        "String (Artist, e.g., 'Moebius', 'Beksinski')"
-      ]
-    },...
-  ]
-}
-
-2. Texture Description Guidelines:
--try to match the texture for the entity
-- Must be self-contained prompts for text-to-image API
-- Full-frame, seamless, unbroken background design
-- Include card-like elements (borders, embellishments, flourishes)
-- Abstract/symbolic rather than literal scenes
-- Blend multiple cultural/genre influences subtly
-- Describe material wear and aging effects
-- Emphasize keywords: RPG, cinematic, ArtStation, grainy, embellishments
-- Natural lighting and atmospheric effects
-- Avoid direct Earth culture references
-
-3. Reference Style Example:
-"{
-      "text_for_entity": "The Hound's Reckoning",
-      "archetype": {
-        "archetype_name": "SOL",
-        "symbol": "radiant dot with twelve outward lines"
-      },
-      "prompt": "Card texture: An obsidian-black card back with a crackled, ember-glowing core at its center, as if the card itself holds a dying fire within. The surface is rough, sand-worn, and deeply pitted, hinting at countless years buried beneath desert winds.
-
-      **Bottom Left & Right Corners:** Charred edges, curling as if touched by distant flames.
-
-      **Right & Left Borders:** Subtle claw-like etchings in the stone, faint echoes of an ancient pact bound in darkness.
-
-      **Top Left & Right Corners:** A lattice of arcane embers, sparking dimly beneath the fractured obsidian.
-
-      **Central Body:** The radiant dot with twelve outward lines, but rendered in the style of volcanic glass-crimson light seeping through jagged cracks.
-
-      The card feels like it has weight, like a fragment of an ancient world now lost. Its textures are raw, worn, immersive, and seamless-suited for a deck where each card carries the burden of a thousand untold stories.",
-      "font": "Cormorant Garamond",
-      "font_size": "20px",
-      "font_color": "deep ember red",
-      "card_material": "cracked obsidian",
-      "major_cultural_influences_references": [
-        "Dark Souls",
-        "Dune",
-        "Hyperion Cantos",
-        "Beksinski"
-      ]
-    }"
-
-4. Material Considerations:
-- Must be plausible as magical card material
-- Show appropriate wear/aging effects
-- Examples: metal, stone, fabric, wood, crystal, bone, etc.
-
-5. Cultural Influence Requirements:
-- Minimum 3 distinct influences per texture
-- Focus on niche/esoteric sources
-- Blend influences into something new/unique
-- Can include RPGs, novels, films, art styles
-
-Each texture should stand alone as a complete prompt without requiring context from other textures or the original scene.
-Seamless RPG card texture. Full Frame design. thick feel for the texture.
-        inspiring. immersive. exciting. magical. think of proper embellishments, flourishes. unbroken. full frame design.
-        surprising idiosyncratic back side of a unique tarot deck. evidently used, arcane, magical. embelishments, filgrees, framed stand alone as a complete prompt without requiring context from other textures or the original scene.
-        I want that the textures would feel like textures, and not resemble the entity they match to.
-imagine it as if the entity is an entity that represents a deck of cards. so the texture would fit the whole deck. this entity is a mere card in that deck (not necessarily even the most valuable one).
-All the textures must be unbroken!!! full, so could be used as a png in a react component!! this is most importatn!!
-
-Entity names (use exactly for text_for_entity, one per texture):
-{{entityNames}}`;
-}
-
-function buildMemoryCardFrontPromptTemplate() {
-  return `Create a full-frame RPG collector card FRONT illustration titled "{{short_title}}".
-Long-form memory identity: "{{dramatic_definition}}".
-Memory viewpoint: "{{viewpoint}}".
-Scene location: "{{location}}".
-Emotional tone: "{{emotional_sentiment}}".
-Memory scene details: "{{miseenscene}}{{actual_result}}{{watched}}".
-Visual style: cinematic, tactile, grainy, with collector-card embellishments and subtle filigree.
-Use this fragment as backup context when needed: "{{fragmentText}}".
-No visible text except the title "{{short_title}}".`;
-}
-
-function buildMemoryCardBackPromptTemplate() {
-  return `Create a full-frame RPG collector card BACK texture for memory "{{short_title}}".
-Theme: memory residue, archival symbolism, layered weathered materials.
-Temporal cue: "{{memory_distance}}{{temporal_relation}}".
-Environmental cue: "{{geographical_relevance}}{{fragmentText}}".
-Emotional undertone: "{{emotional_sentiment}}".
-Visual style: abstract-symbolic, worn, cinematic, grainy, richly textured with card-back motifs and ornate flourishes.
-No readable text.`;
-}
-
-function buildEntityCardFrontPromptTemplate() {
-  return `Create a highly detailed RPG collector card front illustration for "{{entity_name}}".
-The entity is categorized as "{{ner_type}}" with a subtype of "{{ner_subtype}}".
-The entity is described as: "{{description}}". Expand upon this description to craft vivid, concrete imagery for the illustration.
-Narrative context: "{{relevance}}". {{evolution_notes}}
-{{connections}}
-{{texture_prompt}}
-Use this fragment to set the tone when needed: "{{fragmentText}}".
-Full-frame, cinematic quality, detailed, immersive, and cohesive. Include tasteful embellishments and flourishes that make it feel like a collector card.
-No visible text besides the title: "{{entity_name}}".`;
-}
-
 async function buildStorytellerCreationPromptTemplate() {
   const routeConfig = await getRouteConfig('text_to_storyteller');
   return routeConfig?.promptTemplate || '';
@@ -237,6 +73,11 @@ You are:
 - Already introduced in this typewriter session: {{storyteller_already_introduced}}
 
 Your role in this intervention:
+- The continuation prompt and current fragment are composed by the backend before this text.
+- Follow the active storyteller stage guideline exactly: {{storyteller_stage_guideline}}
+- Current stage: {{storyteller_stage_label}} / {{storyteller_stage_id}}
+- First person allowed now: {{storyteller_first_person_allowed}}
+- Current-scene intervention allowed now: {{storyteller_current_scene_intervention_allowed}}
 - Enter as an added observer with your own narrative voice, as if you had been nearby all along.
 - If you were not introduced before, introduce yourself briefly and naturally in-world.
 - Notice one precise detail in the current fragment.
@@ -335,62 +176,6 @@ Rules:
 - Keep reason short and practical if provided.`;
 }
 
-function buildMessengerChatPromptTemplate() {
-  return buildInitialChatPromptText();
-}
-
-function buildImmersiveRpgGmPromptTemplate() {
-  return getDefaultImmersiveRpgGmPromptTemplate();
-}
-
-async function buildSeerReadingOrchestratorPromptTemplate() {
-  const routeConfig = await getRouteConfig('seer_reading_orchestrator');
-  return routeConfig?.promptTemplate || '';
-}
-
-async function buildSeerReadingCardGenerationPromptTemplate() {
-  const routeConfig = await getRouteConfig('seer_reading_card_generation');
-  return routeConfig?.promptTemplate || '';
-}
-
-async function buildStorytellerMissionPromptTemplate() {
-  const routeConfig = await getRouteConfig('storyteller_mission');
-  return routeConfig?.promptTemplate || '';
-}
-
-async function buildQuestGenerationPromptTemplate() {
-  const routeConfig = await getRouteConfig('quest_advance');
-  return routeConfig?.promptTemplate || '';
-}
-
-function buildQuestSceneAuthoringPromptTemplate() {
-  return getDefaultQuestSceneAuthoringPromptTemplate();
-}
-
-function buildRelationshipEvaluationPromptTemplate() {
-  return `You are a worldbuilding judge for a collaborative storytelling game.
-
-A player proposes a relationship between entities in an arena:
-- Source: {{source_json}}
-- Targets: {{targets_json}}
-- Proposed relationship: "{{relationship_surface_text}}"
-- Existing direct connections: {{existing_edges_json}}{{cluster_context_section}}
-
-Evaluate this relationship on:
-1. Type coherence (does it make sense for these entity types?)
-2. Specificity (is it descriptive, not vague?)
-3. Non-redundancy (is it different from existing edges?)
-4. Narrative grounding (does it feel plausible in this world?)
-5. Cluster coherence (does it fit with the broader network of relationships?)
-
-Return JSON:
-{
-  "verdict": "accepted" or "rejected",
-  "quality": { "score": 0-1, "confidence": 0-1, "reasons": ["..."] },
-  "suggestions": [{ "predicate": "...", "surfaceText": "..." }] // only if rejected
-}`;
-}
-
 function buildStorytellerKeyPromptTemplate() {
   return `Create a single isolated storyteller typewriter key replacement asset as a PNG with transparent background.
 
@@ -480,7 +265,7 @@ wizard hat, hood, skull face, vampire tropes, neon glow, sci-fi UI overlays, rea
 }
 
 export async function getCurrentTypewriterPromptTemplates() {
-  return {
+  const templates = {
     story_continuation: {
       pipelineKey: 'story_continuation',
       promptTemplate: buildStoryContinuationPromptTemplate(),
@@ -501,42 +286,6 @@ export async function getCurrentTypewriterPromptTemplates() {
         'candidate_term',
         'xerofag_lore'
       ]
-    },
-    memory_creation: {
-      pipelineKey: 'memory_creation',
-      promptTemplate: await buildMemoryCreationPromptTemplate(),
-      source: 'services/llmRouteConfigService.js:fragment_to_memories.promptTemplate',
-      variables: ['fragmentText', 'memoryCount']
-    },
-    memory_card_front: {
-      pipelineKey: 'memory_card_front',
-      promptTemplate: buildMemoryCardFrontPromptTemplate(),
-      source: 'routes/memoriesRoutes.js:buildMemoryFrontPrompt',
-      variables: ['short_title', 'dramatic_definition', 'viewpoint', 'location', 'emotional_sentiment', 'miseenscene', 'actual_result', 'watched', 'fragmentText']
-    },
-    memory_card_back: {
-      pipelineKey: 'memory_card_back',
-      promptTemplate: buildMemoryCardBackPromptTemplate(),
-      source: 'routes/memoriesRoutes.js:buildMemoryBackPrompt',
-      variables: ['short_title', 'dramatic_definition', 'memory_distance', 'temporal_relation', 'geographical_relevance', 'emotional_sentiment', 'fragmentText']
-    },
-    entity_creation: {
-      pipelineKey: 'entity_creation',
-      promptTemplate: await buildEntityCreationPromptTemplate(),
-      source: 'services/llmRouteConfigService.js:text_to_entity.promptTemplate',
-      variables: ['fragmentText', 'maxEntities', 'existingEntities', 'desiredEntityCategories', 'desiredEntityCategoriesJson', 'desiredEntityCategoriesBullets']
-    },
-    entity_card_front: {
-      pipelineKey: 'entity_card_front',
-      promptTemplate: buildEntityCardFrontPromptTemplate(),
-      source: 'services/textToEntityService.js:buildFrontPrompt',
-      variables: ['entity_name', 'ner_type', 'ner_subtype', 'description', 'relevance', 'evolution_notes', 'connections', 'texture_prompt', 'fragmentText']
-    },
-    texture_creation: {
-      pipelineKey: 'texture_creation',
-      promptTemplate: buildTextureCreationPromptTemplate(),
-      source: 'ai/openai/texturePrompts.js:generate_texture_by_fragment_and_conversation',
-      variables: ['fragmentText', 'entityCount', 'entityNames', 'archetypes_json']
     },
     storyteller_creation: {
       pipelineKey: 'storyteller_creation',
@@ -561,6 +310,12 @@ export async function getCurrentTypewriterPromptTemplates() {
         'storyteller_already_introduced',
         'storyteller_task',
         'storyteller_known_context',
+        'storyteller_stage_id',
+        'storyteller_stage_label',
+        'storyteller_stage_guideline',
+        'storyteller_first_person_allowed',
+        'storyteller_current_scene_intervention_allowed',
+        'storyteller_archetype_label',
         'fragment_text'
       ]
     },
@@ -583,111 +338,6 @@ export async function getCurrentTypewriterPromptTemplates() {
         'entity_type',
         'entity_subtype',
         'source_type'
-      ]
-    },
-    messenger_chat: {
-      pipelineKey: 'messenger_chat',
-      promptTemplate: buildMessengerChatPromptTemplate(),
-      source: 'ai/openai/personaChatPrompts.js:buildInitialChatPromptText',
-      variables: []
-    },
-    immersive_rpg_gm: {
-      pipelineKey: 'immersive_rpg_gm',
-      promptTemplate: buildImmersiveRpgGmPromptTemplate(),
-      source: 'services/immersiveRpgService.js:getDefaultImmersiveRpgGmPromptTemplate',
-      variables: []
-    },
-    seer_reading_orchestrator: {
-      pipelineKey: 'seer_reading_orchestrator',
-      promptTemplate: await buildSeerReadingOrchestratorPromptTemplate(),
-      source: 'services/llmRouteConfigService.js:seer_reading_orchestrator.promptTemplate',
-      variables: [
-        'player_action',
-        'reading_state_json',
-        'focused_memory_json',
-        'focused_card_json',
-        'player_reply',
-        'player_requested_entity_id',
-        'available_tools_json'
-      ]
-    },
-    seer_reading_card_generation: {
-      pipelineKey: 'seer_reading_card_generation',
-      promptTemplate: await buildSeerReadingCardGenerationPromptTemplate(),
-      source: 'services/llmRouteConfigService.js:seer_reading_card_generation.promptTemplate',
-      variables: [
-        'fragment_text',
-        'vision_memory_json',
-        'known_entities_json',
-        'card_count',
-        'allowed_card_kinds_json',
-        'preferred_card_kinds_json'
-      ]
-    },
-    quest_generation: {
-      pipelineKey: 'quest_generation',
-      promptTemplate: await buildQuestGenerationPromptTemplate(),
-      source: 'services/llmRouteConfigService.js:quest_advance.promptTemplate',
-      variables: [
-        'currentScreenId',
-        'currentScreenTitle',
-        'currentScreenType',
-        'currentScreenPrompt',
-        'currentScreenImagePrompt',
-        'currentScreenExpectationSummary',
-        'currentScreenContinuitySummary',
-        'currentDirections',
-        'anchorScreenId',
-        'anchorScreenTitle',
-        'anchorScreenPrompt',
-        'anchorScreenImagePrompt',
-        'recentTraversal',
-        'playerPrompt'
-      ]
-    },
-    quest_scene_authoring: {
-      pipelineKey: 'quest_scene_authoring',
-      promptTemplate: buildQuestSceneAuthoringPromptTemplate(),
-      source: 'services/questSceneAuthoringService.js:getDefaultQuestSceneAuthoringPromptTemplate',
-      variables: [
-        'sessionId',
-        'questId',
-        'authoringMode',
-        'authoringBrief',
-        'phaseGuidance',
-        'visualStyleGuide',
-        'selectedScreenSnapshot',
-        'adjacentVisualContext',
-        'sceneOutline',
-        'promptRouteSummary'
-      ]
-    },
-    storyteller_mission: {
-      pipelineKey: 'storyteller_mission',
-      promptTemplate: await buildStorytellerMissionPromptTemplate(),
-      source: 'services/llmRouteConfigService.js:storyteller_mission.promptTemplate',
-      variables: [
-        'storytellerName',
-        'entityName',
-        'entityType',
-        'entitySubtype',
-        'entityDescription',
-        'entityLore',
-        'storytellingPoints',
-        'message',
-        'durationDays'
-      ]
-    },
-    relationship_evaluation: {
-      pipelineKey: 'relationship_evaluation',
-      promptTemplate: buildRelationshipEvaluationPromptTemplate(),
-      source: 'services/arenaService.js:evaluateRelationship',
-      variables: [
-        'source_json',
-        'targets_json',
-        'relationship_surface_text',
-        'existing_edges_json',
-        'cluster_context_section'
       ]
     },
     storyteller_key_creation: {
@@ -720,6 +370,11 @@ export async function getCurrentTypewriterPromptTemplates() {
       ]
     }
   };
+  return Object.fromEntries(
+    TYPEWRITER_PROMPT_TEMPLATE_KEYS
+      .map((key) => [key, templates[key]])
+      .filter(([, definition]) => Boolean(definition))
+  );
 }
 
 export async function seedCurrentTypewriterPromptTemplates({ updatedBy = 'admin', overwrite = false } = {}) {
@@ -733,9 +388,7 @@ export async function seedCurrentTypewriterPromptTemplates({ updatedBy = 'admin'
     const nextMeta = {
       source: definition.source,
       variables: definition.variables,
-      seededFromCurrentCode: true,
-      sampleEntityCount: pipelineKey === 'texture_creation' ? DEFAULT_ENTITY_COUNT : undefined,
-      sampleArchetypes: pipelineKey === 'texture_creation' ? getNArchetypes(DEFAULT_ENTITY_COUNT) : undefined
+      seededFromCurrentCode: true
     };
 
     if (latest?.promptTemplate === definition.promptTemplate) {

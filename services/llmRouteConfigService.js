@@ -1935,8 +1935,8 @@ function toRouteConfigPayload(source, defaultConfig) {
 }
 
 function ensureRouteKey(routeKey) {
-  if (!DEFAULT_ROUTE_CONFIGS[routeKey]) {
-    const supported = Object.keys(DEFAULT_ROUTE_CONFIGS).join(', ');
+  if (!getSupportedRouteKeys().includes(routeKey)) {
+    const supported = getSupportedRouteKeys().join(', ');
     const error = new Error(`Unknown routeKey "${routeKey}". Supported keys: ${supported}.`);
     error.code = 'INVALID_ROUTE_KEY';
     throw error;
@@ -2042,7 +2042,11 @@ async function findLatestRouteDoc(routeKey) {
 }
 
 export function getSupportedRouteKeys() {
-  return Object.keys(DEFAULT_ROUTE_CONFIGS);
+  return [
+    'text_to_storyteller',
+    'storyteller_typewriter_intervention',
+    'typewriter_key_verification'
+  ];
 }
 
 export async function listRouteConfigs() {

@@ -507,6 +507,23 @@ TypewriterPromptTemplateSchema.index({ pipelineKey: 1, isLatest: 1 });
 
 export const TypewriterPromptTemplate = mongoose.model('TypewriterPromptTemplate', TypewriterPromptTemplateSchema);
 
+const TypewriterStorytellerPolicySchema = new mongoose.Schema({
+  key: { type: String, required: true, default: 'default', index: true },
+  version: { type: Number, required: true },
+  policy: { type: mongoose.Schema.Types.Mixed, required: true },
+  isLatest: { type: Boolean, default: true, index: true },
+  createdBy: { type: String, default: 'admin' },
+  meta: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { timestamps: true });
+
+TypewriterStorytellerPolicySchema.index({ key: 1, version: 1 }, { unique: true });
+TypewriterStorytellerPolicySchema.index({ key: 1, isLatest: 1 });
+
+export const TypewriterStorytellerPolicy = mongoose.model(
+  'TypewriterStorytellerPolicy',
+  TypewriterStorytellerPolicySchema
+);
+
 const LlmRouteConfigVersionSchema = new mongoose.Schema({
   routeKey: { type: String, required: true, index: true },
   version: { type: Number, required: true },

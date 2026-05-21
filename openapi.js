@@ -382,7 +382,7 @@ const jsonResponse = (schema) => ({
 });
 
 export function buildOpenApiSpec() {
-  return {
+  const spec = {
     openapi: '3.0.3',
     info: {
       title: 'Storyteller API',
@@ -1130,7 +1130,50 @@ export function buildOpenApiSpec() {
               additionalProperties: { type: 'number', minimum: 0, maximum: 1 }
             },
             orrery_radial_distance_budget: { type: 'integer', minimum: 0 },
-            number_of_available_slides: { type: 'integer', minimum: 0 }
+            number_of_available_slides: { type: 'integer', minimum: 0 },
+            orrery_vector: { $ref: '#/components/schemas/OrreryVector' },
+            page_texture_identity: { $ref: '#/components/schemas/OrreryPageTextureIdentity' }
+          },
+          additionalProperties: true
+        },
+        OrreryVector: {
+          type: 'object',
+          additionalProperties: { type: 'integer', minimum: 0, maximum: 5 },
+          example: {
+            crown: 4,
+            veil: 3,
+            warden: 2,
+            forge: 0,
+            hollow: 0,
+            rift: 0,
+            verdant: 0
+          }
+        },
+        OrreryPageTextureIdentity: {
+          type: 'object',
+          properties: {
+            alignmentKey: { type: 'string' },
+            vector: { $ref: '#/components/schemas/OrreryVector' },
+            title: { type: 'string' },
+            universeSummary: { type: 'string' },
+            mood: { type: 'string' },
+            vibe: { type: 'string' },
+            dominantArchetype: { type: 'string' },
+            secondaryArchetype: { type: 'string' },
+            tertiaryArchetype: { type: 'string' },
+            hybridInterpretation: { type: 'string' },
+            geographyStyle: { type: 'string' },
+            civilizationStyle: { type: 'string' },
+            magicStyle: { type: 'string' },
+            technologyStyle: { type: 'string' },
+            materialText: { type: 'string' },
+            paperTexturePrompt: { type: 'string' },
+            hiddenImagePrompt: { type: 'string' },
+            negativePrompt: { type: 'string' },
+            assetPngUrl: { type: 'string' },
+            assetStatus: { type: 'string', enum: ['premade', 'generated', 'missing'] },
+            writingStyle: { type: 'object', additionalProperties: true },
+            version: { type: 'integer' }
           },
           additionalProperties: true
         },
@@ -1212,6 +1255,52 @@ export function buildOpenApiSpec() {
               }
             }
           ]
+        },
+        TypewriterStorytellerPromptPreviewResponse: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            playerId: { type: 'string' },
+            fragmentText: { type: 'string' },
+            fragmentSource: { type: 'string', enum: ['session', 'override'] },
+            storyteller: { type: 'object', additionalProperties: true },
+            pressPolicy: { type: 'object', additionalProperties: true },
+            runtime: {
+              type: 'object',
+              properties: {
+                pipeline: { type: 'string' },
+                provider: { type: 'string' },
+                model: { type: 'string' },
+                mocked: { type: 'boolean' }
+              },
+              additionalProperties: true
+            },
+            prompt: {
+              type: 'object',
+              properties: {
+                messages: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      role: { type: 'string' },
+                      content: { type: 'string' }
+                    },
+                    additionalProperties: true
+                  }
+                },
+                systemPrompt: { type: 'string' },
+                userPayload: { type: 'object', additionalProperties: true },
+                stageGuideline: { type: 'string' },
+                taskApplied: { type: 'boolean' },
+                composerBreakpoint: { type: 'string' },
+                continuationPromptTemplate: { type: 'string' },
+                storytellerPromptTemplate: { type: 'string' },
+                overrides: { type: 'object', additionalProperties: true }
+              },
+              additionalProperties: true
+            }
+          }
         },
         TypewriterKeyVerificationResponse: {
           type: 'object',
@@ -1905,6 +1994,8 @@ export function buildOpenApiSpec() {
                       type: 'object',
                       additionalProperties: { type: 'number', minimum: 0, maximum: 1 }
                     },
+                    orrery_vector: { $ref: '#/components/schemas/OrreryVector' },
+                    page_texture_identity: { $ref: '#/components/schemas/OrreryPageTextureIdentity' },
                     orrery_radial_distance_budget: { type: 'integer', minimum: 0 },
                     number_of_available_slides: { type: 'integer', minimum: 0 }
                   }
@@ -1918,6 +2009,38 @@ export function buildOpenApiSpec() {
               ...jsonResponse({ $ref: '#/components/schemas/TypewriterSessionResponse' })
             },
             '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/typewriter/orrery/page-texture': {
+        post: op({
+          tags: ['Sessions'],
+          summary: 'Resolve an Orrery alignment into a page texture identity',
+          importance: 'High',
+          flow: 'The typewriter Orrery sends a figurine level vector. The backend returns the coherent page texture identity and can persist it into the session world state.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['vector'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    vector: { $ref: '#/components/schemas/OrreryVector' },
+                    persistToSession: { type: 'boolean', default: true },
+                    persistAlignment: { type: 'boolean', default: true }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Resolved page texture identity.',
+              ...jsonResponse({ $ref: '#/components/schemas/OrreryPageTextureIdentity' })
+            },
+            '400': { description: 'Missing Orrery vector.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
@@ -1952,6 +2075,46 @@ export function buildOpenApiSpec() {
               ...jsonResponse({ $ref: '#/components/schemas/TypewriterStorytellerKeyCheckResponse' })
             },
             '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+          }
+        })
+      },
+      '/api/typewriter/storyteller-prompt/preview': {
+        post: op({
+          tags: ['Generation', 'Admin'],
+          summary: 'Preview a composed storyteller intervention prompt',
+          importance: 'High',
+          flow: 'Story Admin playground uses this dry-run route to inspect the exact system prompt and user payload that would be sent for a storyteller key press.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sessionId'],
+                  properties: {
+                    sessionId: { type: 'string' },
+                    storytellerId: { type: 'string' },
+                    slotIndex: { type: 'integer' },
+                    playerId: { type: 'string' },
+                    currentNarrative: { type: 'string' },
+                    continuationPromptTemplate: { type: 'string' },
+                    storytellerPromptTemplate: { type: 'string' },
+                    debug: { type: 'boolean' },
+                    mock: { type: 'boolean' },
+                    mock_api_calls: { type: 'boolean' },
+                    mocked_api_calls: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Dry-run prompt composition payload.',
+              ...jsonResponse({ $ref: '#/components/schemas/TypewriterStorytellerPromptPreviewResponse' })
+            },
+            '400': { description: 'Missing sessionId or storyteller selector.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) },
+            '404': { description: 'Storyteller or task not found.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
           }
         })
       },
@@ -3574,4 +3737,107 @@ export function buildOpenApiSpec() {
       }
     }
   };
+
+  spec.tags = [
+    { name: 'Admin', description: 'Typewriter prompt/schema and model management.' },
+    { name: 'Generation', description: 'Typewriter continuation, keys, storyteller slots, and session endpoints.' }
+  ];
+
+  spec.paths['/api/next_film_image'] = {
+    post: op({
+      tags: ['Generation'],
+      summary: 'Return the next typewriter page background',
+      importance: 'High',
+      flow: 'Used by the typewriter UI when advancing the paper texture.',
+      responses: {
+        '200': { description: 'Page image returned.' },
+        '400': { description: 'Missing sessionId.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+      }
+    })
+  };
+
+  spec.paths['/api/tasks'] = {
+    get: op({
+      tags: ['Generation'],
+      summary: 'List typewriter storyteller tasks',
+      importance: 'Medium',
+      flow: 'Supports inspection of task prompts that can guide storyteller interventions.',
+      responses: {
+        '200': { description: 'Tasks returned.' }
+      }
+    }),
+    post: op({
+      tags: ['Generation'],
+      summary: 'Create a typewriter storyteller task',
+      importance: 'High',
+      flow: 'Allows a specific task prompt to be passed into /api/send_storyteller_typewriter_text.',
+      responses: {
+        '201': { description: 'Task created.' },
+        '400': { description: 'Invalid task payload.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+      }
+    })
+  };
+
+  spec.paths['/api/typewriter/storyteller-policy'] = {
+    get: op({
+      tags: ['Generation'],
+      summary: 'Load typewriter storyteller policy',
+      importance: 'High',
+      flow: 'Story Admin uses this to inspect storyteller slot thresholds and press policy.',
+      responses: {
+        '200': { description: 'Policy returned.' }
+      }
+    }),
+    post: op({
+      tags: ['Generation'],
+      summary: 'Save typewriter storyteller policy',
+      importance: 'High',
+      flow: 'Story Admin uses this to tune storyteller slot thresholds and press policy.',
+      responses: {
+        '200': { description: 'Policy saved.' },
+        '400': { description: 'Invalid policy payload.', ...jsonResponse({ $ref: '#/components/schemas/ErrorResponse' }) }
+      }
+    })
+  };
+
+  const activePaths = [
+    '/api/admin/llm-config',
+    '/api/admin/llm-config/{routeKey}',
+    '/api/admin/llm-config/{routeKey}/versions',
+    '/api/admin/llm-config/{routeKey}/prompt',
+    '/api/admin/llm-config/{routeKey}/schema',
+    '/api/admin/llm-config/{routeKey}/latest',
+    '/api/admin/llm-config/{routeKey}/reset',
+    '/api/admin/openai/models',
+    '/api/admin/typewriter/ai-settings',
+    '/api/admin/typewriter/ai-settings/reset',
+    '/api/admin/typewriter/prompts',
+    '/api/admin/typewriter/prompts/seed-current',
+    '/api/admin/typewriter/prompts/{pipelineKey}',
+    '/api/admin/typewriter/prompts/{pipelineKey}/versions',
+    '/api/admin/typewriter/prompts/{pipelineKey}/latest',
+    '/api/next_film_image',
+    '/api/entities',
+    '/api/tasks',
+    '/api/shouldGenerateContinuation',
+    '/api/shouldAllowXerofag',
+    '/api/typewriter/keys/shouldAllow',
+    '/api/typewriter/session/start',
+    '/api/typewriter/session/inspect',
+    '/api/typewriter/session/vibe',
+    '/api/typewriter/orrery/page-texture',
+    '/api/typewriter/storyteller-policy',
+    '/api/shouldCreateStorytellerKey',
+    '/api/typewriter/storyteller-prompt/preview',
+    '/api/send_storyteller_typewriter_text',
+    '/api/send_typewriter_text'
+  ];
+
+  spec.paths = Object.fromEntries(
+    activePaths
+      .map((path) => [path, spec.paths[path]])
+      .filter(([, definition]) => Boolean(definition))
+  );
+
+  return spec;
 }

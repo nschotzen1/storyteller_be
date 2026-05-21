@@ -9,6 +9,7 @@ let Task;
 let TaskAssignment;
 let NarrativeFragment;
 let TypewriterKey;
+let TypewriterStorytellerPolicy;
 let NarrativeEntity;
 let mongoServer;
 
@@ -29,7 +30,7 @@ beforeAll(async () => {
   const mongoUri = mongoServer.getUri();
 
   ({ app } = await import('./server_new.js'));
-  ({ Storyteller, Task, TaskAssignment, NarrativeFragment, TypewriterKey } = await import('./models/models.js'));
+  ({ Storyteller, Task, TaskAssignment, NarrativeFragment, TypewriterKey, TypewriterStorytellerPolicy } = await import('./models/models.js'));
   ({ NarrativeEntity } = await import('./storyteller/utils.js'));
 
   if (mongoose.connection.readyState !== 0) {
@@ -60,6 +61,9 @@ afterEach(async () => {
   if (TypewriterKey) {
     await TypewriterKey.deleteMany({});
   }
+  if (TypewriterStorytellerPolicy) {
+    await TypewriterStorytellerPolicy.deleteMany({});
+  }
 });
 
 afterAll(async () => {
@@ -70,6 +74,74 @@ afterAll(async () => {
 });
 
 describe('POST /api/send_storyteller_typewriter_text', () => {
+  test('previews the composed storyteller intervention prompt without mutating the session', async () => {
+    const sessionId = 'storyteller-prompt-preview-session';
+
+    await request(app)
+      .post('/api/typewriter/session/start')
+      .send({
+        sessionId,
+        fragment: buildNarrative(36)
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/shouldCreateStorytellerKey')
+      .send({ sessionId, mocked_api_calls: true })
+      .expect(200);
+
+    const storyteller = await Storyteller.findOne({ session_id: sessionId, keySlotIndex: 0 }).lean();
+    expect(storyteller).toBeTruthy();
+
+    const policyRes = await request(app)
+      .get('/api/typewriter/storyteller-policy')
+      .expect(200);
+    const policy = policyRes.body.policy;
+    policy.progression.stages[0].instruction = 'Mongo signature guideline for the visible breakpoint.';
+    await request(app)
+      .post('/api/typewriter/storyteller-policy')
+      .send({ policy, updatedBy: 'test' })
+      .expect(200);
+    expect(await TypewriterStorytellerPolicy.countDocuments({ isLatest: true })).toBe(1);
+
+    const previewResponse = await request(app)
+      .post('/api/typewriter/storyteller-prompt/preview')
+      .send({
+        sessionId,
+        storytellerId: String(storyteller._id),
+        currentNarrative: 'The preview narrative names the watchtower and the salt gate.',
+        mocked_api_calls: true
+      })
+      .expect(200);
+
+    expect(previewResponse.body.fragmentSource).toBe('override');
+    expect(previewResponse.body.pressPolicy).toEqual(
+      expect.objectContaining({
+        stageId: 'signature',
+        stageLabel: 'Signature Entry',
+        firstPersonAllowed: false,
+        currentSceneInterventionAllowed: false
+      })
+    );
+    expect(previewResponse.body.prompt.systemPrompt).toContain('Fragment text:');
+    expect(previewResponse.body.prompt.systemPrompt).toContain('The preview narrative names the watchtower');
+    expect(previewResponse.body.prompt.systemPrompt).toContain('Stage guideline from MongoDB:');
+    expect(previewResponse.body.prompt.composerBreakpoint).toBe('server_new.js:composeTypewriterStorytellerPrompt');
+    expect(previewResponse.body.prompt.stageGuideline).toBe('Mongo signature guideline for the visible breakpoint.');
+    expect(previewResponse.body.prompt.userPayload).toEqual(
+      expect.objectContaining({
+        storyteller_stage_label: 'Signature Entry',
+        storyteller_first_person_allowed: 'false',
+        storyteller_current_scene_intervention_allowed: 'false'
+      })
+    );
+
+    const fragment = await NarrativeFragment.findOne({ session_id: sessionId }).lean();
+    expect(fragment.fragment).toBe(buildNarrative(36));
+    expect(await TypewriterKey.countDocuments({ sessionId, sourceType: 'storyteller_intervention' })).toBe(0);
+    expect(await NarrativeEntity.countDocuments({ session_id: sessionId, source: 'storyteller_intervention' })).toBe(0);
+  });
+
   test('runs a storyteller intervention and saves a pressable textual typewriter key in Mongo', async () => {
     const sessionId = 'storyteller-intervention-session';
 
@@ -225,6 +297,10 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
 
     const storyteller = await Storyteller.findOne({ session_id: sessionId, keySlotIndex: 0 }).lean();
     expect(storyteller).toBeTruthy();
+    await Storyteller.updateOne(
+      { _id: storyteller._id },
+      { $set: { typewriterInterventionsCount: 3, introducedInTypewriter: true } }
+    );
 
     const taskRes = await request(app)
       .post('/api/tasks')
@@ -351,6 +427,8 @@ describe('POST /api/send_storyteller_typewriter_text', () => {
         status: 'active'
       })
     );
+    const firstPressText = interventionResponse.body?.writing_sequence?.[0]?.text || '';
+    expect(firstPressText).not.toContain('the Xerofag');
     expect(refreshedAssignment.status).toBe('active');
   });
 
