@@ -1,0 +1,77 @@
+{
+  "chronicle": "early-dusk",
+  "book": {
+    "title": "The Thorbata Chronicles, Vol. I: Early Dusk",
+    "condition": "Cover swollen with damp. Several chapters gone. Spine split. Page numbers repeat."
+  },
+  "characters": [
+    {
+      "id": "mera_venn",
+      "name": "Mera Venn",
+      "locked": true,
+      "description": "A pale singer who arrives weekly with her lauta, thin coat and wet cuffs. When she sings the third verse, her brother comes down from the cold road. Missing for two weeks."
+    },
+    {
+      "id": "oren_venn",
+      "name": "Oren Venn",
+      "locked": true,
+      "description": "Mera's brother, taken by the night, the hills, or the old river — the book is damaged where the truth should be. Comes to the manor door in his wolf-shape when the third verse is sung. Growing restless."
+    },
+    {
+      "id": "brannic_pell",
+      "name": "Brannic Pell",
+      "locked": true,
+      "description": "Owner of The Eel and the Seagull. A smuggler everyone knows about and no one names. Keeps the village supplied through winter and keeps secrets for anyone who can pay."
+    },
+    {
+      "id": "ilan_voss",
+      "name": "Ilan Voss",
+      "locked": true,
+      "description": "Senior storyteller of the Society, sent into the damaged narrative to find the missing hero. Alive, locked in the cellar beneath The Eel and the Seagull. Silent for seven days."
+    }
+  ],
+  "locations": [
+    {
+      "id": "jhinuka_docks",
+      "name": "Jhinuka Docks",
+      "locked": true,
+      "description": "An ill-fated port town on the old course of the Yuradel River toward the Melkava Sea."
+    },
+    {
+      "id": "eel_and_seagull",
+      "name": "The Eel and the Seagull",
+      "locked": true,
+      "description": "An old manor house converted into the most famous tavern in Jhinuka Docks. Two floors, an upper gallery, and a cellar no one admits is a basement."
+    },
+    {
+      "id": "oak_plateau_amphitheatre",
+      "name": "The Oak Plateau Amphitheatre",
+      "locked": true,
+      "description": "Older than the docks, older than the manor. Elves performed theatre here before the Great Thunderous Night. Behind the ruined stage: corridors of looted wonder."
+    }
+  ],
+  "organizations": [
+    {
+      "id": "storytellers_society",
+      "name": "The Esteemed Storyteller's Society",
+      "description": "Recoverers and restorers of damaged narratives. They do not neglect stories, even when their authors do."
+    },
+    {
+      "id": "tin_tongue_guild",
+      "name": "The Tin-Tongue Guild",
+      "description": "A secretive aerial guild whose ships cannot land for long. They want something from the amphitheatre, delivered on the next Silveranu moon night."
+    }
+  ],
+  "fixedEvents": [
+    { "id": "mera_missing", "text": "Mera Venn has been missing for two weeks." },
+    { "id": "ilan_trapped", "text": "Ilan Voss is trapped alive beneath The Eel and the Seagull; his last message reached the Society seven days ago." },
+    { "id": "guild_deadline", "text": "The Tin-Tongue Guild's ship descends into the amphitheatre on the next Silveranu moon night." },
+    { "id": "weekly_ritual", "text": "Each week Mera sings, each week Oren comes to the manor door, each week he leaves without killing anyone." }
+  ],
+  "forbiddenClaims": [
+    { "id": "ilan_dead", "pattern": "ilan[^.!?]*\\b(dead|died|corpse|killed)\\b", "note": "Ilan Voss is alive. The rescue premise depends on it." },
+    { "id": "mera_dead", "pattern": "mera[^.!?]*\\b(dead|died|corpse|killed)\\b", "note": "Mera's fate is unknown, not settled. The mystery must stay open." },
+    { "id": "oren_kills", "pattern": "oren[^.!?]*\\b(kills|slaughters|murders)\\b[^.!?]*\\b(mera|villager|child)", "note": "Oren has never killed. His restraint is the core wound." },
+    { "id": "flute_destroyed", "pattern": "flute[^.!?]*\\b(destroyed|shattered|burned)\\b", "note": "The flute must remain recoverable; it is the Guild's prize and Vol. I's hinge." }
+  ]
+}
