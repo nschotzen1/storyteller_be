@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 const EVIDENCE_SOURCES = ['damaged_page', 'society_note', 'field_report', 'player_restoration', 'marginalia'];
 const TENDENCIES = ['caution', 'nerve', 'curiosity', 'guile', 'empathy'];
 const TENDENCY_CAP = 5;
+const RELIABILITY_VALUES = ['confirmed', 'suspect', 'contradicted'];
 
 const slugify = (text) =>
   String(text).toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s-]+/g, '_');
@@ -23,7 +24,16 @@ function findForbiddenClaim(mutation, canonLocks) {
   return null;
 }
 
-function checkMutation(mutation, session) {
+export function scanForbiddenClaims(text, canonLocks) {
+  if (typeof text !== 'string' || !text.trim()) return null;
+  const claims = canonLocks?.forbiddenClaims || [];
+  for (const claim of claims) {
+    if (new RegExp(claim.pattern, 'i').test(text)) return claim;
+  }
+  return null;
+}
+
+function checkMutation(mutation, session, batchCellIds) {
   const cellIds = new Set(session.cells.map((c) => c.id));
   const forbidden = findForbiddenClaim(mutation, session.canonLocks);
   if (forbidden) return `forbidden claim: ${forbidden.id} — ${forbidden.note}`;
@@ -35,9 +45,11 @@ function checkMutation(mutation, session) {
       return null;
     case 'create_cell': {
       if (typeof mutation.label !== 'string' || !mutation.label.trim()) return 'create_cell requires label';
+      const slug = slugify(mutation.label);
+      if (!slug) return `create_cell label produces an empty id: "${mutation.label}"`;
       const badLink = (mutation.links || []).find((id) => !cellIds.has(id));
       if (badLink) return `unknown cell: ${badLink}`;
-      if (cellIds.has(slugify(mutation.label))) return `cell already exists: ${slugify(mutation.label)}`;
+      if (cellIds.has(slug) || batchCellIds.has(slug)) return `cell already exists: ${slug}`;
       return null;
     }
     case 'link_cells':
@@ -47,6 +59,9 @@ function checkMutation(mutation, session) {
       return null;
     case 'create_evidence':
       if (!EVIDENCE_SOURCES.includes(mutation.source)) return `invalid evidence source: ${mutation.source}`;
+      if (mutation.reliability !== undefined && !RELIABILITY_VALUES.includes(mutation.reliability)) {
+        return `invalid reliability: ${mutation.reliability}`;
+      }
       if (typeof mutation.text !== 'string' || !mutation.text.trim()) return 'create_evidence requires text';
       return null;
     case 'increase_pressure':
@@ -68,15 +83,19 @@ export function validateEnvelope(envelope, session, { voiceOnly = false } = {}) 
   const mutations = Array.isArray(envelope?.mutations) ? envelope.mutations : [];
   const accepted = [];
   const rejected = [];
+  const batchCellIds = new Set();
 
   for (const mutation of mutations) {
     if (voiceOnly) {
       rejected.push({ mutation, reason: 'voice-only envelope: mutations are not allowed in this act' });
       continue;
     }
-    const reason = checkMutation(mutation, session);
+    const reason = checkMutation(mutation, session, batchCellIds);
     if (reason) rejected.push({ mutation, reason });
-    else accepted.push(mutation);
+    else {
+      if (mutation.type === 'create_cell') batchCellIds.add(slugify(mutation.label));
+      accepted.push(mutation);
+    }
   }
 
   return { narration, societyNote, accepted, rejected };

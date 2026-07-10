@@ -1,4 +1,4 @@
-import { validateEnvelope, applyEnvelope } from './services/chronicleEnvelopeService.js';
+import { validateEnvelope, applyEnvelope, scanForbiddenClaims } from './services/chronicleEnvelopeService.js';
 
 function makeSession() {
   return {
@@ -86,6 +86,57 @@ describe('validateEnvelope', () => {
     expect(result.narration).toBe('We found your book.');
     expect(result.accepted).toHaveLength(0);
     expect(result.rejected[0].reason).toMatch(/voice-only/i);
+  });
+
+  test('rejects create_cell whose label slugifies to an empty id', () => {
+    const session = makeSession();
+    const result = validateEnvelope(
+      { narration: '', mutations: [{ type: 'create_cell', label: '!!!' }] },
+      session
+    );
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toMatch(/empty id/i);
+  });
+
+  test('rejects the second create_cell in one envelope that collides on slug', () => {
+    const session = makeSession();
+    const result = validateEnvelope(
+      {
+        narration: '',
+        mutations: [
+          { type: 'create_cell', label: 'The Third Barrel' },
+          { type: 'create_cell', label: 'the third   barrel' }
+        ]
+      },
+      session
+    );
+    expect(result.accepted).toHaveLength(1);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0].reason).toMatch(/already exists/i);
+  });
+
+  test('rejects create_evidence with an unknown reliability value', () => {
+    const session = makeSession();
+    const result = validateEnvelope(
+      {
+        narration: '',
+        mutations: [
+          { type: 'create_evidence', source: 'field_report', text: 'a note', reliability: 'gospel' }
+        ]
+      },
+      session
+    );
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toMatch(/invalid reliability/i);
+  });
+
+  test('scanForbiddenClaims finds a claim in plain text and returns null on clean text', () => {
+    const session = makeSession();
+    const hit = scanForbiddenClaims('They say Ilan was killed in the cellar.', session.canonLocks);
+    expect(hit).not.toBeNull();
+    expect(hit.id).toBe('ilan_dead');
+    expect(scanForbiddenClaims('Ilan taps beneath the barrels.', session.canonLocks)).toBeNull();
+    expect(scanForbiddenClaims('', session.canonLocks)).toBeNull();
   });
 });
 
