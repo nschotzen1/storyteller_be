@@ -86,6 +86,17 @@ const PIPELINE_DEFINITIONS = {
     defaultModel: process.env.OPENAI_ILLUSTRATION_MODEL || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1',
     supportedProviders: OPENAI_ONLY_PROVIDERS,
     defaultProvider: DEFAULT_PROVIDER
+  },
+  chronicle_society_voice: {
+    key: 'chronicle_society_voice',
+    label: 'Chronicle Society Voice',
+    description: '/api/chronicle/:id/chat/respond (Act 1 Society messages)',
+    modelKind: 'text',
+    defaultUseMock: process.env.NODE_ENV === 'test'
+      || process.env.CHRONICLE_SOCIETY_VOICE_MOCK === 'true',
+    defaultModel: process.env.CHRONICLE_SOCIETY_VOICE_MODEL || 'gpt-5-mini',
+    supportedProviders: TEXT_PIPELINE_PROVIDERS,
+    defaultProvider: process.env.CHRONICLE_SOCIETY_VOICE_PROVIDER || DEFAULT_PROVIDER
   }
 };
 const TYPEWRITER_PIPELINE_KEYS = [
@@ -94,7 +105,8 @@ const TYPEWRITER_PIPELINE_KEYS = [
   'storyteller_creation',
   'storyteller_intervention',
   'typewriter_key_verification',
-  'illustration_creation'
+  'illustration_creation',
+  'chronicle_society_voice'
 ];
 
 let cachedSettings = null;
