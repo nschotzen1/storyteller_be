@@ -8,7 +8,7 @@ export function buildStateView(session) {
     recoveredFacts,
     character,
     evidence,
-    cells,
+    cells: cells.map(({ gmHooks, ...cell }) => cell),
     pressure: { value: pressure.value, threshold: pressure.threshold },
     transcript
   };

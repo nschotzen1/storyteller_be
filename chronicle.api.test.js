@@ -45,6 +45,9 @@ describe('chronicle API', () => {
     expect(res.body.cells.length).toBeGreaterThanOrEqual(12);
     expect(res.body.canonLocks).toBeUndefined();
     expect(res.body.pressure).toEqual({ value: 0, threshold: 6 });
+    for (const cell of res.body.cells) {
+      expect(cell.gmHooks).toBeUndefined();
+    }
   });
 
   test('GET state for unknown id returns 404', async () => {

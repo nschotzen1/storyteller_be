@@ -39,6 +39,7 @@ describe('validateEnvelope', () => {
     expect(result.narration).toBe('The cellar listens.');
     expect(result.accepted).toHaveLength(2);
     expect(result.rejected).toHaveLength(0);
+    expect(result.societyNote).toBe('Archivist approves.');
   });
 
   test('drops unknown mutation types', () => {
