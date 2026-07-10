@@ -12,7 +12,8 @@ const chronicleSessionSchema = new Schema(
     evidence: { type: [Schema.Types.Mixed], default: [] },
     cells: { type: [Schema.Types.Mixed], default: [] },
     pressure: { type: Schema.Types.Mixed, default: {} },
-    transcript: { type: [Schema.Types.Mixed], default: [] }
+    transcript: { type: [Schema.Types.Mixed], default: [] },
+    ritual: { type: Schema.Types.Mixed, default: {} }
   },
   { timestamps: true, minimize: false }
 );

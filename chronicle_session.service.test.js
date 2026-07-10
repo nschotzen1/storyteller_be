@@ -44,6 +44,7 @@ describe('chronicleSessionService', () => {
     expect(session.canonLocks.characters).toEqual(expect.arrayContaining(['mera_venn', 'ilan_voss']));
     expect(session.evidence).toEqual([]);
     expect(session.transcript).toEqual([]);
+    expect(session.ritual).toEqual({ cursor: 0 });
   });
 
   test('two chronicles have independent cell snapshots', async () => {

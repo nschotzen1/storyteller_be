@@ -46,7 +46,8 @@ export async function createChronicle() {
     evidence: [],
     cells: buildInitialCells(chapter),
     pressure: INITIAL_PRESSURE(),
-    transcript: []
+    transcript: [],
+    ritual: { cursor: 0 }
   });
   return toPlain(doc);
 }
