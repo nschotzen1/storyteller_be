@@ -51,4 +51,43 @@ describe('thorbataBibleService', () => {
       expect(() => new RegExp(claim.pattern, 'i')).not.toThrow();
     }
   });
+
+  test('loadThorbataBible returns the act 1 ritual with intact rails', async () => {
+    const { ritual } = await loadThorbataBible();
+    expect(ritual.ritualId).toBe('early-dusk-act1');
+    const kinds = ritual.beats.map((b) => b.kind);
+    expect(kinds[kinds.length - 1]).toBe('act_transition');
+    expect(ritual.beats[ritual.beats.length - 1].toAct).toBe('ARRIVAL_SCENE');
+
+    const questionBeats = ritual.beats.filter((b) => b.kind === 'question');
+    const factKeys = questionBeats.map((b) => b.factKey).filter(Boolean);
+    expect(factKeys.sort()).toEqual(
+      ['chapterTitle', 'heroStance', 'pageCount', 'tavernDish', 'writingPlace']
+    );
+    for (const beat of questionBeats) {
+      expect(beat.options.length).toBeGreaterThanOrEqual(2);
+      expect(beat.options.length).toBeLessThanOrEqual(4);
+      if (beat.factKey) {
+        for (const option of beat.options) {
+          expect(typeof option.factValue).toBe('string');
+          expect(option.factValue.length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  test('every message beat carries authored intent and fallback text', async () => {
+    const { ritual } = await loadThorbataBible();
+    for (const beat of ritual.beats.filter((b) => b.kind === 'message')) {
+      expect(beat.intent.length).toBeGreaterThan(20);
+      expect(beat.fallbackText.length).toBeGreaterThan(20);
+    }
+  });
+
+  test('forbidden-claim patterns compile at load time', async () => {
+    const { bible } = await loadThorbataBible();
+    for (const claim of bible.forbiddenClaims) {
+      expect(() => new RegExp(claim.pattern, 'i')).not.toThrow();
+    }
+  });
 });

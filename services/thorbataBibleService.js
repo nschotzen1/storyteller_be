@@ -53,8 +53,59 @@ const CHAPTER_SCHEMA = {
   }
 };
 
+const RITUAL_SCHEMA = {
+  type: 'object',
+  required: ['ritualId', 'beats'],
+  properties: {
+    ritualId: { type: 'string', minLength: 1 },
+    beats: {
+      type: 'array',
+      minItems: 3,
+      items: {
+        type: 'object',
+        required: ['id', 'kind'],
+        properties: {
+          id: { type: 'string', minLength: 1 },
+          kind: { type: 'string', enum: ['message', 'question', 'act_transition'] },
+          intent: { type: 'string' },
+          fallbackText: { type: 'string' },
+          text: { type: 'string' },
+          factKey: { type: ['string', 'null'] },
+          allowFreeText: { type: 'boolean' },
+          toAct: { type: 'string' },
+          options: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'label'],
+              properties: {
+                id: { type: 'string', minLength: 1 },
+                label: { type: 'string', minLength: 1 },
+                factValue: { type: 'string', minLength: 1 }
+              }
+            }
+          },
+          writeEvidence: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['source', 'reliability', 'textTemplate'],
+              properties: {
+                source: { type: 'string', enum: ['damaged_page', 'society_note', 'field_report', 'player_restoration', 'marginalia'] },
+                reliability: { type: 'string', enum: ['confirmed', 'suspect', 'contradicted'] },
+                textTemplate: { type: 'string', minLength: 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+};
+
 const validateBible = ajv.compile(BIBLE_SCHEMA);
 const validateChapter = ajv.compile(CHAPTER_SCHEMA);
+const validateRitual = ajv.compile(RITUAL_SCHEMA);
 
 let cache = null;
 
@@ -81,16 +132,64 @@ function assertLinkTargetsExist(chapter) {
   }
 }
 
+const RECOVERED_FACT_KEYS = new Set(['pageCount', 'heroStance', 'chapterTitle', 'tavernDish', 'writingPlace']);
+
+function assertRitualIntegrity(ritual) {
+  const seenIds = new Set();
+  for (const beat of ritual.beats) {
+    if (seenIds.has(beat.id)) throw new Error(`Duplicate ritual beat id: ${beat.id}`);
+    seenIds.add(beat.id);
+    if (beat.kind === 'message' && (!beat.intent?.trim() || !beat.fallbackText?.trim())) {
+      throw new Error(`Message beat ${beat.id} requires intent and fallbackText`);
+    }
+    if (beat.kind === 'question') {
+      if (!beat.text?.trim()) throw new Error(`Question beat ${beat.id} requires text`);
+      if (!Array.isArray(beat.options) || beat.options.length < 2 || beat.options.length > 4) {
+        throw new Error(`Question beat ${beat.id} requires 2-4 options`);
+      }
+      if (beat.factKey) {
+        if (!RECOVERED_FACT_KEYS.has(beat.factKey)) {
+          throw new Error(`Question beat ${beat.id} writes unknown fact: ${beat.factKey}`);
+        }
+        for (const option of beat.options) {
+          if (!option.factValue?.trim()) {
+            throw new Error(`Question beat ${beat.id} option ${option.id} requires factValue`);
+          }
+        }
+      }
+    }
+    if (beat.kind === 'act_transition' && beat.toAct !== 'ARRIVAL_SCENE') {
+      throw new Error(`Act transition beat ${beat.id} must target ARRIVAL_SCENE, got: ${beat.toAct}`);
+    }
+  }
+  const last = ritual.beats[ritual.beats.length - 1];
+  if (last.kind !== 'act_transition') throw new Error('Ritual must end on an act_transition beat');
+}
+
+function assertForbiddenClaimsCompile(bible) {
+  for (const claim of bible.forbiddenClaims) {
+    try {
+      new RegExp(claim.pattern, 'i');
+    } catch (error) {
+      throw new Error(`Forbidden claim ${claim.id} has an uncompilable pattern: ${error.message}`);
+    }
+  }
+}
+
 export async function loadThorbataBible() {
   if (cache) return cache;
-  const [bible, chapter] = await Promise.all([
+  const [bible, chapter, ritual] = await Promise.all([
     readJson('bible.json'),
-    readJson('act3_chapter_eel_and_seagull.json')
+    readJson('act3_chapter_eel_and_seagull.json'),
+    readJson('act1_ritual.json')
   ]);
   assertValid(validateBible, bible, 'thorbata bible');
   assertValid(validateChapter, chapter, 'thorbata chapter');
+  assertValid(validateRitual, ritual, 'thorbata act 1 ritual');
   assertLinkTargetsExist(chapter);
-  cache = { bible, chapter };
+  assertRitualIntegrity(ritual);
+  assertForbiddenClaimsCompile(bible);
+  cache = { bible, chapter, ritual };
   return cache;
 }
 
