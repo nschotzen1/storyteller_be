@@ -76,6 +76,7 @@ import {
 } from './services/llmRouteConfigService.js';
 import { registerTypewriterRoutes } from './routes/serverNew/typewriterRoutes.js';
 import { registerTypewriterAdminRoutes } from './routes/serverNew/typewriterAdminRoutes.js';
+import { registerChronicleRoutes } from './routes/serverNew/chronicleRoutes.js';
 import {
   getPipelineSettings,
   getTypewriterAiSettings,
@@ -8156,6 +8157,8 @@ registerTypewriterAdminRoutes(app, {
   setLatestRouteConfig,
   resetRouteConfig
 });
+
+registerChronicleRoutes(app);
 
 
 if (process.env.NODE_ENV !== 'test') {
