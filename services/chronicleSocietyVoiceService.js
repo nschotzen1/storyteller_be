@@ -82,6 +82,7 @@ export async function renderSocietyMessage({ beat, session, playerText = '' }, d
     if (scanForbiddenClaims(text, session.canonLocks)) return fallback(beat);
     return { text, source: 'voice' };
   } catch (error) {
+    console.warn('society voice fell back:', beat.id, error.message);
     return fallback(beat);
   }
 }

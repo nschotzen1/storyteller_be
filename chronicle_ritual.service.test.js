@@ -85,6 +85,16 @@ describe('chronicleRitualService', () => {
     expect(pagesEntry.freeText).toBeUndefined();
   });
 
+  test('freeText is capped at 200 chars server-side even if the client bypasses the limit', async () => {
+    const session = buildSession();
+    await runRitualStart(session, deps);
+    const oversized = 'a'.repeat(500);
+    await applyRitualAnswer(session, { choiceId: 'opt_am', freeText: oversized }, deps);
+    const identityEntry = session.transcript.find((e) => e.role === 'player' && e.beatId === 'q_identity');
+    expect(identityEntry.freeText).toBe(oversized.slice(0, 200));
+    expect(identityEntry.freeText).toHaveLength(200);
+  });
+
   test('the full ritual walks to ARRIVAL_SCENE with all facts and evidence written', async () => {
     const session = buildSession();
     let result = await runRitualStart(session, deps);

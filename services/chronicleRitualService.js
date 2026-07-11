@@ -86,7 +86,7 @@ export async function applyRitualAnswer(session, { choiceId, freeText = '' } = {
     throw ritualError('UNKNOWN_CHOICE', `Unknown choice for beat ${beat.id}: ${choiceId}`);
   }
 
-  const safeFreeText = beat.allowFreeText && typeof freeText === 'string' ? freeText.trim() : '';
+  const safeFreeText = beat.allowFreeText && typeof freeText === 'string' ? freeText.trim().slice(0, 200) : '';
   if (beat.factKey) {
     session.recoveredFacts[beat.factKey] = option.factValue;
   }
