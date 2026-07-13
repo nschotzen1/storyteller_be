@@ -40,12 +40,6 @@ const TYPEWRITER_PROMPT_DEFINITIONS = {
     label: 'Storyteller illustration',
     description: '/api/textToStoryteller illustration prompt',
     settingsKey: 'illustration_creation'
-  },
-  chronicle_society_voice: {
-    key: 'chronicle_society_voice',
-    label: 'Chronicle Society voice',
-    description: '/api/chronicle/:id/chat/respond Act 1 Society message rendering',
-    settingsKey: 'chronicle_society_voice'
   }
 };
 

@@ -13,8 +13,7 @@ describe('typewriter admin API metadata', () => {
       'storyteller_creation',
       'storyteller_intervention',
       'typewriter_key_verification',
-      'illustration_creation',
-      'chronicle_society_voice'
+      'illustration_creation'
     ]);
 
     for (const definition of definitions) {
@@ -33,8 +32,7 @@ describe('typewriter admin API metadata', () => {
       'storyteller_intervention',
       'typewriter_key_verification',
       'storyteller_key_creation',
-      'illustration_creation',
-      'chronicle_society_voice'
+      'illustration_creation'
     ]);
   });
 
