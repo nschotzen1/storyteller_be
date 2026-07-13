@@ -2351,7 +2351,15 @@ async function handleMessengerChatPost(req, res) {
     }, persistence);
 
     const historyDocs = await loadMessengerHistoryDocs(sessionId, sceneId, persistence);
-    const messengerPipeline = await getAiPipelineSettings('messenger_chat');
+    let messengerPipeline;
+    try {
+      messengerPipeline = await getAiPipelineSettings('messenger_chat');
+    } catch (error) {
+      if (error.code !== 'INVALID_PIPELINE_KEY') {
+        throw error;
+      }
+      messengerPipeline = { useMock: true, provider: 'openai', model: '' };
+    }
     const messengerProvider = typeof messengerPipeline?.provider === 'string'
       ? messengerPipeline.provider
       : 'openai';
@@ -2395,7 +2403,13 @@ async function handleMessengerChatPost(req, res) {
       existingSceneBrief
     });
 
-    await validatePayloadForRoute('messenger_chat', aiResponse);
+    try {
+      await validatePayloadForRoute('messenger_chat', aiResponse);
+    } catch (error) {
+      if (error.code !== 'INVALID_ROUTE_KEY') {
+        throw error;
+      }
+    }
 
     let reply = typeof aiResponse.message_assistant === 'string' ? aiResponse.message_assistant.trim() : '';
     let hasChatEnded = Boolean(aiResponse.has_chat_ended);
@@ -2481,6 +2495,51 @@ async function handleMessengerChatPost(req, res) {
     return sendLlmAwareError(res, error, 'Server error during messenger chat.');
   }
 }
+
+app.get('/api/messenger/chat', async (req, res) => {
+  try {
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
+    const sceneId = normalizeMessengerSceneId(req.query?.sceneId);
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const persistence = await resolveMessengerPersistenceMode();
+    const conversation = await buildMessengerConversationPayload(sessionId, sceneId, persistence);
+    return res.status(200).json(conversation);
+  } catch (error) {
+    console.error('Error in GET /api/messenger/chat:', error);
+    return res.status(500).json({ message: 'Server error while loading messenger chat.' });
+  }
+});
+
+app.post('/api/messenger/chat', handleMessengerChatPost);
+app.post('/api/sendMessage', handleMessengerChatPost);
+
+app.delete('/api/messenger/chat', async (req, res) => {
+  try {
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
+    const sceneId = normalizeMessengerSceneId(req.query?.sceneId);
+    if (!sessionId) {
+      return res.status(400).json({ message: 'Missing required parameter: sessionId.' });
+    }
+
+    const persistence = await resolveMessengerPersistenceMode();
+    const deletion = await deleteMessengerConversation(sessionId, sceneId, persistence);
+    const deletedSceneBriefCount = await deleteMessengerSceneBrief(sessionId, sceneId, persistence);
+    return res.status(200).json({
+      sessionId,
+      sceneId,
+      deletedCount: (deletion?.deletedCount || 0) + deletedSceneBriefCount,
+      deletedMessagesCount: deletion?.deletedCount || 0,
+      deletedSceneBriefCount,
+      storage: persistence
+    });
+  } catch (error) {
+    console.error('Error in DELETE /api/messenger/chat:', error);
+    return res.status(500).json({ message: 'Server error while clearing messenger chat.' });
+  }
+});
 
 function normalizeImmersiveRpgSessionId(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
